@@ -80,8 +80,8 @@ export default async function handler(req, res) {
       };
     }
 
-    // Use gemini-3.0-flash (free tier, fast, good)
-    const model = "gemini-3.0-flash";
+    // Use gemini-flash (free tier, fast, good)
+    const model = "gemini-flash";
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     const geminiRes = await fetch(url, {
