@@ -13,7 +13,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       status: "ok",
       provider: "gemini",
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       hasKey: key.length > 0,
       keyPrefix: key.slice(0, 8) + "...",
       keyLength: key.length,
@@ -64,7 +64,7 @@ export default async function handler(req, res) {
     // Use 8192 tokens minimum — Gemini counts tokens differently than Claude,
     // and financial JSON responses are verbose. The frontend sends 1500 which
     // was fine for Claude but causes truncation on Gemini.
-    const maxTokens = Math.max(body.max_tokens || 1500, 8192);
+    const maxTokens = Math.max(body.max_tokens || 1500, 4096);
 
     const geminiPayload = {
       contents,
