@@ -118,40 +118,76 @@ function Onboarding({update,notify}){
   <div style={{display:"flex",gap:10,marginTop:28}}>{step>0&&<button className="btn bg" style={{flex:.4,justifyContent:"center"}} onClick={()=>setStep(s=>s-1)}>← Atrás</button>}<button className="btn bl" style={{flex:1,justifyContent:"center"}} disabled={!canNext} onClick={step<5?()=>setStep(s=>s+1):finish}>{step===5?"Empezar →":"Continuar →"}</button></div>{step===5&&<button onClick={finish} style={{display:"block",margin:"12px auto 0",background:"none",border:"none",color:T.muted,fontSize:12,cursor:"pointer",textDecoration:"underline"}}>Saltear meta</button>}</div></div>);
 }
 
-function Dashboard({state,update,notify,setView}){
-  const {transactions,goals,budgets,weeklyInsight,weeklyInsightDate,salaries}=state;
-  const {fmt,toDsp}=useDsp(state);
-  const [loadingIns,setLI]=useState(false);
-  const isMobile=useIsMobile();
-  const NOW=getNow();const CUR=getCUR();
-  const cur=transactions.filter(t=>gMonth(t.date)===CUR);
-  const prevM=(()=>{const d=new Date(NOW.getFullYear(),NOW.getMonth()-1,1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;})();
-  const prev=transactions.filter(t=>gMonth(t.date)===prevM);
-  const inc=cur.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
-  const exp=cur.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
-  const pExp=prev.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
-  const delta=pExp>0?((exp-pExp)/pExp*100).toFixed(1):null;
-  const salary=getSalaryTotal(salaries);
-  const {score,items}=healthScore(transactions,goals,state.holdings||[]);
-  const sc=score>=70?T.lime:score>=45?T.amber:T.red;
-  const {disponible,perGoal}=goalPlan(goals,salaries,transactions,state.holdings||[]);
-  const alerts=Object.entries(budgets||{}).filter(([cat,lim])=>cur.filter(t=>t.category===cat&&t.type==="expense").reduce((s,t)=>s+t.amount,0)>lim*0.8);
-  const trend=Array.from({length:6},(_,i)=>{const d=new Date(NOW.getFullYear(),NOW.getMonth()-5+i,1);const m=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;const txs=transactions.filter(t=>gMonth(t.date)===m);return{name:MOS[d.getMonth()],Gastos:toDsp(txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0)),Ingresos:toDsp(txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0))};});
-  const cm={};cur.filter(t=>t.type==="expense").forEach(t=>{cm[t.category]=(cm[t.category]||0)+t.amount;});
-  const catData=Object.entries(cm).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([k,v],i)=>({name:k.split(" ").slice(1).join(" "),value:toDsp(v),color:CPAL[i]}));
-  const recent=[...transactions].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,6);
-  const holdings=state.holdings||[];
-  const portfolioValue=holdings.reduce((s,h)=>s+(h.currentValue||h.totalInvested||0),0);
-  const portfolioInvested=holdings.reduce((s,h)=>s+(h.totalInvested||0),0);
-  const portfolioPnL=portfolioValue-portfolioInvested;
-  const kpis=[{l:"Sueldo del mes",v:salary>0?fmt(salary):"-",c:T.lime,i:"💵",sub:salary>0?"Registrado":"Registrá tu sueldo"},{l:"Ingresos totales",v:fmt(inc),c:T.teal,i:"📥",sub:"Todos los ingresos"},{l:"Gastos",v:fmt(exp),c:T.red,i:"💸",sub:delta?`${delta>0?"+":""}${delta}% vs mes ant.`:"-"},{l:"Balance libre",v:fmt(inc-exp),c:(inc-exp)>=0?T.lime:T.red,i:"⚖️",sub:(inc-exp)>=0?"✓ Superávit":"⚠ Déficit"},{l:"Portfolio",v:fmt(portfolioValue),c:portfolioPnL>=0?T.blue:T.amber,i:"📊",sub:portfolioValue>0?`P&L: ${portfolioPnL>=0?"+":""}${fARS(portfolioPnL)}`:"Sin inversiones"}];
-  const refreshInsight=async()=>{if(transactions.length<3)return notify("Necesitás más transacciones","info");setLI(true);const ins=await genWeeklyInsight(transactions,state.usdRate,state.holdings||[]);if(ins){update({weeklyInsight:ins,weeklyInsightDate:todayISO()});notify("Resumen actualizado ✓");}else notify("Error — reintentá","err");setLI(false);};
-  return(<div className="up"><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:22,flexWrap:"wrap",gap:8}}><div><div style={{fontSize:11,color:T.muted,textTransform:"uppercase",letterSpacing:".8px",marginBottom:5}}>{NOW.toLocaleDateString("es-AR",{weekday:"long",day:"numeric",month:"long"})}</div><h1 style={{fontSize:isMobile?22:28,fontWeight:800,letterSpacing:"-1px"}}>Dashboard</h1></div>{alerts.length>0&&<div style={{background:"rgba(255,184,48,.08)",border:`1px solid rgba(255,184,48,.25)`,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:8,fontSize:12,color:T.amber,cursor:"pointer"}} onClick={()=>setView("transactions")}><ic.Bell/>{alerts.length} alerta{alerts.length>1?"s":""}</div>}</div>
-  <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:14}}>{kpis.map((k,i)=>(<div key={i} className={`card csm up d${i+1}`} style={{cursor:i===0?"pointer":"default"}} onClick={i===0?()=>setView("salary"):undefined}><div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".6px",fontWeight:600}}>{k.l}</span><span style={{fontSize:18}}>{k.i}</span></div><div className="mono" title={k.v} style={{fontSize:isMobile?16:20,fontWeight:500,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div><div style={{fontSize:11,color:T.muted,marginTop:4}}>{k.sub}</div></div>))}</div>
-  {perGoal.length>0&&(<div className="card up d2" style={{marginBottom:14,borderColor:"rgba(200,255,87,.18)"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}><div style={{fontSize:13,fontWeight:700}}>💡 Plan de ahorro para metas</div><div style={{fontSize:11,color:T.muted}}>Disponible: <span className="mono" style={{color:disponible>0?T.lime:T.red}}>{fmt(disponible)}</span></div></div><div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{perGoal.map(g=>(<div key={g.id} style={{flex:1,minWidth:160,background:T.raised,borderRadius:10,padding:"10px 14px",border:`1px solid ${g.feasible?T.border:"rgba(255,184,48,.25)"}`}}><div style={{fontSize:12,marginBottom:4}}>{g.icon} {g.name}</div><div className="mono" style={{fontSize:16,fontWeight:600,color:g.feasible?T.lime:T.amber}}>{fmt(g.needed)}<span style={{fontSize:11,fontWeight:400,color:T.muted}}>/mes</span></div><div style={{fontSize:10,color:T.muted,marginTop:2}}>{g.months} mes{g.months>1?"es":""} · Falta {fmt(g.rem)}</div>{!g.feasible&&<div style={{fontSize:10,color:T.amber,marginTop:3}}>⚠ Ajustá el plazo</div>}{g.couldUsePortfolio&&<div style={{fontSize:10,color:T.blue,marginTop:3}}>📊 Portfolio cubre {g.portfolioCover}% de esta meta</div>}</div>))}</div></div>)}
-  <div className="card up d2" style={{marginBottom:14,borderColor:weeklyInsight?"rgba(200,255,87,.15)":T.border}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}><div style={{display:"flex",alignItems:"center",gap:10}}><div style={{width:30,height:30,background:"rgba(167,139,250,.1)",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center"}}><ic.Bolt/></div><div><div style={{fontSize:12,fontWeight:700}}>Resumen semanal con IA</div>{weeklyInsightDate&&<div style={{fontSize:10,color:T.muted}}>{weeklyInsightDate}</div>}</div></div><button className="btn bg bsm" onClick={refreshInsight} disabled={loadingIns}>{loadingIns?<Dots/>:<><ic.Refresh/>{weeklyInsight?"Actualizar":"Generar"}</>}</button></div>{weeklyInsight&&<div style={{marginTop:12,padding:"12px 14px",background:T.raised,borderRadius:10}}><div style={{fontSize:14,fontWeight:700,marginBottom:4}}>{weeklyInsight.headline}</div><div style={{fontSize:12,color:T.mid,lineHeight:1.6,marginBottom:8}}>{weeklyInsight.detail}</div><div style={{background:"rgba(200,255,87,.08)",border:`1px solid rgba(200,255,87,.2)`,borderRadius:7,padding:"6px 12px",fontSize:11,color:T.lime,fontWeight:600,display:"inline-block"}}>💡 {weeklyInsight.action}</div></div>}{!weeklyInsight&&<div style={{marginTop:10,fontSize:12,color:T.muted,textAlign:"center",padding:"6px 0"}}>Generá tu resumen semanal — IA detecta tendencias y sugiere acciones</div>}</div>
-  <div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1.8fr .8fr",gap:14,marginBottom:14}}><div className="card up d2"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Últimos 6 meses</div><div style={{width:"100%",minWidth:0,overflow:"hidden"}}><ResponsiveContainer width="100%" height={175}><AreaChart data={trend}><defs><linearGradient id="gi" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={T.teal} stopOpacity={.25}/><stop offset="95%" stopColor={T.teal} stopOpacity={0}/></linearGradient><linearGradient id="ge" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={T.red} stopOpacity={.25}/><stop offset="95%" stopColor={T.red} stopOpacity={0}/></linearGradient></defs><CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" tick={{fill:T.muted,fontSize:10}} axisLine={false} tickLine={false}/><YAxis tick={{fill:T.muted,fontSize:9}} axisLine={false} tickLine={false} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:v}/><Tooltip content={<CTip dc={state.displayCurrency}/>}/><Area type="monotone" dataKey="Ingresos" stroke={T.teal} fill="url(#gi)" strokeWidth={2}/><Area type="monotone" dataKey="Gastos" stroke={T.red} fill="url(#ge)" strokeWidth={2}/></AreaChart></ResponsiveContainer></div></div><div className="card up d3" style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12}}><div style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".8px",fontWeight:600}}>Score financiero</div><svg width={100} height={100} viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke={T.raised} strokeWidth="7"/><circle cx="50" cy="50" r="40" fill="none" stroke={sc} strokeWidth="7" strokeDasharray={`${(score/100)*251} 251`} strokeDashoffset="63" strokeLinecap="round" style={{transition:"stroke-dasharray .8s",filter:`drop-shadow(0 0 8px ${sc}66)`}}/><text x="50" y="46" textAnchor="middle" fill={sc} fontSize="26" fontWeight="700" fontFamily="'DM Mono',monospace">{score}</text><text x="50" y="60" textAnchor="middle" fill={T.muted} fontSize="9" fontFamily="Sora">/100</text></svg>{items.map((it,i)=>(<div key={i} style={{width:"100%"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:T.muted,marginBottom:3}}><span>{it.l}</span><span className="mono">{it.v.toFixed(0)}/{it.m}</span></div><div className="prog"><div className="progf" style={{width:`${(it.v/it.m)*100}%`,background:sc}}/></div></div>))}</div></div>
-  <div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}><div className="card up d3"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Últimos movimientos</div>{recent.length===0?<div style={{color:T.muted,fontSize:13,textAlign:"center",padding:"20px 0"}}>Sin movimientos aún</div>:recent.map(t=>(<div key={t.id} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.ink}`}}><div style={{width:32,height:32,borderRadius:9,background:T.raised,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>{t.category?.split(" ")[0]||"💳"}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</div><div style={{fontSize:10,color:T.muted,marginTop:1}}>{t.date}</div></div><div className="mono" style={{fontSize:12,fontWeight:500,color:t.type==="income"?T.teal:T.red,flexShrink:0}}>{t.type==="income"?"+":"-"}{fmt(t.amount)}</div></div>))}</div><div style={{display:"flex",flexDirection:"column",gap:12}}><div className="card csm up d4"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><div style={{fontSize:12,fontWeight:600,color:T.mid}}>Metas activas</div><button className="btn bg bsm" style={{fontSize:10,padding:"4px 10px"}} onClick={()=>setView("goals")}>Ver →</button></div>{goals.filter(g=>g.saved<g.target).length===0?<div style={{color:T.muted,fontSize:12,textAlign:"center",padding:"10px 0"}}>Sin metas — <button onClick={()=>setView("goals")} style={{color:T.lime,background:"none",border:"none",cursor:"pointer",fontSize:12}}>Crear →</button></div>:goals.filter(g=>g.saved<g.target).slice(0,4).map(g=>{const pct=clamp((g.saved/g.target)*100,0,100);return<div key={g.id} style={{marginBottom:9}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:12}}>{g.icon} {g.name}</span><span className="mono" style={{fontSize:10,color:T.muted}}>{pct.toFixed(0)}%</span></div><div className="prog"><div className="progf" style={{width:`${pct}%`,background:pct>=100?T.lime:pct>=60?T.blue:T.amber}}/></div></div>;})}</div>{catData.length>0&&<div className="card csm up"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:8}}>Gastos este mes</div><div style={{display:"flex",gap:10,alignItems:"center"}}><div style={{width:80,minWidth:0,overflow:"hidden"}}><ResponsiveContainer width={80} height={80}><PieChart><Pie data={catData} cx="50%" cy="50%" innerRadius={22} outerRadius={36} dataKey="value" stroke="none">{catData.map((c,i)=><Cell key={i} fill={c.color}/>)}</Pie></PieChart></ResponsiveContainer></div><div style={{flex:1,minWidth:0}}>{catData.slice(0,4).map((c,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:6,fontSize:10,color:T.muted,marginBottom:4}}><div style={{width:7,height:7,borderRadius:2,background:c.color,flexShrink:0}}/><span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name}</span></div>)}</div></div></div>}</div></div></div>);
+function Dashboard({state, setView}){
+  const {transactions, goals, holdings=[], displayCurrency}=state;
+  const {fmt}=useDsp(state);
+  const CUR=getCUR();
+  const inc = transactions.filter(t => gMonth(t.date) === CUR && t.type === "income").reduce((s,t) => s + t.amount, 0);
+  const exp = transactions.filter(t => gMonth(t.date) === CUR && t.type === "expense").reduce((s,t) => s + t.amount, 0);
+  const portVal = holdings.reduce((s,h) => s + (h.currentValue || h.totalInvested || 0), 0);
+  
+  // Patrimonio Neto (Cash histórico + Inversiones)
+  const totalInc = transactions.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0);
+  const totalExp = transactions.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
+  const cash = totalInc - totalExp;
+  const netWorth = cash + portVal;
+
+  return(
+    <div className="up">
+      <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-end", marginBottom:24, flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontSize:12, color:T.muted, textTransform:"uppercase", letterSpacing:"1px", marginBottom:4}}>Patrimonio Neto ({displayCurrency})</div>
+          <div style={{fontSize:36, fontWeight:800, color:T.lime, letterSpacing:"-1.5px"}}>{fmt(netWorth)}</div>
+        </div>
+        <button className="btn bg bsm" onClick={()=>setView("transactions")}>Ver Historial →</button>
+      </div>
+
+      <div className="kpi-grid" style={{display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:14, marginBottom:24}}>
+        {[{l:"Ingresos Mes",v:fmt(inc),c:T.teal,i:"📥"}, {l:"Gastos Mes",v:fmt(exp),c:T.red,i:"💸"}, {l:"Caja (Cash)",v:fmt(cash),c:cash>=0?T.white:T.red,i:"💵"}, {l:"Inversiones",v:fmt(portVal),c:T.blue,i:"📈"}].map((k,i)=>(
+          <div key={i} className="card"><div style={{fontSize:10, color:T.muted, marginBottom:8, display:"flex", justifyContent:"space-between"}}><span>{k.l}</span><span>{k.i}</span></div><div className="mono" style={{fontSize:18, fontWeight:700, color:k.c}}>{k.v}</div></div>
+        ))}
+      </div>
+
+      <div className="g2">
+        <div className="card up">
+          <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16}}>
+            <h3 style={{fontSize:14}}>Vigilancia de Metas</h3>
+            <button className="btn bg bsm" style={{padding:"4px 8px"}} onClick={()=>setView("goals")}>Ir a Metas</button>
+          </div>
+          <div style={{display:"flex", flexDirection:"column", gap:14}}>
+            {goals.filter(g => g.saved < g.target).slice(0,3).map(g => {
+              const linkedVal = holdings.filter(h => h.goalId === g.id).reduce((s,h) => s + (h.currentValue || h.totalInvested || 0), 0);
+              const total = g.saved + linkedVal;
+              const pct = clamp((total / g.target) * 100, 0, 100);
+              return (
+                <div key={g.id}>
+                  <div style={{display:"flex", justifyContent:"space-between", fontSize:11, marginBottom:6}}>
+                    <span>{g.icon} {g.name}</span>
+                    <span className="mono" style={{color:pct>=100?T.lime:T.white}}>{pct.toFixed(0)}%</span>
+                  </div>
+                  <div className="prog"><div className="progf" style={{width:`${pct}%`, background:pct>=100?T.lime:T.blue}}/></div>
+                </div>
+              );
+            })}
+            {goals.length===0 && <div style={{fontSize:12, color:T.muted}}>No hay metas configuradas.</div>}
+          </div>
+        </div>
+        
+        <div className="card up">
+          <h3 style={{fontSize:14, marginBottom:16}}>Últimos Movimientos</h3>
+          <div style={{display:"flex", flexDirection:"column", gap:10}}>
+             {transactions.slice(-4).reverse().map(t=>(
+               <div key={t.id} style={{display:"flex", justifyContent:"space-between", alignItems:"center", paddingBottom:8, borderBottom:`1px solid ${T.ink}`}}>
+                  <div style={{minWidth:0}}><div style={{fontSize:12, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{t.description}</div><div style={{fontSize:10, color:T.muted}}>{t.date}</div></div>
+                  <div className="mono" style={{fontSize:12, color:t.type==="income"?T.teal:T.red, flexShrink:0}}>{t.type==="income"?"+":"-"}{fmt(t.amount)}</div>
+               </div>
+             ))}
+             {transactions.length===0 && <div style={{fontSize:12, color:T.muted}}>Sin movimientos recientes.</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function SalaryModule({state,update,notify}){
@@ -175,62 +211,165 @@ function SalaryModule({state,update,notify}){
   <div className="card" style={{padding:0,overflow:"auto"}}><div style={{padding:"14px 18px",borderBottom:`1px solid ${T.border}`,fontSize:13,fontWeight:700}}>Historial de ingresos</div><table className="tbl"><thead><tr><th>Mes</th><th>Sueldo base</th><th>Extras</th><th>Total</th><th></th></tr></thead><tbody>{hist.slice().reverse().map(m=>{const sal=salaries.find(s=>s.month===m);const base=sal?.base||0;const exT=(sal?.extras||[]).reduce((s,e)=>s+e.amt,0);return(<tr key={m}><td className="mono" style={{fontSize:12,color:T.muted}}>{m}</td><td className="mono" style={{color:base>0?T.white:T.muted}}>{base>0?fmt(base):"—"}</td><td>{(sal?.extras||[]).length===0?<span style={{color:T.muted,fontSize:12}}>—</span>:<div style={{display:"flex",flexDirection:"column",gap:3}}>{(sal?.extras||[]).map(e=>(<div key={e.id} style={{display:"flex",gap:8,alignItems:"center"}}><span className="mono" style={{fontSize:11,color:T.blue}}>+{fmt(e.amt)}</span><span style={{fontSize:11,color:T.muted}}>{e.desc}</span><button className="btn bd bsm" style={{padding:"2px 6px",fontSize:10}} onClick={()=>delExtra(m,e.id)}><ic.Trash/></button></div>))}</div>}</td><td className="mono" style={{fontWeight:600,color:base+exT>0?T.lime:T.muted}}>{base+exT>0?fmt(base+exT):"—"}</td><td>{addingE===m?<div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}><input className="inp" style={{width:130,fontSize:12,padding:"6px 10px"}} placeholder="Descripción" value={ef.desc} onChange={e=>setEF(f=>({...f,desc:e.target.value}))} autoFocus/><input className="inp" style={{width:100,fontSize:12,padding:"6px 10px"}} placeholder="Monto ARS" value={ef.amt} onChange={e=>setEF(f=>({...f,amt:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&addExtra(m)}/><button className="btn bl bsm" onClick={()=>addExtra(m)}>+</button><button className="btn bg bsm" onClick={()=>{setAE(null);setEF({desc:"",amt:""});}}>✕</button></div>:<button className="btn bg bsm" onClick={()=>{setAE(m);if(!sal)setForm(f=>({...f,month:m}));}}><ic.Plus/> Extra</button>}</td></tr>);})}</tbody></table></div></div>);
 }
 
-function Transactions({state,update,notify}){
-  const {transactions,budgets,usdRate}=state;
+function Transactions({state, update, notify}){
+  const {transactions, usdRate}=state;
   const {fmt}=useDsp(state);
-  const CUR=getCUR();
-  const [showAdd,setSA]=useState(false);
-  const [editTx,setETx]=useState(null);
-  const [showBud,setSB]=useState(false);
-  const [filter,setFilter]=useState({month:"",type:"",cat:""});
-  const [form,setForm]=useState({date:todayISO(),description:"",amount:"",type:"expense",category:"❓ Otros",currency:"ARS"});
-  const [editCat,setEC]=useState(null);
-  const [bf,setBF]=useState({category:CATS[0],limit:""});
-  const rows=useMemo(()=>transactions.filter(t=>{if(filter.month&&gMonth(t.date)!==filter.month)return false;if(filter.type&&t.type!==filter.type)return false;if(filter.cat&&t.category!==filter.cat)return false;return true;}).sort((a,b)=>new Date(b.date)-new Date(a.date)),[transactions,filter]);
-  const cur=transactions.filter(t=>gMonth(t.date)===CUR);
-  const months=[...new Set(transactions.map(t=>gMonth(t.date)))].sort().reverse();
-  const saveTx=()=>{
-    if(!form.description||!form.amount)return notify("Completá descripción y monto","err");
-    const ars=Math.abs(px(form.amount))*(form.currency==="USD"?usdRate:1);
-    if(ars<=0)return notify("Monto inválido","err");
-    if(editTx){
-      update({transactions:transactions.map(t=>t.id===editTx?{...t,...form,amount:ars}:t)});
-      setETx(null);notify("Movimiento actualizado ✓");
-    }else{
-      update({transactions:[...transactions,{...form,id:`m_${uid()}`,amount:ars,source:"manual"}]});
-      notify("Movimiento agregado ✓");
-    }
-    setForm({date:todayISO(),description:"",amount:"",type:"expense",category:"❓ Otros",currency:"ARS"});
-    setSA(false);
+  const [showAdd, setSA]=useState(false);
+  const [editTx, setETx]=useState(null);
+  const [form, setForm]=useState({date:todayISO(), description:"", amount:"", type:"expense", category:"❓ Otros", currency:"ARS"});
+
+  const save = () => {
+    if(!form.description || !form.amount) return notify("Completa descripción y monto", "err");
+    const ars = px(form.amount) * (form.currency==="USD" ? usdRate : 1);
+    if(editTx) update({transactions: transactions.map(t => t.id === editTx ? {...t, ...form, amount: ars} : t)});
+    else update({transactions: [...transactions, {id:`m_${uid()}`, ...form, amount: ars}]});
+    setSA(false); setETx(null); setForm({date:todayISO(), description:"", amount:"", type:"expense", category:"❓ Otros", currency:"ARS"});
+    notify("Movimiento guardado ✓");
   };
-  return(<div className="up"><PH title="Movimientos" sub={`${rows.length} registros`} right={<div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button className="btn bg" onClick={()=>setSB(true)}><ic.Bell/> Presupuestos</button><button className="btn bl" onClick={()=>{setETx(null);setForm({date:todayISO(),description:"",amount:"",type:"expense",category:"❓ Otros",currency:"ARS"});setSA(true);}}><ic.Plus/> Nuevo</button></div>}/>
-  {Object.keys(budgets||{}).length>0&&(<div style={{display:"flex",gap:10,marginBottom:14,overflowX:"auto",paddingBottom:4}}>{Object.entries(budgets).map(([cat,lim])=>{const spent=cur.filter(t=>t.category===cat&&t.type==="expense").reduce((s,t)=>s+t.amount,0);const pct=clamp(spent/lim*100,0,200);return<div key={cat} style={{background:T.raised,border:`1px solid ${pct>=100?T.red:pct>=80?T.amber:T.border}`,borderRadius:10,padding:"10px 14px",minWidth:150,flexShrink:0}}><div style={{fontSize:10,color:T.muted,marginBottom:4}}>{cat}</div><div className="mono" style={{fontSize:13,color:pct>=100?T.red:pct>=80?T.amber:T.white}}>{fmt(spent)}/{fmt(lim)}</div><div className="prog" style={{marginTop:6}}><div className="progf" style={{width:`${clamp(pct,0,100)}%`,background:pct>=100?T.red:pct>=80?T.amber:T.teal}}/></div></div>;})} </div>)}
-  <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}><select className="inp" style={{width:"auto",minWidth:100}} value={filter.month} onChange={e=>setFilter(f=>({...f,month:e.target.value}))}><option value="">Todos los meses</option>{months.map(m=><option key={m}>{m}</option>)}</select><select className="inp" style={{width:"auto"}} value={filter.type} onChange={e=>setFilter(f=>({...f,type:e.target.value}))}><option value="">Todos</option><option value="expense">Gastos</option><option value="income">Ingresos</option></select><select className="inp" style={{width:"auto",minWidth:100}} value={filter.cat} onChange={e=>setFilter(f=>({...f,cat:e.target.value}))}><option value="">Categorías</option>{CATS.map(c=><option key={c}>{c}</option>)}</select>{(filter.month||filter.type||filter.cat)&&<button className="btn bg bsm" onClick={()=>setFilter({month:"",type:"",cat:""})}>Limpiar</button>}</div>
-  <div className="card" style={{padding:0,overflow:"auto"}}><table className="tbl"><thead><tr><th className="hide-m">Fecha</th><th>Descripción</th><th>Categoría</th><th className="hide-m">Tipo</th><th>Monto</th><th></th></tr></thead><tbody>{rows.length===0?<tr><td colSpan={6} style={{textAlign:"center",padding:"36px 0",color:T.muted,fontSize:13}}>Sin movimientos</td></tr>:rows.map(t=>(<tr key={t.id}><td className="mono hide-m" style={{color:T.muted,fontSize:11}}>{t.date}</td><td style={{maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td><td><button onClick={()=>setEC({id:t.id,cat:t.category})} style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:6,padding:"3px 9px",fontSize:11,color:T.mid,cursor:"pointer"}}>{t.category}</button></td><td className="hide-m"><span className={`tag ${t.type==="income"?"ti":t.category==="💰 Ahorro"?"ts":"te"}`}>{t.type==="income"?"Ingreso":t.category==="💰 Ahorro"?"Ahorro":"Gasto"}</span></td><td className="mono" style={{color:t.type==="income"?T.teal:T.red,fontWeight:500}}>{t.type==="income"?"+":"-"}{fmt(t.amount)}</td><td style={{display:"flex",gap:6,justifyContent:"flex-end"}}><button className="btn bg bsm" style={{padding:"4px 8px"}} onClick={()=>{setForm({date:t.date,description:t.description,amount:t.amount,type:t.type,category:t.category,currency:"ARS"});setETx(t.id);setSA(true);}}>✎</button><button className="btn bd bsm" style={{padding:"4px 8px"}} onClick={()=>{update({transactions:transactions.filter(x=>x.id!==t.id)});notify("Eliminado","err");}}><ic.Trash/></button></td></tr>))}</tbody></table></div>
-  {showAdd&&<div className="ov" onClick={e=>{if(e.target===e.currentTarget){setSA(false);setETx(null);}}}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h2 style={{fontSize:18,fontWeight:700}}>{editTx?"Editar movimiento":"Nuevo movimiento"}</h2><button className="btn bg bsm" onClick={()=>{setSA(false);setETx(null);}}><ic.X/></button></div><div style={{display:"flex",flexDirection:"column",gap:12}}><div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha</label><input type="date" className="inp" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tipo</label><select className="inp" value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))}><option value="expense">💸 Gasto</option><option value="income">💵 Ingreso</option></select></div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Descripción</label><input className="inp" placeholder="ej: Supermercado Coto" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/></div><div className="g3"><div style={{gridColumn:"1/3"}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Monto (positivo siempre)</label><input className="inp" placeholder="15000" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda</label><select className="inp" value={form.currency} onChange={e=>setForm(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select></div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Categoría</label><select className="inp" value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select></div>{form.currency==="USD"&&px(form.amount)>0&&<div style={{background:"rgba(77,158,255,.08)",border:`1px solid rgba(77,158,255,.2)`,borderRadius:8,padding:"8px 12px",fontSize:11,color:T.blue}}>💡 = {fARS(Math.abs(px(form.amount))*usdRate)} ARS al tipo oficial ${usdRate}</div>}<div style={{background:form.type==="income"?"rgba(0,229,195,.06)":"rgba(255,77,106,.06)",border:`1px solid ${form.type==="income"?"rgba(0,229,195,.2)":"rgba(255,77,106,.2)"}`,borderRadius:8,padding:"8px 12px",fontSize:11,color:form.type==="income"?T.teal:T.red}}>{form.type==="income"?"✓ Se registrará como INGRESO (+)":"✓ Se registrará como GASTO (-)"}</div><button className="btn bl" style={{justifyContent:"center"}} onClick={saveTx}>{editTx?"Guardar cambios":"Agregar"}</button></div></div></div>}
-  {editCat&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setEC(null)}><div className="modal" style={{width:320}}><h2 style={{fontSize:16,fontWeight:700,marginBottom:14}}>Cambiar categoría</h2><select className="inp" style={{marginBottom:14}} value={editCat.cat} onChange={e=>setEC(c=>({...c,cat:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select><div style={{display:"flex",gap:8}}><button className="btn bl" style={{flex:1,justifyContent:"center"}} onClick={()=>{update({transactions:transactions.map(t=>t.id===editCat.id?{...t,category:editCat.cat}:t)});setEC(null);notify("Guardado ✓");}}>Guardar</button><button className="btn bg" onClick={()=>setEC(null)}>Cancelar</button></div></div></div>}
-  {showBud&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setSB(false)}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}><h2 style={{fontSize:18,fontWeight:700}}>Presupuestos</h2><button className="btn bg bsm" onClick={()=>setSB(false)}><ic.X/></button></div><div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}><select className="inp" style={{flex:1.5,minWidth:120}} value={bf.category} onChange={e=>setBF(f=>({...f,category:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select><input className="inp" style={{flex:1,minWidth:100}} placeholder="Límite ARS" value={bf.limit} onChange={e=>setBF(f=>({...f,limit:e.target.value}))}/><button className="btn bl" onClick={()=>{if(!bf.limit)return;update({budgets:{...budgets,[bf.category]:px(bf.limit)}});setSB(false);notify("Guardado ✓");}}><ic.Plus/></button></div>{Object.entries(budgets||{}).map(([cat,lim])=>(<div key={cat} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:T.raised,borderRadius:10,padding:"10px 14px",marginBottom:7,flexWrap:"wrap",gap:6}}><span style={{fontSize:13}}>{cat}</span><div style={{display:"flex",alignItems:"center",gap:10}}><span className="mono" style={{fontSize:12,color:T.mid}}>{fmt(lim)}/mes</span><button className="btn bd bsm" onClick={()=>{const b={...budgets};delete b[cat];update({budgets:b});}}>✕</button></div></div>))}</div></div>}</div>);
+
+  return(
+    <div className="up">
+      <PH title="Movimientos" right={<button className="btn bl" onClick={()=>{setETx(null); setSA(true)}}><ic.Plus/> Nuevo</button>}/>
+      <div className="card" style={{padding:0, overflow:"auto"}}>
+        <table className="tbl">
+          <thead><tr><th className="hide-m">Fecha</th><th>Detalle</th><th>Categoría</th><th>Monto</th><th></th></tr></thead>
+          <tbody>
+            {transactions.slice().reverse().map(t => (
+              <tr key={t.id}>
+                <td className="mono hide-m" style={{fontSize:11, color:T.muted}}>{t.date}</td>
+                <td style={{fontSize:13, fontWeight:500}}>{t.description}</td>
+                <td style={{fontSize:11, color:T.mid}}>{t.category}</td>
+                <td className="mono" style={{color:t.type==="income"?T.teal:T.red, fontWeight:600}}>{fmt(t.amount)}</td>
+                <td style={{textAlign:"right"}}>
+                  <button className="btn bg bsm" onClick={()=>{setForm({...t, amount:t.amount}); setETx(t.id); setSA(true)}}>✎</button>
+                  <button className="btn bd bsm" style={{marginLeft:6}} onClick={()=>update({transactions:transactions.filter(x=>x.id!==t.id)})}>×</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {transactions.length === 0 && <div style={{padding:"40px", textAlign:"center", color:T.muted}}>Sin movimientos registrados</div>}
+      </div>
+      
+      {showAdd && (
+        <div className="ov" onClick={e=>e.target===e.currentTarget&&setSA(false)}>
+          <div className="modal up">
+            <h3>{editTx ? "Editar" : "Nuevo"} Movimiento</h3>
+            <div style={{display:"flex", flexDirection:"column", gap:14, marginTop:20}}>
+              <div className="g2">
+                <input type="date" className="inp" value={form.date} onChange={e=>setForm({...form, date:e.target.value})}/>
+                <select className="inp" value={form.type} onChange={e=>setForm({...form, type:e.target.value})}>
+                  <option value="expense">Gasto (-)</option>
+                  <option value="income">Ingreso (+)</option>
+                </select>
+              </div>
+              <input className="inp" placeholder="Descripción (ej: Supermercado)" value={form.description} onChange={e=>setForm({...form, description:e.target.value})}/>
+              <div className="g3">
+                <input className="inp" style={{gridColumn:"1/3"}} placeholder="Monto (ej: 15.000,50)" value={form.amount} onChange={e=>setForm({...form, amount:e.target.value})}/>
+                <select className="inp" value={form.currency} onChange={e=>setForm({...form, currency:e.target.value})}>
+                  <option>ARS</option><option>USD</option>
+                </select>
+              </div>
+              <select className="inp" value={form.category} onChange={e=>setForm({...form, category:e.target.value})}>
+                {CATS.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <button className="btn bl" style={{justifyContent:"center"}} onClick={save}>Guardar Movimiento</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
-function Goals({state,update,notify}){
-  const {goals,transactions,usdRate,salaries}=state;
+function Goals({state, update, notify}){
+  const {goals, holdings=[], transactions}=state;
   const {fmt}=useDsp(state);
-  const NOW=getNow();
-  const [sf,setSF]=useState(false);
-  const [addTo,setAT]=useState(null);
-  const [addAmt,setAA]=useState("");
-  const [addCur,setAC]=useState("ARS");
-  const [form,setForm]=useState({name:"",target:"",currency:"ARS",saved:"",icon:"🎯",deadline:""});
-  const ICONS=["🎯","✈️","🚗","🏠","💻","📱","💍","🎓","🏖️","💰","🏋️","🎸","🛵","🌎","👶","🏡"];
-  const {disponible,perGoal}=goalPlan(goals,salaries,transactions,state.holdings||[]);
-  const addG=()=>{if(!form.name||!form.target)return notify("Nombre y monto requeridos","err");const t=Math.abs(px(form.target))*(form.currency==="USD"?usdRate:1);update({goals:[...goals,{id:`g_${uid()}`,name:form.name,target:t,saved:Math.abs(px(form.saved))||0,icon:form.icon,deadline:form.deadline,createdAt:todayISO()}]});setForm({name:"",target:"",currency:"ARS",saved:"",icon:"🎯",deadline:""});setSF(false);notify("Meta creada ✓");};
-  const addSav=g=>{const a=Math.abs(px(addAmt))*(addCur==="USD"?usdRate:1);if(!a)return notify("Ingresá un monto","err");update({goals:goals.map(gl=>gl.id===g.id?{...gl,saved:gl.saved+a}:gl),transactions:[...transactions,{id:`s_${uid()}`,date:todayISO(),description:`Ahorro: ${g.name}`,amount:a,type:"expense",category:"💰 Ahorro",currency:"ARS",source:"manual"}]});setAT(null);setAA("");setAC("ARS");notify(`+${fmt(a)} sumado ✓`);};
-  return(<div className="up"><PH title="Metas" sub={`${goals.filter(g=>g.saved<g.target).length} activas`} right={<button className="btn bl" onClick={()=>setSF(true)}><ic.Plus/> Nueva meta</button>}/>
-  {disponible>0&&perGoal.length>0&&(<div className="card" style={{marginBottom:16,borderColor:"rgba(200,255,87,.18)"}}><div style={{fontSize:13,fontWeight:700,marginBottom:10}}>💡 Plan de ahorro recomendado</div><div style={{fontSize:12,color:T.mid,marginBottom:12}}>Tenés <span className="mono" style={{color:T.lime}}>{fmt(disponible)}</span> disponibles este mes. Distribución sugerida:</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:10}}>{perGoal.map(g=>(<div key={g.id} style={{background:T.raised,borderRadius:10,padding:"12px 14px",border:`1px solid ${g.feasible?T.border:"rgba(255,184,48,.3)"}`}}><div style={{fontSize:12,marginBottom:6}}>{g.icon} {g.name}</div><div className="mono" style={{fontSize:18,fontWeight:600,color:g.feasible?T.lime:T.amber}}>{fmt(g.needed)}<span style={{fontSize:11,fontWeight:400,color:T.muted}}>/mes</span></div><div style={{fontSize:10,color:T.muted,marginTop:3}}>{g.months} mes{g.months>1?"es":""} · Falta {fmt(g.rem)}</div>{!g.feasible&&<div style={{fontSize:10,color:T.amber,marginTop:4}}>⚠ Ajustá el plazo o el monto</div>}{g.couldUsePortfolio&&<div style={{fontSize:10,color:T.blue,marginTop:4}}>📊 Portfolio cubre {g.portfolioCover}%</div>}</div>))}</div></div>)}
-  {goals.length===0?<div className="card" style={{textAlign:"center",padding:"64px 32px"}}><div style={{fontSize:52,marginBottom:14}}>🎯</div><div style={{fontSize:20,fontWeight:700,marginBottom:8}}>Sin metas todavía</div><div style={{fontSize:13,color:T.muted,marginBottom:20}}>Creá una meta y empezá a trackear tu progreso</div><button className="btn bl" onClick={()=>setSF(true)}><ic.Plus/> Crear meta</button></div>:
-  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:14}}>{goals.map(g=>{const pct=clamp((g.saved/g.target)*100,0,100);const rem=g.target-g.saved;const days=g.deadline?Math.ceil((new Date(g.deadline)-NOW)/864e5):null;const months=days&&days>0?Math.ceil(days/30):null;const needed=months?rem/months:null;const pc=pct>=100?T.lime:pct>=60?T.blue:T.amber;return<div key={g.id} className="card up"><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}><div style={{display:"flex",gap:10,alignItems:"center"}}><span style={{fontSize:28}}>{g.icon}</span><div><div style={{fontSize:14,fontWeight:700}}>{g.name}</div>{g.deadline&&<div style={{fontSize:10,color:T.muted,marginTop:2}}>📅 {g.deadline}{days!==null&&` · ${days>0?days+"d":"¡Hoy!"}`}</div>}</div></div><button className="btn bd bsm" onClick={()=>{update({goals:goals.filter(x=>x.id!==g.id)});notify("Eliminado","err");}}><ic.Trash/></button></div><div className="g2" style={{marginBottom:12}}><div style={{background:T.raised,borderRadius:10,padding:"10px 12px"}}><div style={{fontSize:10,color:T.muted,marginBottom:3}}>Ahorrado</div><div className="mono" style={{fontSize:15,color:pc}}>{fmt(g.saved)}</div></div><div style={{background:T.raised,borderRadius:10,padding:"10px 12px"}}><div style={{fontSize:10,color:T.muted,marginBottom:3}}>Objetivo</div><div className="mono" style={{fontSize:15}}>{fmt(g.target)}</div></div></div><div style={{marginBottom:12}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{fontSize:11,color:T.muted}}>Progreso</span><span className="mono" style={{fontSize:11,color:pc,fontWeight:600}}>{pct.toFixed(1)}%</span></div><div className="prog" style={{height:8}}><div className="progf" style={{width:`${pct}%`,background:pct>=100?`linear-gradient(90deg,${T.lime},${T.teal})`:pct>=60?T.blue:T.amber}}/></div></div>{needed&&needed>0&&<div style={{background:"rgba(77,158,255,.07)",border:`1px solid rgba(77,158,255,.15)`,borderRadius:8,padding:"8px 10px",fontSize:11,color:T.blue,marginBottom:12}}>💡 Guardá <span className="mono">{fmt(needed)}</span>/mes para llegar en {months} mes{months>1?"es":""}</div>}{pct>=100?<div style={{background:"rgba(200,255,87,.08)",border:`1px solid rgba(200,255,87,.25)`,borderRadius:10,padding:10,textAlign:"center",fontSize:13,color:T.lime,fontWeight:600}}>🎉 ¡Meta alcanzada!</div>:addTo===g.id?<div style={{display:"flex",gap:8,flexWrap:"wrap"}}><input className="inp" style={{flex:1,fontSize:12,minWidth:80}} placeholder="Monto" value={addAmt} onChange={e=>setAA(e.target.value)} autoFocus onKeyDown={e=>e.key==="Enter"&&addSav(g)}/><select className="inp" style={{width:70,fontSize:12,padding:"10px 6px"}} value={addCur} onChange={e=>setAC(e.target.value)}><option>ARS</option><option>USD</option></select><button className="btn bl bsm" onClick={()=>addSav(g)}>+</button><button className="btn bg bsm" onClick={()=>{setAT(null);setAA("");}}>✕</button></div>:<button className="btn bg" style={{width:"100%",justifyContent:"center"}} onClick={()=>setAT(g.id)}><ic.Plus/> Agregar ahorro</button>}</div>;})}
-  </div>}
-  {sf&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setSF(false)}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h2 style={{fontSize:18,fontWeight:700}}>Nueva meta</h2><button className="btn bg bsm" onClick={()=>setSF(false)}><ic.X/></button></div><div style={{display:"flex",flexDirection:"column",gap:12}}><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:7}}>Ícono</label><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{ICONS.map(ic2=><button key={ic2} onClick={()=>setForm(f=>({...f,icon:ic2}))} style={{width:36,height:36,fontSize:18,borderRadius:8,border:`1.5px solid ${form.icon===ic2?T.lime:T.border}`,background:form.icon===ic2?"rgba(200,255,87,.1)":T.raised,cursor:"pointer"}}>{ic2}</button>)}</div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Nombre</label><input className="inp" placeholder="ej: Viaje a Europa" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))}/></div><div className="g3"><div style={{gridColumn:"1/3"}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Monto objetivo</label><input className="inp" placeholder="500000" value={form.target} onChange={e=>setForm(f=>({...f,target:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda</label><select className="inp" value={form.currency} onChange={e=>setForm(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select></div></div><div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Ya tengo</label><input className="inp" placeholder="0" value={form.saved} onChange={e=>setForm(f=>({...f,saved:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha límite</label><input type="date" className="inp" value={form.deadline} onChange={e=>setForm(f=>({...f,deadline:e.target.value}))}/></div></div><button className="btn bl" style={{justifyContent:"center"}} onClick={addG}>Crear meta</button></div></div></div>}</div>);
+  const [addTo, setAT]=useState(null);
+  const [addAmt, setAA]=useState("");
+  const [sf, setSF]=useState(false);
+  const [form, setForm]=useState({name:"", target:"", icon:"🎯", deadline:""});
+
+  const liquidar = (g, linkedH) => {
+    const ids = linkedH.map(h => h.id);
+    const expense = {id:`m_${uid()}`, date:todayISO(), description:`Gasto Meta: ${g.name}`, amount: g.target, type:"expense", category:"💰 Ahorro", currency:"ARS", source:"auto"};
+    update({
+      transactions: [...transactions, expense],
+      holdings: holdings.filter(h => !ids.includes(h.id)),
+      goals: goals.filter(x => x.id !== g.id)
+    });
+    notify(`¡Felicidades! Meta '${g.name}' cumplida y activos liquidados 🎉`);
+  };
+
+  const addG = () => {
+    if(!form.name || !form.target) return notify("Nombre y monto son requeridos","err");
+    update({goals: [...goals, {id:`g_${uid()}`, name:form.name, target:px(form.target), saved:0, icon:form.icon, deadline:form.deadline}]});
+    setSF(false); setForm({name:"", target:"", icon:"🎯", deadline:""}); notify("Meta creada ✓");
+  }
+
+  return(
+    <div className="up">
+      <PH title="Mis Metas de Ahorro" right={<button className="btn bl" onClick={()=>setSF(true)}><ic.Plus/> Nueva Meta</button>}/>
+      <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(320px, 1fr))", gap:16}}>
+        {goals.map(g => {
+          // Lógica principal de Goal-Based Investing
+          const linkedH = holdings.filter(h => h.goalId === g.id);
+          const linkedVal = linkedH.reduce((s,h) => s + (h.currentValue || h.totalInvested || 0), 0);
+          const total = g.saved + linkedVal;
+          const pct = clamp((total / g.target) * 100, 0, 100);
+          
+          return (
+            <div key={g.id} className="card up" style={{border: pct>=100?`1px solid ${T.lime}`:`1px solid ${T.border}`}}>
+              <div style={{display:"flex", justifyContent:"space-between", marginBottom:14}}>
+                <div style={{display:"flex", gap:12}}>
+                  <span style={{fontSize:28}}>{g.icon}</span>
+                  <div>
+                    <div style={{fontWeight:700, fontSize:15}}>{g.name}</div>
+                    <div style={{fontSize:10, color:T.muted}}>{pct>=100 ? "¡Objetivo Alcanzado!" : `Faltan ${fmt(g.target-total)}`}</div>
+                  </div>
+                </div>
+                <button className="btn bd bsm" onClick={()=>update({goals:goals.filter(x=>x.id!==g.id)})}>×</button>
+              </div>
+              <div className="prog" style={{height:10}}><div className="progf" style={{width:`${pct}%`, background:pct>=100?T.lime:T.blue}}/></div>
+              <div style={{marginTop:12, fontSize:11, color:T.mid, display:"flex", justifyContent:"space-between", background:T.raised, padding:8, borderRadius:8}}>
+                <span>Cash: <span className="mono">{fmt(g.saved)}</span></span>
+                <span>Inversiones: <span className="mono">{fmt(linkedVal)}</span></span>
+              </div>
+              
+              {pct >= 100 ? (
+                <button className="btn bl" style={{width:"100%", marginTop:16, justifyContent:"center"}} onClick={()=>liquidar(g, linkedH)}>💸 Liquidar Activos y Cumplir</button>
+              ) : addTo === g.id ? (
+                <div style={{display:"flex", gap:6, marginTop:16}}>
+                  <input autoFocus className="inp" placeholder="Ahorro manual $" value={addAmt} onChange={e=>setAA(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"){ update({goals:goals.map(x=>x.id===g.id?{...x, saved:x.saved+px(addAmt)}:x)}); setAT(null); setAA("");}}}/>
+                  <button className="btn bl bsm" onClick={()=>{update({goals:goals.map(x=>x.id===g.id?{...x, saved:x.saved+px(addAmt)}:x)}); setAT(null); setAA("")}}>Guardar</button>
+                </div>
+              ) : (
+                <button className="btn bg bsm" style={{width:"100%", marginTop:16}} onClick={()=>setAT(g.id)}>Sumar Cash Manualmente</button>
+              )}
+            </div>
+          );
+        })}
+        {goals.length === 0 && <div className="card" style={{gridColumn:"1/-1", textAlign:"center", padding:"40px", color:T.muted}}>No tienes metas activas.</div>}
+      </div>
+
+      {sf && (
+        <div className="ov" onClick={e=>e.target===e.currentTarget&&setSF(false)}>
+          <div className="modal up">
+            <h3>Nueva Meta</h3>
+            <div style={{display:"flex", flexDirection:"column", gap:14, marginTop:20}}>
+              <div style={{display:"flex", gap:8, fontSize:20}}>
+                {["🎯","✈️","🚗","🏠","💻","📱","💍","🎓"].map(i=><button key={i} onClick={()=>setForm({...form, icon:i})} style={{padding:8, background:form.icon===i?T.raised:"transparent", borderRadius:8, border:`1px solid ${form.icon===i?T.lime:T.border}`}}>{i}</button>)}
+              </div>
+              <input className="inp" placeholder="Nombre (ej: Cambiar el auto)" value={form.name} onChange={e=>setForm({...form, name:e.target.value})}/>
+              <input className="inp" placeholder="Monto objetivo (ARS)" value={form.target} onChange={e=>setForm({...form, target:e.target.value})}/>
+              <input type="date" className="inp" value={form.deadline} onChange={e=>setForm({...form, deadline:e.target.value})}/>
+              <button className="btn bl" style={{justifyContent:"center"}} onClick={addG}>Crear Meta</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function Analytics({state}){
@@ -262,181 +401,177 @@ function Analytics({state}){
   <div className="card"><div style={{marginBottom:14}}><div style={{fontSize:14,fontWeight:700}}>🏦 Comparador de instrumentos</div><div style={{fontSize:11,color:T.muted,marginTop:2}}>FCI, plazo fijo, bonos CER, CEDEARs — contexto argentino 2025</div></div><div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}><div style={{flex:1,minWidth:130}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Ahorro mensual (ARS)</label><input className="inp" value={cf.monthly} onChange={e=>setCF(f=>({...f,monthly:e.target.value}))}/></div><div style={{flex:1,minWidth:90}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Plazo (meses)</label><input className="inp" value={cf.months} onChange={e=>setCF(f=>({...f,months:e.target.value}))}/></div><div style={{display:"flex",alignItems:"flex-end"}}><button className="btn bl" onClick={async()=>{setComp(true);const r=await compareInstruments(px(cf.monthly),px(cf.months),state.usdRate);setResult(r);setComp(false);}} disabled={comparing}>{comparing?<Dots/>:<><ic.Refresh/> Analizar</>}</button></div></div>{result?<div><div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:12}}>{result.instruments?.map((inst,i)=>(<div key={i} style={{background:T.raised,borderRadius:12,padding:"12px 16px",border:`1px solid ${T.border}`,display:"flex",flexWrap:"wrap",gap:10,alignItems:"center"}}><div style={{flex:"2 1 140px"}}><div style={{fontSize:12,fontWeight:600}}>{inst.name}</div><div style={{fontSize:10,color:T.muted,marginTop:2}}>{inst.pros}</div></div><div style={{flex:"1 1 60px"}}><div style={{fontSize:10,color:T.muted,marginBottom:2}}>Ret. anual</div><div className="mono" style={{fontSize:13,color:T.lime}}>{inst.annualReturn?.toFixed(1)}%</div></div><div style={{flex:"1 1 60px"}}><div style={{fontSize:10,color:T.muted,marginBottom:2}}>Final USD</div><div className="mono" style={{fontSize:13,color:T.teal}}>{fUSD(inst.finalUSD||0)}</div></div><div style={{flex:"1 1 60px"}}><div style={{fontSize:10,color:T.muted,marginBottom:2}}>Riesgo</div><span style={{fontSize:11,padding:"2px 8px",borderRadius:99,background:`${rc[inst.risk]||T.mid}1A`,color:rc[inst.risk]||T.mid}}>{(inst.risk||"").replace(/_/g," ")}</span></div><div style={{flex:"1.5 1 100px",fontSize:10,color:T.muted}}>{inst.cons}</div></div>))}</div>{result.recommendation&&<div style={{background:"rgba(200,255,87,.06)",border:`1px solid rgba(200,255,87,.2)`,borderRadius:10,padding:"12px 16px"}}><div style={{fontSize:11,color:T.lime,fontWeight:600,marginBottom:4}}>💡 Recomendación</div><div style={{fontSize:12,color:T.mid}}>{result.recommendation}</div><div style={{fontSize:10,color:T.muted,marginTop:6}}>{result.disclaimer}</div></div>}</div>:<div style={{textAlign:"center",padding:"20px 0",color:T.muted,fontSize:13}}>Ingresá monto y plazo para comparar instrumentos</div>}</div></div>);
 }
 
-function Investments({state,update,notify}){
-  const {savedAnalyses=[],riskProfile}=state;
-  const [tab,setTab]=useState("portfolio");
-  const [hFilter,setHFilter]=useState("all");
-  const [scanning,setScan]=useState(false);
-  const [scanResult,setSR]=useState(null);
-  const [scanErr,setSE]=useState(null);
-  const [ticker,setTicker]=useState("");
-  const [tname,setTname]=useState("");
-  const [loading,setLoad]=useState(false);
-  const [loadErr,setLE]=useState(null);
-  const [sel,setSel]=useState(null);
-  const [justSaved,setJS]=useState(null);
-  const [showHForm,setSHF]=useState(false);
-  const [hForm,setHF]=useState({type:"accion",ticker:"",name:"",quantity:"",buyPrice:"",totalInvested:"",currency:"ARS",buyDate:todayISO(),maturityDate:"",rate:""});
-  
-  // Estado para el refresh individual (guarda el ID de la inversión que se está actualizando)
-  const [refreshingId,setRI]=useState(null);
-  const [loadingTNA,setLoadingTNA]=useState(false); 
-  
-  const holdings=state.holdings||[];
-  const filteredHoldings=hFilter==="all"?holdings:holdings.filter(h=>h.type===hFilter);
-  const holdingTypes=[...new Set(holdings.map(h=>h.type))];
-  
-  const totalInvested=holdings.reduce((s,h)=>s+(h.totalInvested||0),0);
-  const totalCurrent=holdings.reduce((s,h)=>s+(h.currentValue||h.totalInvested||0),0);
-  const totalPnL=totalCurrent-totalInvested;
+function Investments({state, update, notify}){
+  const {holdings=[], goals=[], usdRate, transactions}=state;
+  const {fmt}=useDsp(state);
+  const [showHForm, setSHF]=useState(false);
+  const [hForm, setHF]=useState({type:"accion", ticker:"", name:"", quantity:"", buyPrice:"", totalInvested:"", currency:"ARS", buyDate:todayISO(), rate:"", goalId:""});
+  const [refreshingId, setRI]=useState(null);
 
-  const handleAutoTNA = async () => {
-    setLoadingTNA(true);
-    try {
-      const r = await fetch("https://api.argentinadatos.com/v1/finanzas/tasas/plazoFijo");
-      const d = await r.json();
-      const avg = d.slice(0,10).reduce((s,b)=>s+b.tna, 0) / Math.min(10, d.length);
-      setHF(f => ({...f, rate: avg.toFixed(1)}));
-      notify("TNA promedio de mercado actualizada ✓");
-    } catch(e) {
-      notify("Error al obtener TNA", "err");
-    }
-    setLoadingTNA(false);
-  };
-  
-  const addHolding=()=>{
-    const isVar = ["accion", "cedear", "etf", "crypto"].includes(hForm.type);
-    const isFix = ["plazo_fijo", "fci", "bono"].includes(hForm.type);
-    
-    // Validaciones estrictas
-    if(isVar && (!hForm.ticker || !hForm.quantity || !hForm.buyPrice)) return notify("Ticker, cantidad y precio de compra son obligatorios", "err");
-    if(isFix && (!hForm.name || !hForm.totalInvested || !hForm.rate || !hForm.buyDate)) return notify("Nombre, monto invertido, TNA y fecha son obligatorios", "err");
-
-    let inv = px(hForm.totalInvested);
-    if(isVar && !inv) inv = px(hForm.quantity) * px(hForm.buyPrice);
-
-    const h={...hForm, id:`h_${uid()}`, quantity:px(hForm.quantity), buyPrice:px(hForm.buyPrice), totalInvested:inv, rate:px(hForm.rate), currentValue:inv, currentPrice:px(hForm.buyPrice), lastUpdated:todayISO()};
-    
-    update({holdings:[...holdings,h]});
-    setSHF(false);
-    setHF({type:"accion",ticker:"",name:"",quantity:"",buyPrice:"",totalInvested:"",currency:"ARS",buyDate:todayISO(),maturityDate:"",rate:""});
-    notify("Inversión agregada al portfolio ✓");
-  };
-  
-  const delHolding=id=>update({holdings:holdings.filter(h=>h.id!==id)});
-  
-  // REFRESH INDIVIDUAL OPTIMIZADO
   const refreshSingle = async (h) => {
     setRI(h.id);
-    let updatedHolding = { ...h };
-    
-    const isVar = ["accion", "cedear", "etf", "crypto"].includes(h.type);
-    
-    if (isVar) {
-      notify(`Consultando mercado para ${h.ticker||h.name}...`, "info");
-      const query = h.type === "crypto" ? `${h.ticker} crypto in USD` : h.ticker;
-      const raw = await ai(`Current market price for: ${query}. Date: ${todayISO()}. Return ONLY valid JSON: {"price": number}. USD for Crypto/US stocks, ARS for local AR stocks.`, "Financial data. Valid JSON only. Return just the numeric value in the JSON.");
-      if (raw) {
-        try {
-          const d = JSON.parse(cleanJSON(raw));
+    let updatedHolding = {...h};
+    try {
+      if(h.type === "crypto") {
+        // BINANCE API (Motor de tiempo real)
+        let sym = h.ticker.toUpperCase().replace(/[^A-Z]/g,"");
+        if(!sym.endsWith("USDT") && !sym.endsWith("BUSD") && !sym.endsWith("USDC")) sym += "USDT";
+        const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${sym}`);
+        const d = await r.json();
+        if(d.price) {
+          let cp = parseFloat(d.price);
+          if(h.currency==="ARS") cp *= usdRate;
+          const cv = h.quantity ? px(h.quantity) * cp : px(h.totalInvested) * (cp/px(h.buyPrice));
+          updatedHolding = {...updatedHolding, currentPrice:cp, currentValue:Math.round(cv), lastUpdated:todayISO()};
+          notify(`${h.ticker} actualizado vía Binance ✓`);
+        } else throw new Error();
+      } else if (["accion","cedear","etf","bono"].includes(h.type)) {
+        // IA API (Motor de búsqueda para Renta Variable local/extranjera)
+        const raw = await ai(`Price for ticker: ${h.ticker}. Date: ${todayISO()}. Return JSON: {"price": number}. ARS for local AR instruments, USD for US.`, "Valid JSON only. Return just the numeric value in the JSON.");
+        if(raw){
+          const d = JSON.parse(raw);
           let cp = d.price || d.prices?.[h.ticker] || null;
-          if (cp) {
-            if (h.currency === "ARS" && (h.type === "cedear" || h.type === "crypto")) cp = cp * state.usdRate;
-            const cv = h.quantity ? h.quantity * cp : h.totalInvested * (cp / (h.buyPrice || cp));
-            updatedHolding = { ...updatedHolding, currentPrice: cp, currentValue: Math.round(cv), lastUpdated: todayISO() };
-            notify(`Cotización de ${h.ticker} actualizada ✓`);
+          if(cp) {
+            if(h.currency==="ARS" && (h.type==="cedear" || h.type==="etf")) cp *= usdRate;
+            const cv = h.quantity ? px(h.quantity) * cp : px(h.totalInvested) * (cp/px(h.buyPrice));
+            updatedHolding = {...updatedHolding, currentPrice:cp, currentValue:Math.round(cv), lastUpdated:todayISO()};
+            notify(`${h.ticker} actualizado vía IA ✓`);
           } else throw new Error();
-        } catch {
-          notify(`No se pudo obtener precio de ${h.ticker}`, "err");
-        }
-      }
-    } else {
-      // RENTA FIJA: Cálculo instantáneo de intereses (Sin consumir API)
-      const days = Math.max(0, Math.floor((Date.now() - new Date(h.buyDate)) / 864e5));
-      const rateDec = h.rate / 100;
-      let cv = h.totalInvested;
-      if (h.type === "fci") {
-          cv = h.totalInvested * Math.pow(1 + (rateDec / 365), days); // Compuesto Diario
+        } else throw new Error();
       } else {
-          cv = h.totalInvested * (1 + rateDec * (days / 365)); // Simple
+        // MATH API (Motor local para Renta Fija)
+        const days = Math.max(0, Math.floor((Date.now()-new Date(h.buyDate))/864e5));
+        const rateDec = px(h.rate)/100;
+        let cv = px(h.totalInvested);
+        if(h.type==="fci") cv *= Math.pow(1+(rateDec/365), days); // Compuesto diario
+        else cv *= (1 + rateDec*(days/365)); // Simple
+        updatedHolding = {...updatedHolding, currentValue:Math.round(cv), lastUpdated:todayISO()};
+        notify("Rendimiento calculado a hoy ✓");
       }
-      updatedHolding = { ...updatedHolding, currentValue: Math.round(cv), lastUpdated: todayISO() };
-      notify(`Rendimientos de ${h.name} calculados a hoy ✓`);
+      update({holdings: holdings.map(x=>x.id===h.id ? updatedHolding : x)});
+    } catch(e){ 
+      notify(`Fallo al actualizar ${h.ticker||h.name}`, "err"); 
     }
-
-    update({ holdings: holdings.map(x => x.id === h.id ? updatedHolding : x) });
     setRI(null);
   };
-  
-  const PRESETS=[{t:"BTC",n:"Bitcoin"},{t:"ETH",n:"Ethereum"},{t:"AAPL",n:"Apple"},{t:"NVDA",n:"NVIDIA"},{t:"MELI",n:"MercadoLibre"},{t:"VIST",n:"Vista Oil"},{t:"YPF",n:"YPF SA"},{t:"SPY",n:"S&P 500 ETF"}];
-  const runScanner=async()=>{if(!riskProfile)return notify("Configurá tu perfil en el onboarding","info");setScan(true);setSE(null);notify("Analizando mercado...","info");try{const r=await autoScanInvestments(riskProfile,state.usdRate);setSR(r);notify(`${r.opportunities?.length||0} oportunidades ✓`);}catch(e){setSE("No se pudo conectar con la IA. Reintentá en un momento.");notify("Error","err");}setScan(false);};
-  const analyze=async(t,n)=>{const ex=savedAnalyses.find(a=>a.ticker===t);if(ex){setSel(ex);return;}setLoad(true);setLE(null);notify(`Analizando ${t}...`,"info");const r=await analyzeStock(t,n||t);if(r){update({savedAnalyses:[r,...savedAnalyses.filter(a=>a.ticker!==r.ticker)]});setSel(r);notify(`${t} analizado ✓`);}else{setLE(`No se pudo analizar "${t}". Verificá el ticker e intentá de nuevo.`);notify("Error","err");}setLoad(false);};
-  const saveFromScan=opp=>{const a={ticker:opp.ticker,company:opp.name,sector:"",signal:opp.signal,timeframe:opp.timeframe,upside:opp.upside,currentEstimate:opp.currentEstimate,peRatio:opp.peRatio,revenueGrowth:opp.revenueGrowth,moat:opp.moat,bullCase:opp.thesis,bearCase:opp.bearRisk,catalysts:opp.catalysts||[],risks:[opp.bearRisk],summary:opp.thesis,confidenceScore:opp.confidenceScore};update({savedAnalyses:[a,...savedAnalyses.filter(s=>s.ticker!==a.ticker)]});setJS(opp.ticker);setTimeout(()=>setJS(null),2500);notify(`${opp.ticker} guardado ✓`);};
-  
-  return(<div className="up"><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:8}}><div><h1 style={{fontSize:24,fontWeight:800,letterSpacing:"-1px"}}>Inversiones</h1><div style={{fontSize:12,color:T.muted,marginTop:4}}>Perfil: <span style={{color:T.lime,fontWeight:600}}>{riskProfile?.risk||"no configurado"}</span> · Horizonte: <span style={{color:T.lime,fontWeight:600}}>{riskProfile?.horizon||"—"}</span></div></div>{savedAnalyses.length>0&&<div className="chip"><ic.Check/>{savedAnalyses.length} guardados</div>}</div>
-  <div className="tabbar" style={{marginBottom:18}}>{[{id:"portfolio",l:`📊 Portfolio (${holdings.length})`},{id:"scanner",l:"🔍 Scanner"},{id:"manual",l:"🔎 Analizar Activo"},{id:"saved",l:`📁 (${savedAnalyses.length})`}].map(t=>(<button key={t.id} className={`tab${tab===t.id?" on":""}`} onClick={()=>setTab(t.id)}>{t.l}</button>))}</div>
-  {tab==="portfolio"&&<div>
-  <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>{[{l:"Capital Invertido",v:fARS(totalInvested),c:T.blue,i:"💰"},{l:"Valor al día de hoy",v:fARS(totalCurrent),c:T.lime,i:"📈"},{l:"Ganancia Patrimonial",v:`${totalPnL>=0?"+":""}${fARS(totalPnL)}`,c:totalPnL>=0?T.teal:T.red,i:totalPnL>=0?"✅":"⚠️"}].map((k,i)=><div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".5px"}}>{k.l}</span><span>{k.i}</span></div><div className="mono" title={k.v} style={{fontSize:16,fontWeight:600,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div></div>)}</div>
-  <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}><button className="btn bl" onClick={()=>setSHF(true)}><ic.Plus/> Agregar inversión manual</button></div>
-  {holdings.length>0&&<div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap",overflowX:"auto",paddingBottom:4}}>
-      <button style={{padding:"5px 12px",borderRadius:8,fontSize:11,fontWeight:600,border:`1px solid ${hFilter==="all"?T.lime:T.border}`,background:hFilter==="all"?"rgba(200,255,87,.1)":T.raised,color:hFilter==="all"?T.lime:T.muted,cursor:"pointer",whiteSpace:"nowrap"}} onClick={()=>setHFilter("all")}>Todas</button>
-      {holdingTypes.map(t=>(<button key={t} style={{padding:"5px 12px",borderRadius:8,fontSize:11,fontWeight:600,border:`1px solid ${hFilter===t?T.lime:T.border}`,background:hFilter===t?"rgba(200,255,87,.1)":T.raised,color:hFilter===t?T.lime:T.muted,cursor:"pointer",whiteSpace:"nowrap",textTransform:"capitalize"}} onClick={()=>setHFilter(t)}>{t.replace("_"," ")}</button>))}
-  </div>}
-  {showHForm&&<div className="card" style={{marginBottom:14}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><div style={{fontSize:14,fontWeight:700}}>Cargar activo existente</div><button className="btn bg bsm" onClick={()=>setSHF(false)}><ic.X/></button></div>
-  <div style={{display:"flex",flexDirection:"column",gap:10}}>
-  <div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tipo de instrumento</label><select className="inp" value={hForm.type} onChange={e=>setHF(f=>({...f,type:e.target.value}))}><option value="accion">📈 Acción local</option><option value="cedear">🇺🇸 CEDEAR</option><option value="etf">📊 ETF</option><option value="crypto">₿ Crypto (BTC, ETH...)</option><option value="plazo_fijo">🏦 Plazo fijo</option><option value="fci">💼 FCI (MercadoPago, etc)</option><option value="bono">📜 Bono</option></select></div>
-  <div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>{["plazo_fijo","fci","bono"].includes(hForm.type)?"Banco / Entidad *":"Ticker *"}</label><input className="inp" placeholder={["plazo_fijo","fci","bono"].includes(hForm.type)?"ej: Mercado Pago":"ej: BTC"} value={hForm.ticker} onChange={e=>setHF(f=>({...f,ticker:e.target.value.toUpperCase()}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Nombre (opcional)</label><input className="inp" placeholder="ej: Bitcoin" value={hForm.name} onChange={e=>setHF(f=>({...f,name:e.target.value}))}/></div></div>
-  {(["accion","cedear","etf","crypto"].includes(hForm.type))&&<div className="g3"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Cantidad *</label><input className="inp" placeholder="ej: 0.05" value={hForm.quantity} onChange={e=>setHF(f=>({...f,quantity:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Precio compra *</label><input className="inp" placeholder="ej: 65000" value={hForm.buyPrice} onChange={e=>setHF(f=>({...f,buyPrice:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda</label><select className="inp" value={hForm.currency} onChange={e=>setHF(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select></div></div>}
-  {(["plazo_fijo","fci","bono"].includes(hForm.type))&&<div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Capital Inicial (ARS) *</label><input className="inp" placeholder="ej: 500000" value={hForm.totalInvested} onChange={e=>setHF(f=>({...f,totalInvested:e.target.value}))}/></div>
-  
-  {(["plazo_fijo","fci","bono"].includes(hForm.type))&&<div>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
-      <label style={{fontSize:11,color:T.muted,display:"block",margin:0}}>TNA % *</label>
-      <button className="btn bg bsm" style={{padding:"2px 8px",fontSize:9,color:T.lime}} onClick={handleAutoTNA} disabled={loadingTNA}>{loadingTNA?"...":"✨ Auto (BCRA)"}</button>
-    </div>
-    <input className="inp" placeholder="ej: 32.5" value={hForm.rate} onChange={e=>setHF(f=>({...f,rate:e.target.value}))}/>
-  </div>}
-  </div>}
 
-  <div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha de inversión *</label><input type="date" className="inp" value={hForm.buyDate} onChange={e=>setHF(f=>({...f,buyDate:e.target.value}))}/></div>{(["plazo_fijo","bono"].includes(hForm.type))&&<div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Vencimiento (Opcional)</label><input type="date" className="inp" value={hForm.maturityDate} onChange={e=>setHF(f=>({...f,maturityDate:e.target.value}))}/></div>}</div>
-  <button className="btn bl" style={{justifyContent:"center", marginTop:8}} onClick={addHolding}>✓ Guardar en mi portfolio</button></div></div>}
-  {holdings.length===0&&!showHForm&&<div style={{textAlign:"center",padding:"48px 32px",color:T.muted}}><div style={{fontSize:40,marginBottom:12}}>📊</div><div style={{fontSize:14,marginBottom:4}}>Tu portfolio está vacío</div><div style={{fontSize:12}}>Agregá tus inversiones reales para proyectar tus ganancias en el Dashboard</div></div>}
-  {filteredHoldings.length>0&&<div style={{display:"flex",flexDirection:"column",gap:8}}>{filteredHoldings.map(h=>{
-    const pnl=(h.currentValue||h.totalInvested)-(h.totalInvested||0);
-    const pnlPct=h.totalInvested?((pnl/h.totalInvested)*100).toFixed(1):0;
-    const typeEmoji={"accion":"📈","cedear":"🇺🇸","etf":"📊","plazo_fijo":"🏦","fci":"💼","bono":"📜","crypto":"₿"}[h.type]||"💰";
+  const addH = () => {
+    const isVar = ["accion","cedear","etf","crypto","bono"].includes(hForm.type);
+    if(isVar && (!hForm.ticker || !hForm.quantity || !hForm.buyPrice)) return notify("Completa Ticker, Cantidad y Precio", "err");
     
-    let projectedMaturity = null;
-    if (h.maturityDate && h.rate && h.buyDate) {
-        const totalDays = Math.max(1, Math.floor((new Date(h.maturityDate) - new Date(h.buyDate)) / 864e5));
-        projectedMaturity = h.totalInvested * (1 + (h.rate/100) * (totalDays/365));
-    }
+    let inv = px(hForm.totalInvested);
+    if(isVar && !inv) inv = px(hForm.quantity) * px(hForm.buyPrice);
+    
+    const h = {...hForm, id:`h_${uid()}`, totalInvested:inv, currentValue:inv, lastUpdated:todayISO()};
+    update({holdings: [...holdings, h]});
+    setSHF(false); 
+    setHF({type:"accion", ticker:"", name:"", quantity:"", buyPrice:"", totalInvested:"", currency:"ARS", buyDate:todayISO(), rate:"", goalId:""});
+    notify("Activo registrado en Portfolio ✓");
+  };
 
-    return<div key={h.id} className="card" style={{padding:"14px 16px"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
-        <div style={{display:"flex",gap:10,alignItems:"center"}}><span style={{fontSize:22}}>{typeEmoji}</span><div style={{minWidth:0}}><div style={{display:"flex",gap:6,alignItems:"center"}}><span className="mono" title={h.ticker||h.name} style={{fontSize:15,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:140}}>{h.ticker||h.name}</span>{h.currency==="USD"&&<span style={{fontSize:10,color:T.blue,fontWeight:600,background:"rgba(77,158,255,.1)",padding:"2px 6px",borderRadius:4}}>USD</span>}</div><div style={{fontSize:11,color:T.muted,marginTop:2}}>{h.name!==h.ticker?h.name:""} {h.quantity?`· ${h.quantity} unid. a ${h.currency==="USD"?"U$D":"$"}${h.buyPrice}`:h.rate?`· TNA ${h.rate}%`:""}</div></div></div>
-        
-        <div style={{display:"flex",gap:6}}>
-            <button className="btn bg bsm" style={{padding:"6px 10px", color:T.lime}} onClick={()=>refreshSingle(h)} disabled={refreshingId===h.id}>{refreshingId===h.id?<Dots/>:<><ic.Refresh/> Actualizar</>}</button>
-            <button className="btn bd bsm" style={{padding:"6px 10px"}} onClick={()=>delHolding(h.id)}><ic.Trash/></button>
+  const gSel = goals.find(gx=>gx.id===hForm.goalId);
+  const showRisk = gSel && gSel.deadline && (new Date(gSel.deadline)-getNow())/(864e5) < 180 && ["accion","crypto","cedear"].includes(hForm.type);
+
+  return(
+    <div className="up">
+      <PH title="Mi Portfolio" right={<button className="btn bl" onClick={()=>setSHF(true)}><ic.Plus/> Cargar Inversión</button>}/>
+      
+      {showHForm && (
+        <div className="card up" style={{marginBottom:24, borderColor:T.hi}}>
+          <h3 style={{fontSize:14, marginBottom:16}}>Registrar Activo Real</h3>
+          <div style={{display:"flex", flexDirection:"column", gap:12}}>
+            <div className="g2">
+              <select className="inp" value={hForm.type} onChange={e=>setHF({...hForm, type:e.target.value, ticker:"", quantity:"", buyPrice:"", rate:""})}>
+                <option value="accion">Acción / CEDEAR</option>
+                <option value="crypto">Criptomoneda</option>
+                <option value="plazo_fijo">Plazo Fijo</option>
+                <option value="fci">FCI / Billetera (MP, Ualá)</option>
+                <option value="bono">Bono / ETF</option>
+              </select>
+              <select className="inp" value={hForm.goalId} onChange={e=>setHF({...hForm, goalId:e.target.value})}>
+                <option value="">-- Sin meta vinculada --</option>
+                {goals.filter(g=>g.saved<g.target).map(g => <option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}
+              </select>
+            </div>
+            {showRisk && <div style={{background:`rgba(255,77,106,0.1)`, color:T.red, padding:10, borderRadius:8, fontSize:11, border:`1px solid rgba(255,77,106,0.3)`}}>⚠️ Atención: Estás atando un activo volátil a una meta de muy corto plazo.</div>}
+            
+            <div className="g2">
+              <input className="inp" placeholder={["plazo_fijo","fci"].includes(hForm.type)?"Banco / Entidad (ej: Galicia)":"Ticker (ej: BTC, AAPL)"} value={hForm.ticker} onChange={e=>setHF({...hForm, ticker:e.target.value.toUpperCase()})}/>
+              <input className="inp" placeholder="Nombre (opcional)" value={hForm.name} onChange={e=>setHF({...hForm, name:e.target.value})}/>
+            </div>
+
+            {["accion","crypto","cedear","bono","etf"].includes(hForm.type) ? (
+              <div className="g3">
+                <input className="inp" placeholder="Cantidad (ej: 0.5)" value={hForm.quantity} onChange={e=>setHF({...hForm, quantity:e.target.value})}/>
+                <input className="inp" placeholder="Precio Compra $" value={hForm.buyPrice} onChange={e=>setHF({...hForm, buyPrice:e.target.value})}/>
+                <select className="inp" value={hForm.currency} onChange={e=>setHF({...hForm, currency:e.target.value})}>
+                  <option>ARS</option><option>USD</option>
+                </select>
+              </div>
+            ) : (
+              <div className="g3">
+                <input className="inp" placeholder="Capital Inicial $" value={hForm.totalInvested} onChange={e=>setHF({...hForm, totalInvested:e.target.value})}/>
+                <input className="inp" placeholder="TNA %" value={hForm.rate} onChange={e=>setHF({...hForm, rate:e.target.value})}/>
+                <input type="date" className="inp" value={hForm.buyDate} onChange={e=>setHF({...hForm, buyDate:e.target.value})}/>
+              </div>
+            )}
+            <div className="g2">
+              <button className="btn bl" style={{justifyContent:"center"}} onClick={addH}>Confirmar en Portfolio</button>
+              <button className="btn bg" style={{justifyContent:"center"}} onClick={()=>setSHF(false)}>Cancelar</button>
+            </div>
+          </div>
         </div>
+      )}
+
+      <div style={{display:"flex", flexDirection:"column", gap:14}}>
+        {holdings.map(h => {
+          const linkedGoal = goals.find(g => g.id === h.goalId);
+          const gain = (h.currentValue || h.totalInvested) - h.totalInvested;
+          return (
+            <div key={h.id} className="card up" style={{borderColor: linkedGoal ? T.hi : T.border}}>
+              <div style={{display:"flex", justifyContent:"space-between", marginBottom:12, flexWrap:"wrap", gap:10}}>
+                <div style={{display:"flex", gap:12, alignItems:"center"}}>
+                  <span style={{fontSize:24, background:T.raised, padding:8, borderRadius:12}}>{h.type==="crypto"?"₿":h.type==="plazo_fijo"?"🏦":"📈"}</span>
+                  <div>
+                    <div style={{fontWeight:800, fontSize:15}}>{h.ticker || h.name}</div>
+                    <div style={{fontSize:10, color:T.muted, marginTop:2}}>
+                      {h.type.replace("_"," ")} {linkedGoal && <span style={{color:T.lime, marginLeft:4}}>🎯 Atado a: {linkedGoal.name}</span>}
+                    </div>
+                  </div>
+                </div>
+                <div style={{display:"flex", gap:8}}>
+                  <button className="btn bg bsm" onClick={()=>refreshSingle(h)} disabled={refreshingId===h.id}>{refreshingId===h.id ? <Dots/> : "🔄 Actualizar"}</button>
+                  <button className="btn bd bsm" onClick={()=>update({holdings: holdings.filter(x=>x.id!==h.id)})}>×</button>
+                </div>
+              </div>
+              
+              <div className="g3" style={{background:T.raised, padding:14, borderRadius:14}}>
+                <div><div style={{fontSize:9, color:T.muted, marginBottom:4}}>Inversión Inicial</div><div className="mono" style={{fontSize:14}}>{fARS(h.totalInvested)}</div></div>
+                <div><div style={{fontSize:9, color:T.muted, marginBottom:4}}>Valor de Mercado</div><div className="mono" style={{fontSize:14, color:T.white}}>{fARS(h.currentValue || h.totalInvested)}</div></div>
+                <div><div style={{fontSize:9, color:T.muted, marginBottom:4}}>P&L (Ganancia)</div><div className="mono" style={{fontSize:14, color:gain>=0?T.lime:T.red}}>{gain>=0?"+":""}{fARS(gain)}</div></div>
+              </div>
+
+              <div style={{marginTop:12, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10}}>
+                <div style={{display:"flex", gap:6}}>
+                  <input className="inp" style={{width:90, padding:"6px 10px"}} placeholder="Cupón $" id={`div_${h.id}`}/>
+                  <button className="btn bg bsm" onClick={()=>{
+                    const amt = px(document.getElementById(`div_${h.id}`).value);
+                    if(amt>0) {
+                      update({transactions: [...transactions, {id:`d_${uid()}`, date:todayISO(), description:`Dividendo/Cupón: ${h.ticker||h.name}`, amount:amt, type:"income", category:"💰 Ahorro", currency:"ARS"}]});
+                      document.getElementById(`div_${h.id}`).value = "";
+                      notify("Ingreso registrado en movimientos ✓");
+                    }
+                  }}>➕ Cobrar Div.</button>
+                </div>
+                {h.lastUpdated && <div style={{fontSize:9, color:T.muted}}>Actualizado: {h.lastUpdated}</div>}
+              </div>
+            </div>
+          );
+        })}
+        {holdings.length === 0 && !showHForm && <div className="card" style={{textAlign:"center", padding:"50px", color:T.muted}}>Tu portfolio está vacío. Carga activos para verlos crecer y atalos a tus metas.</div>}
+      </div>
     </div>
-    
-    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,background:T.raised,padding:"10px 12px",borderRadius:10}}>
-        <div><div style={{fontSize:9,color:T.muted,marginBottom:2}}>Inicial</div><div className="mono" style={{fontSize:12}}>{fARS(h.totalInvested||0)}</div></div>
-        <div><div style={{fontSize:9,color:T.muted,marginBottom:2}}>Actual (Hoy)</div><div className="mono" style={{fontSize:12,color:h.currentValue?T.white:T.muted}}>{h.currentValue?fARS(h.currentValue):"—"}</div></div>
-        <div><div style={{fontSize:9,color:T.muted,marginBottom:2}}>Ganancia</div><div className="mono" style={{fontSize:12,color:h.currentValue?(pnl>=0?T.teal:T.red):T.muted}}>{h.currentValue?`${pnl>=0?"+":""}${fARS(pnl)}`:"—"}</div></div>
-        <div><div style={{fontSize:9,color:T.muted,marginBottom:2}}>Rend. %</div><div className="mono" style={{fontSize:12,color:h.currentValue?(pnl>=0?T.teal:T.red):T.muted}}>{h.currentValue?`${pnl>=0?"+":""}${pnlPct}%`:"—"}</div></div>
-    </div>
-    
-    {projectedMaturity && <div style={{marginTop:8, background:"rgba(200,255,87,.05)", border:`1px dashed rgba(200,255,87,.2)`, borderRadius:8, padding:"8px 12px", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
-        <div><div style={{fontSize:10, color:T.mid}}>Proyección al vencimiento</div><div style={{fontSize:9, color:T.muted}}>{h.maturityDate}</div></div>
-        <div className="mono" style={{fontSize:14, color:T.lime, fontWeight:600}}>{fARS(projectedMaturity)}</div>
-    </div>}
-    
-    {h.lastUpdated&&<div style={{fontSize:9,color:T.muted,marginTop:8,textAlign:"right"}}>Última act: {h.lastUpdated}</div>}</div>})}</div>}</div>}
-  {tab==="scanner"&&<div><div className="card" style={{marginBottom:14,background:`linear-gradient(135deg,${T.surface},#0f1525)`}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12,flexWrap:"wrap",gap:10}}><div><div style={{fontSize:15,fontWeight:700,marginBottom:4}}>🤖 Scanner automático con IA</div><div style={{fontSize:12,color:T.muted}}>Encuentra oportunidades adaptadas a tu perfil.</div></div><button className="btn bl" onClick={runScanner} disabled={scanning} style={{flexShrink:0}}>{scanning?<><Dots/> Analizando...</>:<><ic.Scan/> Escanear mercado</>}</button></div>{riskProfile&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}><div className="chip">🛡️ {riskProfile.risk}</div><div className="chip">⏱️ {riskProfile.horizon}</div></div>}</div>{scanErr&&<div style={{background:"rgba(255,77,106,.08)",border:`1px solid rgba(255,77,106,.25)`,borderRadius:10,padding:"10px 14px",fontSize:12,color:T.red,marginBottom:14}}>⚠ {scanErr}</div>}{scanning&&<div style={{textAlign:"center",padding:"48px 0",color:T.muted}}><div style={{fontSize:32,marginBottom:12}}>🔍</div><div style={{fontSize:14,marginBottom:8}}>Analizando el mercado...</div><Dots/></div>}{scanResult&&!scanning&&<div>{scanResult.marketContext&&<div style={{background:"rgba(77,158,255,.07)",border:`1px solid rgba(77,158,255,.15)`,borderRadius:12,padding:"12px 16px",marginBottom:14,fontSize:12,color:T.blue}}>🌍 {scanResult.marketContext}</div>}<div className="inv-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(270px,1fr))",gap:12}}>{scanResult.opportunities?.map((opp,i)=>(<div key={i} className="card" style={{cursor:"pointer",border:`1px solid ${opp.ticker===scanResult.topPick?T.lime:T.border}`,background:opp.ticker===scanResult.topPick?"rgba(200,255,87,.03)":T.surface,position:"relative",transition:"all .2s"}}>{opp.ticker===scanResult.topPick&&<div style={{position:"absolute",top:-8,right:12,background:T.lime,color:T.bg,fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:99}}>TOP PICK</div>}<div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}><div><div style={{display:"flex",gap:7,alignItems:"center",marginBottom:3}}><span className="mono" style={{fontSize:16,fontWeight:700}}>{opp.ticker}</span><span className={`tag ${sigCls(opp.signal)}`} style={{fontSize:10}}>{opp.signal}</span></div><div style={{fontSize:11,color:T.muted}}>{opp.name}</div></div></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginBottom:10}}>{[{l:"Upside",v:`${opp.upside>0?"+":""}${(opp.upside||0).toFixed(0)}%`,c:opp.upside>0?T.lime:T.red},{l:"Fit",v:`${opp.profileFit||0}%`,c:(opp.profileFit||0)>=70?T.teal:T.amber},{l:"Confianza",v:`${opp.confidenceScore||0}%`,c:(opp.confidenceScore||0)>=70?T.lime:T.amber}].map((s,j)=>(<div key={j} style={{background:T.raised,borderRadius:7,padding:"6px 8px"}}><div style={{fontSize:9,color:T.muted,marginBottom:2}}>{s.l}</div><div className="mono" style={{fontSize:12,color:s.c}}>{s.v}</div></div>))}</div><div style={{fontSize:11,color:T.muted,lineHeight:1.5,marginBottom:10,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{opp.thesis}</div><button className={`btn bsm ${justSaved===opp.ticker?"bl":"bg"}`} style={{width:"100%",justifyContent:"center"}} onClick={e=>{e.stopPropagation();saveFromScan(opp);}}>{justSaved===opp.ticker?<><ic.Check/> Guardado</>:"+ Analizar en detalle"}</button></div>))}</div><div style={{fontSize:10,color:T.muted,textAlign:"center",marginTop:12}}>⚠️ Análisis educativo. No constituye asesoramiento financiero.</div></div>}{!scanResult&&!scanning&&!scanErr&&<div style={{textAlign:"center",padding:"48px 32px",color:T.muted}}><div style={{fontSize:40,marginBottom:12}}>🔍</div><div style={{fontSize:14,marginBottom:4}}>El scanner analiza el mercado automáticamente</div><div style={{fontSize:12}}>Usa tu perfil de riesgo para encontrar oportunidades</div></div>}</div>}
-  {tab==="manual"&&<div><div className="card" style={{marginBottom:14}}><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:10}}>Buscar por ticker o moneda</div><div style={{display:"flex",gap:10,flexWrap:"wrap"}}><input className="inp" style={{flex:.6,minWidth:80}} placeholder="ej: BTC" value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&analyze(ticker,tname)}/><input className="inp" style={{flex:1.2,minWidth:120}} placeholder="Nombre (opcional)" value={tname} onChange={e=>setTname(e.target.value)} onKeyDown={e=>e.key==="Enter"&&analyze(ticker,tname)}/><button className="btn bl" onClick={()=>analyze(ticker,tname)} disabled={loading||!ticker}>{loading?<Dots/>:<><ic.Stock/> Analizar IA</>}</button></div>{loadErr&&<div style={{marginTop:10,background:"rgba(255,77,106,.08)",border:`1px solid rgba(255,77,106,.25)`,borderRadius:8,padding:"8px 12px",fontSize:12,color:T.red}}>{loadErr}</div>}<div style={{marginTop:12}}><div style={{fontSize:10,color:T.muted,marginBottom:7,textTransform:"uppercase",letterSpacing:".6px"}}>Acceso rápido</div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{PRESETS.map(p=><button key={p.t} onClick={()=>analyze(p.t,p.n)} disabled={loading} style={{padding:"5px 11px",borderRadius:7,fontSize:11,fontWeight:500,border:`1px solid ${savedAnalyses.find(a=>a.ticker===p.t)?T.lime:T.border}`,background:savedAnalyses.find(a=>a.ticker===p.t)?"rgba(200,255,87,.08)":T.raised,color:savedAnalyses.find(a=>a.ticker===p.t)?T.lime:T.mid,cursor:"pointer",transition:"all .15s"}}>{p.t}</button>)}</div></div></div>{sel&&<AnalysisDetail a={sel} onClose={()=>setSel(null)}/>}</div>}
-  {tab==="saved"&&<div>{savedAnalyses.length===0?<div style={{textAlign:"center",padding:"48px 32px",color:T.muted}}><div style={{fontSize:40,marginBottom:12}}>📁</div><div style={{fontSize:14}}>Sin análisis guardados</div></div>:<div><div className="inv-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(250px,1fr))",gap:10,marginBottom:14}}>{savedAnalyses.map(a=>(<div key={a.ticker} onClick={()=>setSel(sel?.ticker===a.ticker?null:a)} className="card" style={{cursor:"pointer",border:`1px solid ${sel?.ticker===a.ticker?T.lime:T.border}`,transition:"all .2s",position:"relative"}}><button onClick={e=>{e.stopPropagation();update({savedAnalyses:savedAnalyses.filter(x=>x.ticker!==a.ticker)});if(sel?.ticker===a.ticker)setSel(null);notify("Eliminado","err");}} className="btn bd bsm" style={{position:"absolute",top:12,right:12}}><ic.Trash/></button><div style={{display:"flex",gap:8,alignItems:"center",marginBottom:6,paddingRight:36}}><span className="mono" style={{fontSize:16,fontWeight:700}}>{a.ticker}</span><span className={`tag ${sigCls(a.signal)}`} style={{fontSize:10}}>{a.signal}</span></div><div style={{fontSize:11,color:T.muted,marginBottom:8}}>{a.company}</div><div style={{display:"flex",gap:7}}>{[{l:"Upside",v:`${a.upside>0?"+":""}${(a.upside||0).toFixed(0)}%`,c:a.upside>0?T.lime:T.red},{l:"Confianza",v:`${a.confidenceScore||0}%`,c:(a.confidenceScore||0)>=70?T.lime:T.amber}].map((s,i)=>(<div key={i} style={{background:T.raised,borderRadius:7,padding:"6px 10px"}}><div style={{fontSize:9,color:T.muted,marginBottom:2}}>{s.l}</div><div className="mono" style={{fontSize:12,color:s.c}}>{s.v}</div></div>))}</div></div>))}</div>{sel&&<AnalysisDetail a={sel} onClose={()=>setSel(null)}/>}</div>}</div>}</div>);
+  );
 }
 
 function AnalysisDetail({a,onClose}){
@@ -471,3 +606,82 @@ function Import({state,update,notify}){
   {tab==="guide"&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:12}}>{[{app:"🟢 Mercado Pago",steps:["App → Actividad","Filtrar fecha → ⋮ → Exportar CSV","O capturá screenshot y subí la imagen"]},{app:"🟣 Ualá",steps:["Movimientos → ⬇ Descargar CSV","O screenshot del historial"]},{app:"🔵 Brubank",steps:["Cuenta → Movimientos → Exportar CSV","O screenshot del historial"]},{app:"🏦 Galicia / Nación",steps:["Homebanking → Extracto → CSV","Formato: fecha;descripcion;debito;credito"]},{app:"📸 Cualquier app",steps:["Capturá screenshot del historial","Subí la imagen en 'Imagen'","La IA detecta los movimientos"]}].map(({app,steps})=><div key={app} className="card csm"><div style={{fontSize:13,fontWeight:600,marginBottom:9}}>{app}</div><ol style={{paddingLeft:16,display:"flex",flexDirection:"column",gap:6}}>{steps.map((s,i)=><li key={i} style={{fontSize:12,color:T.muted}}>{s}</li>)}</ol></div>)}</div>}
   {preview.length>0&&<div style={{marginTop:22}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}><h2 style={{fontSize:16,fontWeight:700}}>{preview.length} movimientos detectados</h2><div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button className="btn bg" onClick={autoCatAll} disabled={autoRunning}>{autoRunning?<><Dots/> Categorizando...</>:"✨ Auto-categorizar IA"}</button><button className="btn bg" onClick={()=>{setPreview([]);setCE({});}}>Cancelar</button><button className="btn bl" onClick={confirm}>✓ Importar todo</button></div></div><div className="card" style={{padding:0,overflow:"auto",maxHeight:380}}><table className="tbl"><thead><tr><th className="hide-m">Fecha</th><th>Descripción</th><th>Monto</th><th className="hide-m">Tipo</th><th>Categoría</th></tr></thead><tbody>{preview.slice(0,50).map(t=>(<tr key={t.id}><td className="mono hide-m" style={{fontSize:11,color:T.muted}}>{t.date}</td><td style={{fontSize:12,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td><td className="mono" style={{fontSize:12,color:t.type==="income"?T.teal:T.red}}>{t.type==="income"?"+":"-"}{fARS(t.amount)}</td><td className="hide-m"><span className={`tag ${t.type==="income"?"ti":"te"}`} style={{fontSize:10}}>{t.type==="income"?"Ingreso":"Gasto"}</span></td><td><select className="inp" style={{fontSize:11,padding:"4px 8px"}} value={catE[t.id]||t.category} onChange={e=>setCE(c=>({...c,[t.id]:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select></td></tr>))}</tbody></table>{preview.length>50&&<div style={{padding:"8px 16px",fontSize:11,color:T.muted,textAlign:"center"}}>...y {preview.length-50} más</div>}</div></div>}</div>);
 }
+// --- ICONOS Y COMPONENTES UI BÁSICOS ---
+const ic = {
+  Grid: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>,
+  Tx: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>,
+  Target: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>,
+  Stock: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>,
+  Plus: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+  Menu: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+};
+
+const Dots = () => <span className="mono">...</span>;
+const PH = ({title, right}) => (<div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24, flexWrap:"wrap", gap:10}}><h1 style={{fontSize:26, fontWeight:800, letterSpacing:"-1px"}}>{title}</h1>{right}</div>);
+function useDsp({displayCurrency, usdRate}){ const fmt = useCallback(a => displayCurrency==="USD" ? fUSD(a/usdRate) : fARS(a), [displayCurrency, usdRate]); return {fmt}; }
+function useIsMobile(){ const [m,setM]=useState(window.innerWidth<=768); useEffect(()=>{ const h=()=>setM(window.innerWidth<=768); window.addEventListener("resize",h); return()=>window.removeEventListener("resize",h); },[]); return m; }
+
+function Onboarding({update, notify}){
+  const [d, setD] = useState({name:"", income:"", goalName:"", goalAmt:""});
+  const finish = () => {
+    const base = px(d.income);
+    update({onboardingDone:true, lastSalaryBase:base, salaries:[{month:getCUR(), base, extras:[]}]}); 
+    if(d.goalName && px(d.goalAmt)>0) update(p => ({...p, goals: [{id:`g_${uid()}`, name:d.goalName, target:px(d.goalAmt), saved:0, icon:"🎯"}]}));
+    notify("¡Bienvenido! Empieza a trackear tu patrimonio.");
+  };
+  return(
+    <div style={{display:"flex", alignItems:"center", justifyContent:"center", height:"100vh", padding:20, background:T.bg}}>
+      <div className="card" style={{maxWidth:400, width:"100%"}}>
+        <h2 style={{marginBottom:10}}>Bienvenido 👋</h2>
+        <div style={{display:"flex", flexDirection:"column", gap:16, marginTop:20}}>
+          <input className="inp" placeholder="Tu nombre" value={d.name} onChange={e=>setD({...d, name:e.target.value})}/>
+          <input className="inp" placeholder="Sueldo neto mensual $" value={d.income} onChange={e=>setD({...d, income:e.target.value})}/>
+          <div style={{borderTop:`1px solid ${T.border}`, paddingTop:20, marginTop:10}}>
+             <div style={{fontSize:12, color:T.muted, marginBottom:12}}>Define un objetivo de ahorro inicial (opcional):</div>
+             <input className="inp" placeholder="Ej: Viaje a Europa" value={d.goalName} onChange={e=>setD({...d, goalName:e.target.value})}/>
+             <input className="inp" style={{marginTop:10}} placeholder="Monto Objetivo $" value={d.goalAmt} onChange={e=>setD({...d, goalAmt:e.target.value})}/>
+          </div>
+          <button className="btn bl" style={{justifyContent:"center", marginTop:10}} onClick={finish}>Comenzar →</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=DM+Mono:wght@300;400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#07080D;color:#F0F2F7;font-family:'Sora',sans-serif;overflow:hidden;height:100%}
+::-webkit-scrollbar{width:3px}
+::-webkit-scrollbar-thumb{background:#3A4255;border-radius:99px}
+.mono{font-family:'DM Mono',monospace}
+input,select,textarea,button{font-family:inherit}
+button{cursor:pointer;border:none;background:none}
+.up{animation:up .35s ease both}
+@keyframes up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.nav{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;font-size:14px;font-weight:500;color:#3A4255;transition:all .2s;width:100%;text-align:left}
+.nav:hover{color:#F0F2F7;background:#111520}
+.nav.on{color:#C8FF57;background:rgba(200,255,87,.07);font-weight:700}
+.inp{background:#111520;border:1px solid #1C2030;border-radius:12px;padding:12px 14px;font-size:14px;color:#F0F2F7;outline:none;width:100%;transition:all .2s}
+.inp:focus{border-color:#C8FF57;background:#161B2A}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:12px;font-size:14px;font-weight:700;transition:all .2s;white-space:nowrap}
+.btn:active{transform:scale(0.96)}
+.bl{background:#C8FF57;color:#07080D}
+.bl:hover{background:#A8E030;box-shadow:0 0 15px rgba(200,255,87,0.3)}
+.bg{background:#111520;color:#8892A4;border:1px solid #1C2030}
+.bg:hover{background:#1C2030;color:white}
+.bd{background:rgba(255,77,106,.08);color:#FF4D6A;border:1px solid rgba(255,77,106,.2)}
+.bsm{padding:8px 12px;font-size:12px;border-radius:10px}
+.card{background:#0C0E15;border:1px solid #1C2030;border-radius:20px;padding:24px}
+.prog{height:8px;border-radius:4px;background:#111520;overflow:hidden}
+.progf{height:100%;border-radius:4px;transition:width .7s cubic-bezier(0.16, 1, 0.3, 1)}
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.85);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px}
+.modal{background:#0C0E15;border:1px solid #1C2030;border-radius:28px;padding:32px;width:540px;max-width:100%;max-height:92vh;overflow-y:auto;box-shadow:0 20px 50px rgba(0,0,0,0.5)}
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{padding:14px;font-size:11px;color:#3A4255;text-transform:uppercase;text-align:left;border-bottom:1px solid #1C2030;letter-spacing:1.5px}
+.tbl td{padding:14px;font-size:14px;border-bottom:1px solid #0E1117}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+.toast{position:fixed;bottom:24px;right:24px;padding:16px 28px;border-radius:16px;font-size:14px;font-weight:600;background:#C8FF57;color:#07080D;z-index:999;box-shadow:0 10px 30px rgba(200,255,87,0.3)}
+@media(max-width:768px){.hide-m{display:none!important}.g2,.g3{grid-template-columns:1fr!important}.kpi-grid{grid-template-columns:1fr 1fr!important}}
+`;
