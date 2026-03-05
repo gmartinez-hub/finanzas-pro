@@ -1,857 +1,473 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { AreaChart, Area, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
-// ==========================================
-// MÓDULO 1: CONFIGURACIÓN Y UTILIDADES
-// ==========================================
 const T = {
   bg:"#07080D",surface:"#0C0E15",raised:"#111520",border:"#1C2030",hi:"#252D45",
   lime:"#C8FF57",limeD:"#A8E030",blue:"#4D9EFF",red:"#FF4D6A",amber:"#FFB830",
   teal:"#00E5C3",purple:"#A78BFA",white:"#F0F2F7",mid:"#8892A4",muted:"#3A4255",ink:"#0E1117",
 };
+const SK="fp_v3b";
+const persist=async d=>{try{await window.storage?.set(SK,JSON.stringify(d),false);}catch(e){console.warn("persist fail",e);}};
+const hydrate=async()=>{try{const r=await window.storage?.get(SK,false);return r?JSON.parse(r.value):null;}catch(e){return null;}};
+const px=raw=>{const s=String(raw||"").trim().replace(/[^0-9.,-]/g,"");if(!s)return 0;if(/^\d{1,3}(\.\d{3})+(,\d*)?$/.test(s))return parseFloat(s.replace(/\./g,"").replace(",","."))||0;if(/^\d+,\d+$/.test(s))return parseFloat(s.replace(",","."))||0;if(/^\d{1,3}(,\d{3})+(\.\d*)?$/.test(s))return parseFloat(s.replace(/,/g,""))||0;return parseFloat(s)||0;};
+const fARS=n=>new Intl.NumberFormat("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0}).format(n||0);
+const fUSD=n=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",minimumFractionDigits:0,maximumFractionDigits:2}).format(n||0);
+const clamp=(v,a,b)=>Math.min(Math.max(v,a),b);
+const getNow=()=>new Date();
+const todayISO=()=>getNow().toISOString().slice(0,10);
+const getCUR=()=>{const n=getNow();return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}`;};
+const gMonth=d=>(d||"").slice(0,7);
+const MOS=["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+const CATS=["🏠 Vivienda","🛒 Supermercado","🚗 Transporte","🍔 Comida y delivery","💊 Salud","👕 Indumentaria","📱 Servicios digitales","🎬 Ocio","💪 Deporte","✈️ Viajes","📚 Educación","💰 Ahorro","💳 Cuotas","🐜 Gastos hormiga","🧛 Suscripciones","❓ Otros"];
+const CATS_PLAIN=CATS.map(c=>c.split(" ").slice(1).join(" "));
+const matchCat=raw=>{if(!raw)return "❓ Otros";const found=CATS.find(c=>c===raw);if(found)return found;const lower=raw.toLowerCase().trim();const idx=CATS_PLAIN.findIndex(p=>p.toLowerCase()===lower);return idx>=0?CATS[idx]:"❓ Otros";};
+const CPAL=["#C8FF57","#4D9EFF","#FF4D6A","#FFB830","#00E5C3","#A78BFA","#F97316","#EC4899","#84CC16","#14B8A6","#60A5FA","#4ADE80","#FB923C","#EF4444","#94A3B8","#CBD5E1"];
+const DEFAULT={transactions:[],goals:[],budgets:{},usdRate:1350,displayCurrency:"ARS",riskProfile:null,onboardingDone:false,savedAnalyses:[],weeklyInsight:null,weeklyInsightDate:null,salaries:[],lastSalaryBase:0,holdings:[]};
+const uid=()=>`${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
 
-const SK="fp_v5_pro";
-const persist = (d) => { try { localStorage.setItem(SK, JSON.stringify(d)); } catch (e) { console.warn(e); } };
-const hydrate = () => { try { const r = localStorage.getItem(SK); return r ? JSON.parse(r) : null; } catch (e) { return null; } };
+/* LIMPIADOR EXTREMO DE JSON PARA PREVENIR ALUCINACIONES DE LA IA */
+const cleanJSON=r=>{if(!r)return"";let s=r.replace(/`{3}json|`{3}/gi,"").trim();const f=s.search(/[\{\[]/);const l=Math.max(s.lastIndexOf("}"),s.lastIndexOf("]"));return f!==-1&&l!==-1?s.slice(f,l+1):s;};
 
-const px = raw => {
-  if(typeof raw === "number") return raw;
-  let s = String(raw||"").trim();
-  if(!s) return 0;
-  if(s.includes('.') && s.includes(',')){
-    const d=s.lastIndexOf('.'); const c=s.lastIndexOf(',');
-    if(c>d) s=s.replace(/\./g,'').replace(',','.');
-    else s=s.replace(/,/g,'');
-  } else {
-    const commas = (s.match(/,/g)||[]).length;
-    const dots = (s.match(/\./g)||[]).length;
-    if(commas === 1 && dots === 0) s = s.replace(',', '.');
-    else if(dots > 1) s = s.replace(/\./g, '');
-    else if(commas > 1) s = s.replace(/,/g, '');
-  }
-  s = s.replace(/[^0-9.-]/g,"");
-  return parseFloat(s)||0;
-};
+async function fetchUSDOficial(){try{const c=new AbortController();const tmr=setTimeout(()=>c.abort(),6000);const r=await fetch("https://dolarapi.com/v1/dolares/oficial",{signal:c.signal});clearTimeout(tmr);const d=await r.json();return Math.round((d.compra+d.venta)/2);}catch{try{const c2=new AbortController();const t2=setTimeout(()=>c2.abort(),6000);const r2=await fetch("https://api.bluelytics.com.ar/v2/latest",{signal:c2.signal});clearTimeout(t2);const d2=await r2.json();return Math.round(d2.oficial.value_avg);}catch{return null;}}}
 
-const fARS = n => new Intl.NumberFormat("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0}).format(n||0);
-const fUSD = n => new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",maximumFractionDigits:2}).format(n||0);
-const clamp = (v,a,b) => Math.min(Math.max(v,a),b);
-const todayISO = () => new Date().toISOString().slice(0,10);
-const getCUR = () => { const n=new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}`; };
-const gMonth = d => (d||"").slice(0,7);
-const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
-const cleanJSON = r => { let s=r.replace(/`{3}json|`{3}/gi,"").trim(); const f=s.search(/[\{\[]/); const l=Math.max(s.lastIndexOf("}"),s.lastIndexOf("]")); return f!==-1&&l!==-1?s.slice(f,l+1):s; };
+const AI_URL=window.location.hostname==="localhost"||window.location.hostname==="127.0.0.1"?"https://api.anthropic.com/v1/messages":"/api/ai";
+async function ai(prompt,sys=""){try{const r=await fetch(AI_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5-20250929",max_tokens:1500,system:sys||"Respond with clean JSON only. No markdown fences.",messages:[{role:"user",content:prompt}]})});if(!r.ok)throw new Error(`HTTP ${r.status}`);const d=await r.json();return(d.content?.filter(b=>b.type==="text").map(b=>b.text).join("")||"").replace(/`{3}json|`{3}/g,"").trim();}catch(e){console.error("AI error",e);return null;}}
 
-const CATS = ["🏠 Vivienda","🛒 Supermercado","🚗 Transporte","🍔 Comida y delivery","💊 Salud","👕 Indumentaria","📱 Servicios digitales","🎬 Ocio","💪 Deporte","✈️ Viajes","📚 Educación","💰 Ahorro","💳 Cuotas","🐜 Gastos hormiga","🧛 Suscripciones","❓ Otros"];
+async function aiVision(b64,rawMime,prompt){const VALID=["image/jpeg","image/png","image/gif","image/webp"];const mime=VALID.includes(rawMime)?rawMime:"image/png";try{const r=await fetch(AI_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5-20250929",max_tokens:1500,system:"Financial data extractor. Return ONLY valid JSON, no markdown.",messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:mime,data:b64}},{type:"text",text:prompt}]}]})});if(!r.ok){const e=await r.text();throw new Error(`HTTP ${r.status}: ${e}`);}const d=await r.json();return(d.content?.filter(b=>b.type==="text").map(b=>b.text).join("")||"").replace(/`{3}json|`{3}/g,"").trim();}catch(e){console.error("Vision error",e);return null;}}
 
-// ==========================================
-// MÓDULO 2: SERVICIOS API Y LLM (IA)
-// ==========================================
-async function fetchUSDOficial(){
-  try { const r = await fetch("https://dolarapi.com/v1/dolares/oficial"); const d = await r.json(); return Math.round((d.compra+d.venta)/2); } 
-  catch { return 1350; }
-}
+async function extractFromImage(b64,mime){const raw=await aiVision(b64,mime,`Extract transactions from Argentine banking app screenshot. Return ONLY JSON: {"transactions":[{"date":"YYYY-MM-DD","description":"<merchant>","amount":<positive number>,"type":"income|expense","category":"<one of: ${CATS.join(", ")}>"}],"currency":"ARS|USD","appDetected":"<app or null>"} Rules: amounts always POSITIVE. income for deposits/credits/salary. expense for purchases. Use ${todayISO()} if date unclear. IMPORTANT: category MUST include the emoji prefix exactly as listed.`);if(!raw)return null;try{const parsed=JSON.parse(cleanJSON(raw));if(parsed.transactions){parsed.transactions=parsed.transactions.map(t=>({...t,category:matchCat(t.category)}));}return parsed;}catch{return null;}}
 
-const AI_URL = window.location.hostname==="localhost"||window.location.hostname==="127.0.0.1" ? "https://api.anthropic.com/v1/messages" : "/api/ai";
+async function autoScanInvestments(profile,usdRate){const raw=await ai(`Argentine market. ${todayISO()}. Risk="${profile.risk}", horizon="${profile.horizon}". USD:${usdRate}. Find 3 investment opportunities. CONCISE. Return ONLY valid JSON: {"opportunities":[{"ticker":"","name":"","type":"CEDEAR|ARG_STOCK|ETF|BOND","signal":"STRONG BUY|BUY|HOLD","timeframe":"SHORT|LONG|BOTH","upside":0,"currentEstimate":0,"peRatio":null,"revenueGrowth":null,"moat":"one sentence","thesis":"two sentences max","risk":"low|medium|high","catalysts":["max 2"],"bearRisk":"one sentence","confidenceScore":0,"profileFit":0}],"marketContext":"one sentence","topPick":"","scanDate":"${todayISO()}"}`, "Argentine equity analyst. CONCISE responses. Valid JSON only.");if(!raw)throw new Error("Sin respuesta");return JSON.parse(cleanJSON(raw));}
 
-async function ai(prompt){
-  try {
-    const r = await fetch(AI_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5-20250929",max_tokens:1500,messages:[{role:"user",content:prompt}]})});
-    if(!r.ok) return null; const d = await r.json(); return cleanJSON(d.content?.[0]?.text || "");
-  } catch { return null; }
-}
+async function analyzeStock(ticker,name){const raw=await ai(`Analyze ${name||ticker} (${ticker}) fundamentals ${todayISO()}. Return ONLY valid JSON: {"ticker":"${ticker}","company":"${name||ticker}","sector":"","signal":"STRONG BUY|BUY|HOLD|SELL|STRONG SELL","timeframe":"SHORT|LONG|BOTH","priceTarget12m":0,"currentEstimate":0,"upside":0,"peRatio":null,"revenueGrowth":null,"moat":"","bullCase":"","bearCase":"","catalysts":[""],"risks":[""],"summary":"","confidenceScore":0}`,"Senior equity analyst. Valid JSON only.");if(!raw)return null;try{return JSON.parse(cleanJSON(raw));}catch{return null;}}
 
-async function aiVision(b64,mime,prompt){
-  try {
-    const r = await fetch(AI_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5-20250929",max_tokens:1500,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:mime,data:b64}},{type:"text",text:prompt}]}]})});
-    if(!r.ok) return null; const d = await r.json(); return cleanJSON(d.content?.[0]?.text || "");
-  } catch { return null; }
-}
+async function compareInstruments(monthly,months,usdRate){const raw=await ai(`Compare 4 Argentine instruments: saving ${fARS(monthly)}/month for ${months} months. USD:${usdRate}. CONCISE. Return ONLY valid JSON: {"instruments":[{"name":"","type":"","annualReturn":0,"realReturn":0,"finalAmount":0,"finalUSD":0,"risk":"low","pros":"short","cons":"short"}],"recommendation":"one sentence","disclaimer":"Este análisis es educativo y no constituye asesoramiento financiero."} Include only: Plazo fijo, FCI T+0, S&P500 CEDEARs, Bonos CER.`,"Argentine advisor. CONCISE. Valid JSON only.");if(!raw)return null;try{return JSON.parse(cleanJSON(raw));}catch{return null;}}
 
-const DEFAULT = {transactions:[], goals:[], usdRate:1350, displayCurrency:"ARS", onboardingDone:false, holdings:[], weeklyInsight:null};
+async function autoCat(desc){const raw=await ai(`Transaction: "${desc}". Return ONLY: {"category":"<one of: ${CATS.join(", ")}>","type":"income|expense"} Rules: sueldo/salary/acreditacion→income type; netflix/spotify→🧛 Suscripciones; rappi/pedidosya→🍔 Comida y delivery; gym→💪 Deporte; coto/carrefour/dia→🛒 Supermercado; cuota/credito→💳 Cuotas. IMPORTANT: category MUST include the emoji prefix exactly as listed.`);if(!raw)return{category:"❓ Otros",type:"expense"};try{const p=JSON.parse(cleanJSON(raw));return{category:matchCat(p.category),type:p.type||"expense"};}catch{return{category:"❓ Otros",type:"expense"};}}
 
-// ==========================================
-// MÓDULO 3: COMPONENTE PRINCIPAL (Layout)
-// ==========================================
+async function genWeeklyInsight(transactions,usdRate,holdings=[]){const now=Date.now();const w1=transactions.filter(t=>(now-new Date(t.date))<=7*864e5);if(!w1.length)return null;const e1=w1.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);const w2=transactions.filter(t=>{const d=now-new Date(t.date);return d>7*864e5&&d<=14*864e5;});const e2=w2.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);const cm={};w1.filter(t=>t.type==="expense").forEach(t=>{cm[t.category]=(cm[t.category]||0)+t.amount;});const top=Object.entries(cm).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([c,v])=>`${c}:${fARS(v)}`).join(", ");const pVal=holdings.reduce((s,h)=>s+(h.currentValue||h.totalInvested||0),0);const pInv=holdings.reduce((s,h)=>s+(h.totalInvested||0),0);const pInfo=holdings.length>0?` Portfolio: ${holdings.length} inversiones, valor ${fARS(pVal)}, invertido ${fARS(pInv)}, P&L ${fARS(pVal-pInv)}.`:"";const raw=await ai(`Argentina personal finance. Last 7d expenses: ${fARS(e1)}. Prior week: ${fARS(e2)}. Top: ${top}. USD:${usdRate}.${pInfo} Return ONLY valid JSON: {"headline":"<Spanish 12 words max>","detail":"<2 Spanish sentences with numbers>","action":"<1 Spanish concrete action 15 words max>","trend":"up|down|stable","savingOpportunity":0}`,"Friendly financial coach. Spanish. Valid JSON only.");if(!raw)return null;try{return JSON.parse(cleanJSON(raw));}catch{return null;}}
+
+function parseCSV(txt){const lines=txt.trim().split("\n").filter(l=>l.trim());if(lines.length<2)return[];const sep=lines[0].includes(";")?";":lines[0].includes("\t")?"\t":",";const hdrs=lines[0].split(sep).map(h=>h.trim().replace(/"/g,"").toLowerCase());const out=[];for(let i=1;i<lines.length;i++){const cols=lines[i].split(sep).map(c=>c.trim().replace(/^"|"$/g,""));const obj={};hdrs.forEach((h,idx)=>obj[h]=cols[idx]||"");const dK=hdrs.find(h=>/^(fecha|date|dia)$/i.test(h)||/fecha|date/.test(h));const dscK=hdrs.find(h=>/desc|concepto|detalle|comer|estab|ref/.test(h));const debK=hdrs.find(h=>/debito|debe|debit|cargo|egreso/.test(h));const creK=hdrs.find(h=>/credito|haber|credit|abono/.test(h));const aK=hdrs.find(h=>/import|monto|amount|total/.test(h));let amount=0,type="expense";if(debK&&creK){const deb=px(obj[debK]),cre=px(obj[creK]);if(cre>0){amount=cre;type="income";}else if(deb>0){amount=deb;type="expense";}else continue;}else if(aK){const raw2=String(obj[aK]).trim();amount=Math.abs(px(obj[aK]));type=raw2.startsWith("-")||px(obj[aK])<0?"expense":"income";}else{const numVal=Object.values(obj).map(v=>px(v)).find(v=>v>0);if(!numVal)continue;amount=numVal;type="expense";}if(amount<=0)continue;out.push({id:`csv_${uid()}_${i}`,currency:"ARS",date:obj[dK]||getCUR()+"-01",description:obj[dscK]||`TX ${i}`,amount,type,category:"❓ Otros"});}return out;}
+
+const getSalaryTotal=(salaries,month)=>{const m=month||getCUR();const s=salaries?.find(s=>s.month===m);return s?(s.base+(s.extras||[]).reduce((a,e)=>a+e.amt,0)):0;};
+
+const goalPlan=(goals,salaries,transactions,holdings=[])=>{const CUR=getCUR();const NOW=getNow();const salary=getSalaryTotal(salaries);const spent=transactions.filter(t=>gMonth(t.date)===CUR&&t.type==="expense").reduce((s,t)=>s+t.amount,0);const disponible=Math.max(0,salary-spent);const portfolioValue=holdings.reduce((s,h)=>s+(h.currentValue||h.totalInvested||0),0);const active=goals.filter(g=>g.saved<g.target);return{disponible,portfolioValue,perGoal:active.map(g=>{const rem=g.target-g.saved;const couldUsePortfolio=portfolioValue>=rem*0.3;const days=g.deadline?Math.ceil((new Date(g.deadline)-NOW)/864e5):365;const months=Math.max(1,Math.ceil(days/30));const needed=rem/months;return{id:g.id,name:g.name,icon:g.icon,needed,months,rem,feasible:needed<=disponible/Math.max(active.length,1)*1.2,couldUsePortfolio,portfolioCover:portfolioValue>0?Math.min(100,Math.round(portfolioValue/rem*100)):0};})};};
+
+const healthScore=(txs,goals,holdings=[])=>{const CUR=getCUR();const c=txs.filter(t=>gMonth(t.date)===CUR);const inc=c.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);const sav=c.filter(t=>t.category==="💰 Ahorro").reduce((s,t)=>s+t.amount,0);const exp=c.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);const cuotas=c.filter(t=>t.category==="💳 Cuotas").reduce((s,t)=>s+t.amount,0);const hasPortfolio=holdings.length>0;const s1=Math.min(inc>0?clamp(sav/inc,0,1)*30:0,30);const s2=inc>0&&inc>exp?25:0;const s3=Math.max(0,25-(inc>0?clamp(cuotas/inc,0,1)*100:0));const s4Base=goals.some(g=>g.saved>0)?15:5;const s4=s4Base+(hasPortfolio?5:0);return{score:clamp(Math.round(s1+s2+s3+s4),0,100),items:[{l:"Tasa ahorro",v:s1,m:30},{l:"Balance +",v:s2,m:25},{l:"Sin cuotas",v:s3,m:25},{l:"Metas + inversiones",v:s4,m:20}]};};
+
+const CSS=`@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=DM+Mono:wght@300;400;500&display=swap');*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{background:#07080D;color:#F0F2F7;font-family:'Sora',sans-serif;overflow:hidden;height:100%}::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#3A4255;border-radius:99px}input,select,textarea,button{font-family:inherit}button{cursor:pointer;border:none;background:none}.mono{font-family:'DM Mono',monospace}.up{animation:up .35s cubic-bezier(.16,1,.3,1) both}@keyframes up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}.d1{animation-delay:.05s}.d2{animation-delay:.1s}.d3{animation-delay:.15s}.d4{animation-delay:.2s}.nav{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;font-size:13px;font-weight:500;color:#3A4255;transition:all .18s;width:100%;text-align:left;position:relative}.nav:hover{color:#F0F2F7;background:#111520}.nav.on{color:#C8FF57;background:rgba(200,255,87,.07)}.nav.on::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:60%;background:#C8FF57;border-radius:0 2px 2px 0}.inp{background:#111520;border:1px solid #1C2030;border-radius:10px;padding:10px 13px;font-size:13px;color:#F0F2F7;outline:none;transition:border .15s;width:100%}.inp:focus{border-color:#7CB33A}.inp::placeholder{color:#3A4255}.btn{display:inline-flex;align-items:center;gap:7px;padding:10px 18px;border-radius:10px;font-size:13px;font-weight:600;transition:all .15s;white-space:nowrap}.btn:disabled{opacity:.5;cursor:not-allowed}.bl{background:#C8FF57;color:#07080D}.bl:hover:not(:disabled){background:#A8E030;transform:translateY(-1px);box-shadow:0 4px 20px rgba(200,255,87,.3)}.bg{background:#111520;color:#8892A4;border:1px solid #1C2030}.bg:hover:not(:disabled){background:#1C2030;color:#F0F2F7}.bd{background:rgba(255,77,106,.08);color:#FF4D6A;border:1px solid rgba(255,77,106,.2)}.bd:hover:not(:disabled){background:rgba(255,77,106,.18)}.bsm{padding:6px 12px;font-size:12px;border-radius:8px}.card{background:#0C0E15;border:1px solid #1C2030;border-radius:16px;padding:20px}.csm{border-radius:12px;padding:14px}.tag{display:inline-flex;align-items:center;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:600}.ti{background:rgba(0,229,195,.12);color:#00E5C3}.te{background:rgba(255,77,106,.12);color:#FF4D6A}.ts{background:rgba(77,158,255,.12);color:#4D9EFF}.prog{height:6px;border-radius:3px;background:#111520;overflow:hidden}.progf{height:100%;border-radius:3px;transition:width .7s cubic-bezier(.16,1,.3,1)}.ov{position:fixed;inset:0;background:rgba(0,0,0,.8);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px}.modal{background:#0C0E15;border:1px solid #1C2030;border-radius:20px;padding:28px;width:520px;max-width:100%;max-height:92vh;overflow-y:auto}.tbl{width:100%;border-collapse:collapse}.tbl th{padding:9px 14px;font-size:10px;color:#3A4255;font-weight:600;text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid #1C2030;text-align:left}.tbl td{padding:9px 14px;font-size:13px;border-bottom:1px solid #0E1117;vertical-align:middle}.tbl tr:hover td{background:#111520}.tbl tr:last-child td{border-bottom:none}.toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:12px;font-size:13px;font-weight:500;z-index:999;animation:up .3s ease}.tok{background:rgba(0,229,195,.1);color:#00E5C3;border:1px solid rgba(0,229,195,.3)}.terr{background:rgba(255,77,106,.1);color:#FF4D6A;border:1px solid rgba(255,77,106,.3)}.tinfo{background:rgba(77,158,255,.1);color:#4D9EFF;border:1px solid rgba(77,158,255,.3)}.dots{display:inline-flex;gap:4px;align-items:center}.dots span{width:5px;height:5px;border-radius:50%;background:currentColor;animation:blink 1.2s infinite}.dots span:nth-child(2){animation-delay:.2s}.dots span:nth-child(3){animation-delay:.4s}@keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1}}.dz{border:2px dashed #1C2030;border-radius:14px;padding:36px 24px;text-align:center;transition:all .2s;cursor:pointer}.dz:hover,.dz.ov2{border-color:#C8FF57;background:rgba(200,255,87,.03)}.imgdrop{border:2px dashed #1C2030;border-radius:14px;min-height:180px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;cursor:pointer;transition:all .2s;overflow:hidden}.imgdrop:hover,.imgdrop.ov2{border-color:#A78BFA;background:rgba(167,139,250,.04)}.g2{display:grid;gap:10px;grid-template-columns:1fr 1fr}.g3{display:grid;gap:10px;grid-template-columns:1fr 1fr 1fr}.tabbar{display:flex;gap:3px;background:#111520;padding:4px;border-radius:11px;width:fit-content;flex-wrap:wrap}.tab{padding:7px 15px;border-radius:8px;font-size:12px;font-weight:600;transition:all .15s;color:#3A4255;cursor:pointer}.tab.on{background:#0C0E15;color:#F0F2F7;box-shadow:0 0 0 1px #1C2030}.chip{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:8px;font-size:11px;font-weight:600;background:#111520;border:1px solid #1C2030;color:#8892A4}.sb{background:rgba(200,255,87,.15);color:#C8FF57;border:1px solid rgba(200,255,87,.3)}.buy{background:rgba(0,229,195,.12);color:#00E5C3;border:1px solid rgba(0,229,195,.25)}.hld{background:rgba(255,184,48,.12);color:#FFB830;border:1px solid rgba(255,184,48,.25)}.sel{background:rgba(255,77,106,.12);color:#FF4D6A;border:1px solid rgba(255,77,106,.25)}@media(max-width:768px){.hide-m{display:none!important}.modal{padding:18px;width:100%;border-radius:16px}.card{padding:14px}.kpi-grid{grid-template-columns:1fr 1fr!important}.trend-grid{grid-template-columns:1fr!important}.g2,.g3{grid-template-columns:1fr!important}.tbl td,.tbl th{padding:6px 8px;font-size:11px}.inv-grid{grid-template-columns:1fr!important}}@media(max-width:480px){.kpi-grid{grid-template-columns:1fr!important}}`;
+
+const ic={Grid:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>,Tx:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>,Target:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>,Chart:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>,Import:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,Stock:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>,Salary:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>,Plus:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,X:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,Trash:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>,Refresh:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><path d="M20.5 16a9 9 0 11-2.3-8.7L23 10"/></svg>,Bell:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>,Scan:()=><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 9V5a2 2 0 012-2h4M15 3h4a2 2 0 012 2v4M21 15v4a2 2 0 01-2 2h-4M9 21H5a2 2 0 01-2-2v-4"/><line x1="3" y1="12" x2="21" y2="12"/></svg>,Bolt:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>,Check:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>,Menu:()=><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>};
+
+const Dots=()=><span className="dots"><span/><span/><span/></span>;
+const PH=({title,sub,right})=>(<div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24,flexWrap:"wrap",gap:10}}><div><h1 style={{fontSize:24,fontWeight:800,color:T.white,letterSpacing:"-1px"}}>{title}</h1>{sub&&<div style={{fontSize:12,color:T.muted,marginTop:4}}>{sub}</div>}</div>{right}</div>);
+const CTip=({active,payload,label,dc="ARS"})=>{if(!active||!payload?.length)return null;return <div style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 14px",fontSize:12}}><div style={{color:T.muted,marginBottom:5,fontSize:11}}>{label}</div>{payload.map((p,i)=><div key={i} style={{color:p.color,display:"flex",gap:12,justifyContent:"space-between"}}><span>{p.name}</span><span className="mono">{dc==="USD"?fUSD(p.value):fARS(p.value)}</span></div>)}</div>;};
+function useDsp({displayCurrency,usdRate}){const fmt=useCallback(a=>displayCurrency==="USD"?fUSD(a/usdRate):fARS(a),[displayCurrency,usdRate]);const toDsp=useCallback(a=>displayCurrency==="USD"?a/usdRate:a,[displayCurrency,usdRate]);return{fmt,toDsp};}
+const sigCls=s=>s==="STRONG BUY"?"sb":s==="BUY"?"buy":s==="HOLD"?"hld":"sel";
+function useIsMobile(){const [m,setM]=useState(window.innerWidth<=768);useEffect(()=>{const h=()=>setM(window.innerWidth<=768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);return m;}
+
 export default function App(){
-  const [state,setState] = useState(DEFAULT);
-  const [view,setView] = useState("dashboard");
-  const [ready,setReady] = useState(false);
-  const [toast,setToast] = useState(null);
-  const [sideOpen,setSO] = useState(false);
-  const [scanOpen,setScanOpen] = useState(false); 
-  const [isMobile, setIsMobile] = useState(false);
+  const [state,setState]=useState(DEFAULT);
+  const [view,setView]=useState("dashboard");
+  const [ready,setReady]=useState(false);
+  const [toast,setToast]=useState(null);
+  const [usdLoading,setUL]=useState(false);
+  const [sideOpen,setSO]=useState(false);
+  const isMobile=useIsMobile();
+  useEffect(()=>{hydrate().then(s=>{if(s)setState(p=>({...p,...s}));setReady(true);});},[]);
+  useEffect(()=>{if(ready)persist(state);},[state,ready]);
+  useEffect(()=>{if(!ready)return;setUL(true);fetchUSDOficial().then(r=>{if(r&&r>0)setState(p=>({...p,usdRate:r}));setUL(false);}).catch(()=>setUL(false));},[ready]);
+  const notify=(msg,type="ok")=>{setToast({msg,type});setTimeout(()=>setToast(null),4000);};
+  const update=useCallback(patch=>setState(s=>({...s,...patch})),[]);
+  const navTo=useCallback(id=>{setView(id);setSO(false);},[]);
+  if(!ready)return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:T.bg,color:T.muted,fontFamily:"Sora",fontSize:14,gap:10}}><Dots/>Cargando</div>;
+  if(!state.onboardingDone)return <><style>{CSS}</style><Onboarding update={update} notify={notify}/></>;
+  const pages={dashboard:<Dashboard state={state} update={update} notify={notify} setView={navTo}/>,transactions:<Transactions state={state} update={update} notify={notify}/>,goals:<Goals state={state} update={update} notify={notify}/>,salary:<SalaryModule state={state} update={update} notify={notify}/>,analytics:<Analytics state={state}/>,investments:<Investments state={state} update={update} notify={notify}/>,import:<Import state={state} update={update} notify={notify}/>};
+  const nav=[{id:"dashboard",l:"Dashboard",I:ic.Grid},{id:"transactions",l:"Movimientos",I:ic.Tx},{id:"goals",l:"Metas",I:ic.Target},{id:"salary",l:"Sueldo",I:ic.Salary},{id:"analytics",l:"Analíticas",I:ic.Chart},{id:"investments",l:"Inversiones",I:ic.Stock},{id:"import",l:"Importar",I:ic.Import}];
+  const CUR=getCUR();
+  const alerts=Object.entries(state.budgets||{}).filter(([cat,lim])=>state.transactions.filter(t=>gMonth(t.date)===CUR&&t.category===cat&&t.type==="expense").reduce((s,t)=>s+t.amount,0)>lim*0.8);
 
-  useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth <= 768);
-    checkMobile();
-    window.addEventListener("resize", checkMobile);
-    return () => window.removeEventListener("resize", checkMobile);
-  }, []);
+  const sidebar=<aside style={{width:isMobile?"100%":212,background:T.surface,borderRight:isMobile?"none":`1px solid ${T.border}`,display:"flex",flexDirection:"column",padding:"20px 12px",gap:2,flexShrink:0,...(isMobile?{position:"fixed",top:0,left:0,bottom:0,zIndex:300,width:260,transform:sideOpen?"translateX(0)":"translateX(-100%)",transition:"transform .25s cubic-bezier(.16,1,.3,1)",boxShadow:sideOpen?"8px 0 30px rgba(0,0,0,.6)":"none"}:{})}}><div style={{padding:"4px 10px 20px",display:"flex",alignItems:"center",gap:9,justifyContent:"space-between"}}><div style={{display:"flex",alignItems:"center",gap:9}}><div style={{width:30,height:30,background:T.lime,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>💳</div><div style={{fontSize:14,fontWeight:700,letterSpacing:"-.4px"}}>FinanzasPro</div></div>{isMobile&&<button onClick={()=>setSO(false)} style={{color:T.muted,padding:4}}><ic.X/></button>}</div>{nav.map(({id,l,I})=>(<button key={id} className={`nav${view===id?" on":""}`} onClick={()=>navTo(id)}><I/>{l}{id==="investments"&&state.savedAnalyses?.length>0&&<span style={{marginLeft:"auto",fontSize:10,background:T.raised,padding:"2px 6px",borderRadius:99,color:T.muted}}>{state.savedAnalyses.length}</span>}</button>))}<div style={{flex:1}}/>{alerts.length>0&&<div onClick={()=>navTo("transactions")} style={{background:"rgba(255,184,48,.08)",border:`1px solid rgba(255,184,48,.2)`,borderRadius:10,padding:"9px 12px",cursor:"pointer",marginBottom:8}}><div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:T.amber,fontWeight:600}}><ic.Bell/>{alerts.length} alerta{alerts.length>1?"s":""}</div></div>}<div style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 14px"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}><span style={{fontSize:9,color:T.muted,textTransform:"uppercase",letterSpacing:".7px",fontWeight:600}}>USD Oficial</span>{usdLoading?<Dots/>:<button onClick={()=>{setUL(true);fetchUSDOficial().then(r=>{if(r>0)update({usdRate:r});setUL(false);}).catch(()=>setUL(false));}} style={{fontSize:10,color:T.muted,cursor:"pointer",display:"flex",alignItems:"center",gap:3}}><ic.Refresh/>Auto</button>}</div><input className="mono" style={{background:"transparent",border:"none",outline:"none",fontSize:18,fontWeight:600,color:T.lime,width:"100%"}} value={state.usdRate} onChange={e=>{const v=px(e.target.value);if(v>0)update({usdRate:v});}}/><div style={{display:"flex",gap:5,marginTop:8}}>{["ARS","USD"].map(c=>(<button key={c} onClick={()=>update({displayCurrency:c})} style={{flex:1,padding:"5px 0",borderRadius:6,fontSize:10,fontWeight:600,border:`1px solid ${state.displayCurrency===c?T.lime:T.border}`,background:state.displayCurrency===c?"rgba(200,255,87,.1)":T.surface,color:state.displayCurrency===c?T.lime:T.muted,cursor:"pointer"}}>{c}</button>))}</div></div></aside>;
 
-  // Fix: Hydrate de manera síncrona y segura sin promesas.
-  useEffect(() => { 
-    const savedState = hydrate();
-    if(savedState) setState(p => ({...p,...savedState})); 
-    setReady(true); 
-  }, []);
-  
-  useEffect(() => { if(ready) persist(state); }, [state, ready]);
-  useEffect(() => { if(ready) fetchUSDOficial().then(r => setState(p => ({...p, usdRate:r}))); }, [ready]);
-
-  const notify = (msg, type="ok") => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
-  
-  // Fix: Actualizador blindado que acepta objetos o funciones
-  const update = useCallback((patch) => {
-    setState(s => {
-      const updates = typeof patch === 'function' ? patch(s) : patch;
-      return {...s, ...updates};
-    });
-  }, []);
-
-  if(!ready) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:T.bg,color:T.muted}}>Iniciando FinanzasPro V5...</div>;
-  if(!state.onboardingDone) return <Onboarding update={update} notify={notify}/>;
-
-  const sidebar = (
-    <aside style={{width:isMobile?260:220, background:T.surface, borderRight:`1px solid ${T.border}`, display:"flex", flexDirection:"column", padding:"20px 12px", gap:4, height:"100vh", position:isMobile?"fixed":"relative", left:isMobile && !sideOpen?"-260px":"0", zIndex:300, transition:"left .3s ease"}}>
-      <div style={{padding:"0 10px 20px", fontSize:18, fontWeight:800, color:T.lime}}>💳 FinanzasPro</div>
-      
-      <button className="btn bl" style={{marginBottom:16, justifyContent:"center"}} onClick={()=>{setScanOpen(true); setSO(false);}}>📸 Escáner IA</button>
-
-      {[{id:"dashboard", l:"Patrimonio", I:ic.Grid}, {id:"transactions", l:"Movimientos", I:ic.Tx}, {id:"goals", l:"Metas & Simulador", I:ic.Target}, {id:"investments", l:"Inversiones", I:ic.Stock}].map(n => (
-        <button key={n.id} className={`nav ${view===n.id?"on":""}`} onClick={()=>{setView(n.id);setSO(false)}}><n.I/> {n.l}</button>
-      ))}
-      <div style={{flex:1}}/>
-      <div style={{background:T.raised, padding:14, borderRadius:16, fontSize:10, color:T.muted, border:`1px solid ${T.border}`}}>
-        USD Oficial: <span className="mono" style={{color:T.lime, fontSize:12}}>{fARS(state.usdRate)}</span>
-        <div style={{display:"flex", gap:4, marginTop:10}}>
-          {["ARS","USD"].map(c => (
-            <button key={c} onClick={()=>update({displayCurrency:c})} style={{flex:1, padding:"6px", borderRadius:8, background:state.displayCurrency===c?T.lime:T.bg, color:state.displayCurrency===c?T.bg:T.muted, fontWeight:700}}>{c}</button>
-          ))}
-        </div>
-      </div>
-    </aside>
-  );
-
-  return(
-    <div style={{display:"flex", height:"100vh", background:T.bg, color:T.white}}>
-      <style>{CSS}</style>
-      {isMobile && sideOpen && <div style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.7)", zIndex:299, backdropFilter:"blur(4px)"}} onClick={()=>setSO(false)}/>}
-      {sidebar}
-      <main style={{flex:1, overflow:"auto", padding:isMobile?"76px 16px 20px":"30px 40px"}}>
-        {isMobile && <div style={{position:"fixed", top:0, left:0, right:0, height:60, background:T.surface, display:"flex", alignItems:"center", padding:"0 16px", zIndex:100, borderBottom:`1px solid ${T.border}`} }><button onClick={()=>setSO(true)}><ic.Menu/></button><span style={{marginLeft:12, fontWeight:700}}>FinanzasPro V5</span></div>}
-        
-        {view==="dashboard" && <Dashboard state={state} update={update} notify={notify} setView={setView}/>}
-        {view==="transactions" && <Transactions state={state} update={update} notify={notify}/>}
-        {view==="goals" && <Goals state={state} update={update} notify={notify}/>}
-        {view==="investments" && <Investments state={state} update={update} notify={notify}/>}
-      </main>
-      {scanOpen && <ScannerModal state={state} update={update} notify={notify} close={()=>setScanOpen(false)} />}
-      {toast && <div className="toast up" style={{borderColor:toast.type==="err"?T.red:T.lime}}>{toast.msg}</div>}
-    </div>
-  );
+  return(<div style={{display:"flex",height:"100vh",overflow:"hidden",background:T.bg}}><style>{CSS}</style>{isMobile?<>{sideOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:299}} onClick={()=>setSO(false)}/>}{sidebar}</>:sidebar}{isMobile&&<div style={{position:"fixed",top:0,left:0,right:0,height:52,background:T.surface,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",padding:"0 14px",gap:12,zIndex:100}}><button onClick={()=>setSO(true)} style={{color:T.white,padding:4}}><ic.Menu/></button><div style={{fontSize:14,fontWeight:700}}>FinanzasPro</div><div style={{flex:1}}/><div className="mono" style={{fontSize:11,color:T.lime}}>{state.displayCurrency==="USD"?fUSD(1):fARS(state.usdRate)}</div></div>}<main style={{flex:1,overflow:"auto",padding:isMobile?"66px 14px 20px":"28px 32px"}}>{pages[view]}</main>{toast&&<div className={`toast t${toast.type}`}>{toast.msg}</div>}</div>);
 }
 
-// ==========================================
-// MÓDULO 4: ESCÁNER UNIVERSAL (OCR + LLM)
-// ==========================================
-function ScannerModal({state, update, notify, close}) {
-  const [img, setImg] = useState(null);
-  const [mime, setMime] = useState("");
-  const [status, setStatus] = useState("idle"); 
-  const [result, setResult] = useState(null);
-  const fileRef = useRef();
-
-  const handleFile = (f) => {
-    if(!f) return;
-    const r = new FileReader();
-    r.onload = (e) => { setImg(e.target.result); setMime(f.type); setStatus("idle"); setResult(null); };
-    r.readAsDataURL(f);
-  };
-
-  const analyze = async () => {
-    setStatus("analyzing");
-    const b64 = img.split(",")[1];
-    const prompt = `Analyze this financial app screenshot. Is it a list of 'transactions' or a 'portfolio' of assets?
-    Return ONLY valid JSON:
-    If transactions: {"type": "transactions", "data": [{"date":"YYYY-MM-DD", "description":"Merchant name", "amount":<positive number>, "txType":"expense" or "income", "category":"...best match from predefined list..."}]}
-    If portfolio: {"type": "portfolio", "data": [{"ticker":"BTC or AAPL or MercadoPago", "name":"Bitcoin...", "quantity": <number or 1>, "price": <number>, "totalValue": <number>}]}
-    Predefined categories: ${CATS.join(", ")}. Convert dates to YYYY-MM-DD. Treat salary/deposits as income, purchases as expense.`;
-    
-    const res = await aiVision(b64, mime, prompt);
-    if(res) {
-      try {
-        const parsed = JSON.parse(res);
-        setResult(parsed);
-        setStatus("review");
-      } catch {
-        notify("No se pudo interpretar la imagen", "err"); setStatus("idle");
-      }
-    } else {
-      notify("Fallo en la IA de visión", "err"); setStatus("idle");
-    }
-  };
-
-  const confirm = () => {
-    if(result.type === "transactions") {
-      const newTxs = result.data.map(t => ({id:`m_${uid()}`, date:t.date||todayISO(), description:t.description, amount:t.amount, type:t.txType, category:t.category, currency:"ARS"}));
-      update({transactions: [...state.transactions, ...newTxs]});
-      notify(`${newTxs.length} movimientos importados ✓`);
-    } else if (result.type === "portfolio") {
-      const newAssets = result.data.map(a => {
-        const isCrypto = String(a.ticker).includes("BTC") || String(a.ticker).includes("ETH") || String(a.ticker).includes("USDT");
-        return {
-          id:`h_${uid()}`, type: isCrypto ? "crypto" : String(a.ticker).length <= 5 ? "accion" : "fci", 
-          ticker: a.ticker || "ACTIVO", name: a.name || a.ticker, 
-          quantity: a.quantity || 1, buyPrice: a.price || a.totalValue, totalInvested: a.totalValue || (a.quantity * a.price),
-          currentValue: a.totalValue, currency: "ARS", lastUpdated: todayISO(), buyDate: todayISO(), rate: ""
-        };
-      });
-      update({holdings: [...state.holdings, ...newAssets]});
-      notify(`${newAssets.length} activos importados ✓`);
-    }
-    close();
-  };
-
-  return (
-    <div className="ov" onClick={e=>e.target===e.currentTarget&&close()}>
-      <div className="modal up">
-        <div style={{display:"flex", justifyContent:"space-between", marginBottom:20}}><h3>📸 Escáner IA Universal</h3><button onClick={close}><ic.X/></button></div>
-        
-        {status === "idle" && (
-          <div style={{display:"flex", flexDirection:"column", gap:16}}>
-            <div style={{fontSize:12, color:T.muted}}>Sube capturas de MercadoPago, Ualá, Binance o tu Homebanking. La IA detectará automáticamente si son movimientos o inversiones.</div>
-            <div style={{border:`2px dashed ${T.border}`, padding:"40px 20px", textAlign:"center", borderRadius:16, cursor:"pointer", background:T.raised}} onClick={()=>fileRef.current?.click()}>
-               {img ? <img src={img} alt="preview" style={{maxHeight:150, borderRadius:8, objectFit:"contain"}}/> : <div style={{fontSize:32}}>📁</div>}
-               <div style={{marginTop:10, fontSize:12, fontWeight:600}}>{img ? "Cambiar Imagen" : "Click para subir captura"}</div>
-               <input type="file" ref={fileRef} accept="image/*" style={{display:"none"}} onChange={e=>handleFile(e.target.files[0])}/>
-            </div>
-            {img && <button className="btn bl" style={{justifyContent:"center"}} onClick={analyze}>✨ Analizar Píxeles con IA</button>}
-          </div>
-        )}
-
-        {status === "analyzing" && <div style={{textAlign:"center", padding:"40px", color:T.muted}}><div style={{fontSize:32, marginBottom:16}}>🤖</div>Extrayendo datos financieros... <Dots/></div>}
-
-        {status === "review" && result && (
-          <div className="up">
-            <div style={{background:`${T.blue}22`, color:T.blue, padding:10, borderRadius:8, fontSize:12, marginBottom:16, fontWeight:600}}>
-               Formato detectado: {result.type.toUpperCase()}
-            </div>
-            <div style={{maxHeight:250, overflowY:"auto", background:T.raised, padding:10, borderRadius:12, marginBottom:16}}>
-               {result.type === "transactions" ? result.data.map((t,i) => (
-                 <div key={i} style={{display:"flex", justifyContent:"space-between", fontSize:11, padding:"8px 0", borderBottom:`1px solid ${T.border}`}}>
-                   <div><div style={{fontWeight:600}}>{String(t.description).slice(0,25)}</div><div style={{color:T.muted}}>{t.date} · {t.category}</div></div>
-                   <div className="mono" style={{color:t.txType==="income"?T.teal:T.red}}>{t.txType==="income"?"+":"-"}{fARS(t.amount)}</div>
-                 </div>
-               )) : result.data.map((a,i) => (
-                 <div key={i} style={{display:"flex", justifyContent:"space-between", fontSize:11, padding:"8px 0", borderBottom:`1px solid ${T.border}`}}>
-                   <div><div style={{fontWeight:600}}>{a.ticker}</div><div style={{color:T.muted}}>{a.name} · Cant: {a.quantity}</div></div>
-                   <div className="mono">{fARS(a.totalValue)}</div>
-                 </div>
-               ))}
-            </div>
-            <div style={{display:"flex", gap:10}}>
-              <button className="btn bl" style={{flex:1, justifyContent:"center"}} onClick={confirm}>✓ Guardar Todo</button>
-              <button className="btn bg" onClick={()=>setStatus("idle")}>Cancelar</button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+function Onboarding({update,notify}){
+  const [step,setStep]=useState(0);
+  const [d,setD]=useState({name:"",income:"",incomeCurrency:"ARS",goalName:"",goalAmt:"",goalDate:""});
+  const [ans,setAns]=useState([null,null,null,null]);
+  const STEPS=6;
+  const pickAns=(qi,val)=>{const a=[...ans];a[qi]=val;setAns(a);};
+  const score=ans.reduce((s,v)=>s+(v||0),0);
+  const profile=score<=3?"conservador":score<=7?"moderado":"agresivo";
+  const horizon=ans[3]===0?"3m":ans[3]===1?"3m":ans[3]===2?"1a":"3a";
+  const profileData={conservador:{emoji:"🛡️",label:"Conservador",color:"#4D9EFF",desc:"Priorizás seguridad. Instrumentos recomendados: plazo fijo, FCI T+0, bonos CER.",pct:[70,25,5]},moderado:{emoji:"⚖️",label:"Moderado",color:"#FFB830",desc:"Buscás equilibrio entre riesgo y retorno. Mix de renta fija y variable.",pct:[40,35,25]},agresivo:{emoji:"🚀",label:"Agresivo",color:"#FF4D6A",desc:"Buscás máximo crecimiento. CEDEARs, acciones, ETFs con mayor volatilidad.",pct:[15,25,60]}};
+  const pf=profileData[profile];
+  const QS=[
+    {title:"Experiencia",sub:"¿Cuánto sabés de inversiones?",icon:"📚",opts:[{l:"Nunca invertí",d:"Ni plazo fijo ni fondos",v:0},{l:"Plazo fijo o FCI",d:"Instrumentos básicos",v:1},{l:"Acciones, bonos o CEDEARs",d:"Mercado de capitales",v:2},{l:"Trading activo u opciones",d:"Operaciones avanzadas",v:3}]},
+    {title:"Colchón financiero",sub:"¿Tenés un fondo de emergencia?",icon:"🏦",opts:[{l:"No, vivo al día",d:"Sin ahorro de respaldo",v:0},{l:"Algo, pero no llega a 3 meses",d:"Colchón parcial",v:1},{l:"Sí, 3 a 6 meses cubiertos",d:"Buen respaldo",v:2},{l:"Más de 6 meses",d:"Muy sólido",v:3}]},
+    {title:"Tolerancia al riesgo",sub:"Si tu inversión baja 25% en un mes...",icon:"📉",opts:[{l:"Vendo todo inmediatamente",d:"No puedo tolerar pérdidas",v:0},{l:"Vendo una parte",d:"Bajo exposición",v:1},{l:"No toco nada, espero",d:"Confío en la recuperación",v:2},{l:"Compro más aprovechando",d:"Oportunidad en la caída",v:3}]},
+    {title:"Horizonte temporal",sub:"¿Cuándo vas a necesitar la plata?",icon:"⏳",opts:[{l:"Menos de 6 meses",d:"Muy corto plazo",v:0},{l:"6 meses a 1 año",d:"Corto plazo",v:1},{l:"1 a 3 años",d:"Mediano plazo",v:2},{l:"Más de 3 años",d:"Largo plazo",v:3}]}
+  ];
+  const finish=()=>{const rawBase=px(d.income);const base=d.incomeCurrency==="USD"?rawBase*1350:rawBase;const CUR=getCUR();const patch={onboardingDone:true,riskProfile:{risk:profile,horizon,monthlyIncome:base,incomeCurrency:d.incomeCurrency,incomeRaw:rawBase,score,answers:ans},lastSalaryBase:base,salaries:base>0?[{month:CUR,base,extras:[]}]:[]};if(d.goalName&&d.goalAmt)patch.goals=[{id:`g_${uid()}`,name:d.goalName,target:px(d.goalAmt),saved:0,icon:"🎯",deadline:d.goalDate,createdAt:todayISO()}];update(patch);notify("¡Todo listo! 🎉");};
+  const canNext=step===0?true:step>=1&&step<=4?ans[step-1]!==null:true;
+  return(<div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:T.bg,padding:16,overflow:"auto"}}><div style={{width:480,maxWidth:"100%",background:T.surface,borderRadius:24,border:`1px solid ${T.border}`,padding:"clamp(20px,5vw,40px)"}}><div style={{display:"flex",gap:4,marginBottom:28}}>{Array.from({length:STEPS}).map((_,i)=><div key={i} style={{flex:1,height:3,borderRadius:3,background:i<=step?T.lime:T.raised,transition:"background .3s"}}/>)}</div>
+  {step===0&&<><div style={{fontSize:22,fontWeight:800,marginBottom:6,letterSpacing:"-.5px"}}>Bienvenido a FinanzasPro</div><div style={{fontSize:13,color:T.muted,marginBottom:24}}>Tomá el control de tu dinero</div><div style={{display:"flex",flexDirection:"column",gap:12}}><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tu nombre (opcional)</label><input className="inp" placeholder="ej: Martín" value={d.name} onChange={e=>setD(p=>({...p,name:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Sueldo neto mensual</label><div style={{display:"flex",gap:8}}><input className="inp" style={{flex:1}} placeholder={d.incomeCurrency==="ARS"?"ej: 800000":"ej: 1200"} value={d.income} onChange={e=>setD(p=>({...p,income:e.target.value}))}/><div style={{display:"flex",borderRadius:10,overflow:"hidden",border:`1px solid ${T.border}`,flexShrink:0}}>{["ARS","USD"].map(c=><button key={c} onClick={()=>setD(p=>({...p,incomeCurrency:c}))} style={{padding:"8px 12px",fontSize:12,fontWeight:600,background:d.incomeCurrency===c?"rgba(200,255,87,.15)":T.raised,color:d.incomeCurrency===c?T.lime:T.muted,border:"none",cursor:"pointer",transition:"all .15s"}}>{c}</button>)}</div></div></div></div></>}
+  {step>=1&&step<=4&&<><div style={{fontSize:28,marginBottom:6}}>{QS[step-1].icon}</div><div style={{fontSize:22,fontWeight:800,marginBottom:4,letterSpacing:"-.5px"}}>{QS[step-1].title}</div><div style={{fontSize:13,color:T.muted,marginBottom:20}}>{QS[step-1].sub}</div><div style={{display:"flex",flexDirection:"column",gap:8}}>{QS[step-1].opts.map(o=><button key={o.v} onClick={()=>pickAns(step-1,o.v)} style={{display:"block",width:"100%",padding:"13px 16px",borderRadius:12,border:`1.5px solid ${ans[step-1]===o.v?T.lime:T.border}`,background:ans[step-1]===o.v?"rgba(200,255,87,.08)":T.raised,textAlign:"left",cursor:"pointer",transition:"all .15s"}}><div style={{fontSize:13,fontWeight:600,color:ans[step-1]===o.v?T.lime:T.white}}>{o.l}</div><div style={{fontSize:11,color:T.muted,marginTop:2}}>{o.d}</div></button>)}</div></>}
+  {step===5&&<><div style={{textAlign:"center",marginBottom:24}}><div style={{fontSize:48,marginBottom:8}}>{pf.emoji}</div><div style={{fontSize:24,fontWeight:800,letterSpacing:"-.5px",color:pf.color}}>{pf.label}</div><div style={{fontSize:13,color:T.muted,marginTop:6,lineHeight:1.6}}>{pf.desc}</div><div style={{display:"flex",justifyContent:"center",gap:6,marginTop:16}}>{[{l:"Renta fija",p:pf.pct[0],c:"#4D9EFF"},{l:"Mixto",p:pf.pct[1],c:"#FFB830"},{l:"Renta variable",p:pf.pct[2],c:"#FF4D6A"}].map(s=><div key={s.l} style={{background:T.raised,borderRadius:10,padding:"10px 14px",textAlign:"center",minWidth:80}}><div className="mono" style={{fontSize:18,fontWeight:700,color:s.c}}>{s.p}%</div><div style={{fontSize:10,color:T.muted,marginTop:3}}>{s.l}</div></div>)}</div><div className="mono" style={{fontSize:11,color:T.muted,marginTop:12}}>Score: {score}/12 · Horizonte: {horizon}</div></div><div style={{borderTop:`1px solid ${T.border}`,paddingTop:20}}><div style={{fontSize:16,fontWeight:700,marginBottom:4}}>Primera meta <span style={{fontSize:12,color:T.muted,fontWeight:400}}>(opcional)</span></div><div className="g2" style={{marginTop:12}}><div style={{gridColumn:"1/-1"}}><input className="inp" placeholder="ej: Viaje a Europa" value={d.goalName} onChange={e=>setD(p=>({...p,goalName:e.target.value}))}/></div><input className="inp" placeholder="Monto ARS" value={d.goalAmt} onChange={e=>setD(p=>({...p,goalAmt:e.target.value}))}/><input type="date" className="inp" value={d.goalDate} onChange={e=>setD(p=>({...p,goalDate:e.target.value}))}/></div></div></>}
+  <div style={{display:"flex",gap:10,marginTop:28}}>{step>0&&<button className="btn bg" style={{flex:.4,justifyContent:"center"}} onClick={()=>setStep(s=>s-1)}>← Atrás</button>}<button className="btn bl" style={{flex:1,justifyContent:"center"}} disabled={!canNext} onClick={step<5?()=>setStep(s=>s+1):finish}>{step===5?"Empezar →":"Continuar →"}</button></div>{step===5&&<button onClick={finish} style={{display:"block",margin:"12px auto 0",background:"none",border:"none",color:T.muted,fontSize:12,cursor:"pointer",textDecoration:"underline"}}>Saltear meta</button>}</div></div>);
 }
 
-// ==========================================
-// MÓDULO 5: DASHBOARD (Net Worth & Score)
-// ==========================================
-function Dashboard({state, update, notify, setView}){
-  const {transactions, goals, holdings=[], displayCurrency, usdRate}=state;
+function Dashboard({state,update,notify,setView}){
+  const {transactions,goals,budgets,weeklyInsight,weeklyInsightDate,salaries}=state;
+  const {fmt,toDsp}=useDsp(state);
   const [loadingIns,setLI]=useState(false);
-  
-  const fmt = useCallback(a => displayCurrency==="USD" ? fUSD(a/usdRate) : fARS(a), [displayCurrency, usdRate]);
+  const isMobile=useIsMobile();
+  const NOW=getNow();const CUR=getCUR();
+  const cur=transactions.filter(t=>gMonth(t.date)===CUR);
+  const prevM=(()=>{const d=new Date(NOW.getFullYear(),NOW.getMonth()-1,1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;})();
+  const prev=transactions.filter(t=>gMonth(t.date)===prevM);
+  const inc=cur.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
+  const exp=cur.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
+  const pExp=prev.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
+  const delta=pExp>0?((exp-pExp)/pExp*100).toFixed(1):null;
+  const salary=getSalaryTotal(salaries);
+  const {score,items}=healthScore(transactions,goals,state.holdings||[]);
+  const sc=score>=70?T.lime:score>=45?T.amber:T.red;
+  const {disponible,perGoal}=goalPlan(goals,salaries,transactions,state.holdings||[]);
+  const alerts=Object.entries(budgets||{}).filter(([cat,lim])=>cur.filter(t=>t.category===cat&&t.type==="expense").reduce((s,t)=>s+t.amount,0)>lim*0.8);
+  const trend=Array.from({length:6},(_,i)=>{const d=new Date(NOW.getFullYear(),NOW.getMonth()-5+i,1);const m=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;const txs=transactions.filter(t=>gMonth(t.date)===m);return{name:MOS[d.getMonth()],Gastos:toDsp(txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0)),Ingresos:toDsp(txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0))};});
+  const cm={};cur.filter(t=>t.type==="expense").forEach(t=>{cm[t.category]=(cm[t.category]||0)+t.amount;});
+  const catData=Object.entries(cm).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([k,v],i)=>({name:k.split(" ").slice(1).join(" "),value:toDsp(v),color:CPAL[i]}));
+  const recent=[...transactions].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,6);
+  const holdings=state.holdings||[];
+  const portfolioValue=holdings.reduce((s,h)=>s+(h.currentValue||h.totalInvested||0),0);
+  const portfolioInvested=holdings.reduce((s,h)=>s+(h.totalInvested||0),0);
+  const portfolioPnL=portfolioValue-portfolioInvested;
+  const kpis=[{l:"Sueldo del mes",v:salary>0?fmt(salary):"-",c:T.lime,i:"💵",sub:salary>0?"Registrado":"Registrá tu sueldo"},{l:"Ingresos totales",v:fmt(inc),c:T.teal,i:"📥",sub:"Todos los ingresos"},{l:"Gastos",v:fmt(exp),c:T.red,i:"💸",sub:delta?`${delta>0?"+":""}${delta}% vs mes ant.`:"-"},{l:"Balance libre",v:fmt(inc-exp),c:(inc-exp)>=0?T.lime:T.red,i:"⚖️",sub:(inc-exp)>=0?"✓ Superávit":"⚠ Déficit"},{l:"Portfolio",v:fmt(portfolioValue),c:portfolioPnL>=0?T.blue:T.amber,i:"📊",sub:portfolioValue>0?`P&L: ${portfolioPnL>=0?"+":""}${fARS(portfolioPnL)}`:"Sin inversiones"}];
+  const refreshInsight=async()=>{if(transactions.length<3)return notify("Necesitás más transacciones","info");setLI(true);const ins=await genWeeklyInsight(transactions,state.usdRate,state.holdings||[]);if(ins){update({weeklyInsight:ins,weeklyInsightDate:todayISO()});notify("Resumen actualizado ✓");}else notify("Error — reintentá","err");setLI(false);};
+  return(<div className="up"><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:22,flexWrap:"wrap",gap:8}}><div><div style={{fontSize:11,color:T.muted,textTransform:"uppercase",letterSpacing:".8px",marginBottom:5}}>{NOW.toLocaleDateString("es-AR",{weekday:"long",day:"numeric",month:"long"})}</div><h1 style={{fontSize:isMobile?22:28,fontWeight:800,letterSpacing:"-1px"}}>Dashboard</h1></div>{alerts.length>0&&<div style={{background:"rgba(255,184,48,.08)",border:`1px solid rgba(255,184,48,.25)`,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:8,fontSize:12,color:T.amber,cursor:"pointer"}} onClick={()=>setView("transactions")}><ic.Bell/>{alerts.length} alerta{alerts.length>1?"s":""}</div>}</div>
+  <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:14}}>{kpis.map((k,i)=>(<div key={i} className={`card csm up d${i+1}`} style={{cursor:i===0?"pointer":"default"}} onClick={i===0?()=>setView("salary"):undefined}><div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".6px",fontWeight:600}}>{k.l}</span><span style={{fontSize:18}}>{k.i}</span></div><div className="mono" title={k.v} style={{fontSize:isMobile?16:20,fontWeight:500,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div><div style={{fontSize:11,color:T.muted,marginTop:4}}>{k.sub}</div></div>))}</div>
+  {perGoal.length>0&&(<div className="card up d2" style={{marginBottom:14,borderColor:"rgba(200,255,87,.18)"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}><div style={{fontSize:13,fontWeight:700}}>💡 Plan de ahorro para metas</div><div style={{fontSize:11,color:T.muted}}>Disponible: <span className="mono" style={{color:disponible>0?T.lime:T.red}}>{fmt(disponible)}</span></div></div><div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{perGoal.map(g=>(<div key={g.id} style={{flex:1,minWidth:160,background:T.raised,borderRadius:10,padding:"10px 14px",border:`1px solid ${g.feasible?T.border:"rgba(255,184,48,.25)"}`}}><div style={{fontSize:12,marginBottom:4}}>{g.icon} {g.name}</div><div className="mono" style={{fontSize:16,fontWeight:600,color:g.feasible?T.lime:T.amber}}>{fmt(g.needed)}<span style={{fontSize:11,fontWeight:400,color:T.muted}}>/mes</span></div><div style={{fontSize:10,color:T.muted,marginTop:2}}>{g.months} mes{g.months>1?"es":""} · Falta {fmt(g.rem)}</div>{!g.feasible&&<div style={{fontSize:10,color:T.amber,marginTop:3}}>⚠ Ajustá el plazo</div>}{g.couldUsePortfolio&&<div style={{fontSize:10,color:T.blue,marginTop:3}}>📊 Portfolio cubre {g.portfolioCover}% de esta meta</div>}</div>))}</div></div>)}
+  <div className="card up d2" style={{marginBottom:14,borderColor:weeklyInsight?"rgba(200,255,87,.15)":T.border}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}><div style={{display:"flex",alignItems:"center",gap:10}}><div style={{width:30,height:30,background:"rgba(167,139,250,.1)",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center"}}><ic.Bolt/></div><div><div style={{fontSize:12,fontWeight:700}}>Resumen semanal con IA</div>{weeklyInsightDate&&<div style={{fontSize:10,color:T.muted}}>{weeklyInsightDate}</div>}</div></div><button className="btn bg bsm" onClick={refreshInsight} disabled={loadingIns}>{loadingIns?<Dots/>:<><ic.Refresh/>{weeklyInsight?"Actualizar":"Generar"}</>}</button></div>{weeklyInsight&&<div style={{marginTop:12,padding:"12px 14px",background:T.raised,borderRadius:10}}><div style={{fontSize:14,fontWeight:700,marginBottom:4}}>{weeklyInsight.headline}</div><div style={{fontSize:12,color:T.mid,lineHeight:1.6,marginBottom:8}}>{weeklyInsight.detail}</div><div style={{background:"rgba(200,255,87,.08)",border:`1px solid rgba(200,255,87,.2)`,borderRadius:7,padding:"6px 12px",fontSize:11,color:T.lime,fontWeight:600,display:"inline-block"}}>💡 {weeklyInsight.action}</div></div>}{!weeklyInsight&&<div style={{marginTop:10,fontSize:12,color:T.muted,textAlign:"center",padding:"6px 0"}}>Generá tu resumen semanal — IA detecta tendencias y sugiere acciones</div>}</div>
+  <div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1.8fr .8fr",gap:14,marginBottom:14}}><div className="card up d2"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Últimos 6 meses</div><div style={{width:"100%",minWidth:0,overflow:"hidden"}}><ResponsiveContainer width="100%" height={175}><AreaChart data={trend}><defs><linearGradient id="gi" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={T.teal} stopOpacity={.25}/><stop offset="95%" stopColor={T.teal} stopOpacity={0}/></linearGradient><linearGradient id="ge" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={T.red} stopOpacity={.25}/><stop offset="95%" stopColor={T.red} stopOpacity={0}/></linearGradient></defs><CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" tick={{fill:T.muted,fontSize:10}} axisLine={false} tickLine={false}/><YAxis tick={{fill:T.muted,fontSize:9}} axisLine={false} tickLine={false} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:v}/><Tooltip content={<CTip dc={state.displayCurrency}/>}/><Area type="monotone" dataKey="Ingresos" stroke={T.teal} fill="url(#gi)" strokeWidth={2}/><Area type="monotone" dataKey="Gastos" stroke={T.red} fill="url(#ge)" strokeWidth={2}/></AreaChart></ResponsiveContainer></div></div><div className="card up d3" style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12}}><div style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".8px",fontWeight:600}}>Score financiero</div><svg width={100} height={100} viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke={T.raised} strokeWidth="7"/><circle cx="50" cy="50" r="40" fill="none" stroke={sc} strokeWidth="7" strokeDasharray={`${(score/100)*251} 251`} strokeDashoffset="63" strokeLinecap="round" style={{transition:"stroke-dasharray .8s",filter:`drop-shadow(0 0 8px ${sc}66)`}}/><text x="50" y="46" textAnchor="middle" fill={sc} fontSize="26" fontWeight="700" fontFamily="'DM Mono',monospace">{score}</text><text x="50" y="60" textAnchor="middle" fill={T.muted} fontSize="9" fontFamily="Sora">/100</text></svg>{items.map((it,i)=>(<div key={i} style={{width:"100%"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:T.muted,marginBottom:3}}><span>{it.l}</span><span className="mono">{it.v.toFixed(0)}/{it.m}</span></div><div className="prog"><div className="progf" style={{width:`${(it.v/it.m)*100}%`,background:sc}}/></div></div>))}</div></div>
+  <div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}><div className="card up d3"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Últimos movimientos</div>{recent.length===0?<div style={{color:T.muted,fontSize:13,textAlign:"center",padding:"20px 0"}}>Sin movimientos aún</div>:recent.map(t=>(<div key={t.id} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.ink}`}}><div style={{width:32,height:32,borderRadius:9,background:T.raised,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>{t.category?.split(" ")[0]||"💳"}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</div><div style={{fontSize:10,color:T.muted,marginTop:1}}>{t.date}</div></div><div className="mono" style={{fontSize:12,fontWeight:500,color:t.type==="income"?T.teal:T.red,flexShrink:0}}>{t.type==="income"?"+":"-"}{fmt(t.amount)}</div></div>))}</div><div style={{display:"flex",flexDirection:"column",gap:12}}><div className="card csm up d4"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><div style={{fontSize:12,fontWeight:600,color:T.mid}}>Metas activas</div><button className="btn bg bsm" style={{fontSize:10,padding:"4px 10px"}} onClick={()=>setView("goals")}>Ver →</button></div>{goals.filter(g=>g.saved<g.target).length===0?<div style={{color:T.muted,fontSize:12,textAlign:"center",padding:"10px 0"}}>Sin metas — <button onClick={()=>setView("goals")} style={{color:T.lime,background:"none",border:"none",cursor:"pointer",fontSize:12}}>Crear →</button></div>:goals.filter(g=>g.saved<g.target).slice(0,4).map(g=>{const pct=clamp((g.saved/g.target)*100,0,100);return<div key={g.id} style={{marginBottom:9}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:12}}>{g.icon} {g.name}</span><span className="mono" style={{fontSize:10,color:T.muted}}>{pct.toFixed(0)}%</span></div><div className="prog"><div className="progf" style={{width:`${pct}%`,background:pct>=100?T.lime:pct>=60?T.blue:T.amber}}/></div></div>;})}</div>{catData.length>0&&<div className="card csm up"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:8}}>Gastos este mes</div><div style={{display:"flex",gap:10,alignItems:"center"}}><div style={{width:80,minWidth:0,overflow:"hidden"}}><ResponsiveContainer width={80} height={80}><PieChart><Pie data={catData} cx="50%" cy="50%" innerRadius={22} outerRadius={36} dataKey="value" stroke="none">{catData.map((c,i)=><Cell key={i} fill={c.color}/>)}</Pie></PieChart></ResponsiveContainer></div><div style={{flex:1,minWidth:0}}>{catData.slice(0,4).map((c,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:6,fontSize:10,color:T.muted,marginBottom:4}}><div style={{width:7,height:7,borderRadius:2,background:c.color,flexShrink:0}}/><span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name}</span></div>)}</div></div></div>}</div></div></div>);
+}
 
-  // Patrimonio Neto
-  const portVal = holdings.reduce((s,h) => s + (h.currentValue || h.totalInvested || 0), 0);
-  const totalInc = transactions.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0);
-  const totalExp = transactions.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
-  const cash = totalInc - totalExp;
-  const netWorth = cash + portVal;
+function SalaryModule({state,update,notify}){
+  const {salaries=[],transactions}=state;
+  const {fmt}=useDsp(state);
+  const NOW=getNow();const CUR=getCUR();
+  const [form,setForm]=useState({base:"",month:CUR});
+  const [ef,setEF]=useState({desc:"",amt:""});
+  const [addingE,setAE]=useState(null);
+  const totalCur=getSalaryTotal(salaries);
+  const curExp=transactions.filter(t=>gMonth(t.date)===CUR&&t.type==="expense").reduce((s,t)=>s+t.amount,0);
+  const disponible=Math.max(0,totalCur-curExp);
+  const curSal=salaries.find(s=>s.month===form.month);
+  const saveSalary=()=>{const base=Math.abs(px(form.base));if(!base)return notify("Ingresá un monto","err");const exists=salaries.find(s=>s.month===form.month);const updated=exists?salaries.map(s=>s.month===form.month?{...s,base}:s):[...salaries,{month:form.month,base,extras:[]}];const existingTx=transactions.find(t=>t.type==="income"&&gMonth(t.date)===form.month&&t.source==="salary");let txList=transactions;if(existingTx){txList=txList.map(t=>t.id===existingTx.id?{...t,amount:base,description:`Sueldo ${form.month}`}:t);}else{txList=[...txList,{id:`sal_${uid()}`,date:form.month+"-01",description:`Sueldo ${form.month}`,amount:base,type:"income",category:"❓ Otros",currency:"ARS",source:"salary"}];}update({salaries:updated,lastSalaryBase:base,transactions:txList});notify(curSal?"Sueldo actualizado ✓":"Sueldo registrado ✓");};
+  const addExtra=(month)=>{const amt=Math.abs(px(ef.amt));if(!ef.desc||!amt)return notify("Completá descripción y monto","err");const updated=salaries.map(s=>s.month===month?{...s,extras:[...(s.extras||[]),{id:`e_${uid()}`,desc:ef.desc,amt}]}:s);const newTx={id:`ex_${uid()}`,date:month+"-15",description:ef.desc,amount:amt,type:"income",category:"❓ Otros",currency:"ARS",source:"extra"};update({salaries:updated,transactions:[...transactions,newTx]});setEF({desc:"",amt:""});setAE(null);notify("Ingreso extra agregado ✓");};
+  const delExtra=(month,id)=>{update({salaries:salaries.map(s=>s.month===month?{...s,extras:(s.extras||[]).filter(e=>e.id!==id)}:s)});notify("Eliminado","err");};
+  const hist=Array.from({length:6},(_,i)=>{const d=new Date(NOW.getFullYear(),NOW.getMonth()-5+i,1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;});
+  const pVal=(state.holdings||[]).reduce((s,h)=>s+(h.currentValue||h.totalInvested||0),0);
+  return(<div className="up"><PH title="Sueldo e ingresos" sub="Registrá tu sueldo y agregá ingresos extra"/><div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:12,marginBottom:18}}>{[{l:"Sueldo base",v:fmt(salaries.find(s=>s.month===CUR)?.base||0),c:T.lime,i:"💵"},{l:"Ingresos extra",v:fmt((salaries.find(s=>s.month===CUR)?.extras||[]).reduce((s,e)=>s+e.amt,0)),c:T.blue,i:"💼"},{l:"Disponible libre",v:fmt(disponible),c:disponible>0?T.teal:T.red,i:"🆓"},{l:"Portfolio",v:fmt(pVal),c:T.blue,i:"📊"}].map((k,i)=>(<div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".6px",fontWeight:600}}>{k.l}</span><span style={{fontSize:18}}>{k.i}</span></div><div className="mono" title={k.v} style={{fontSize:20,fontWeight:500,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div><div style={{fontSize:10,color:T.muted,marginTop:3}}>{CUR}</div></div>))}</div>
+  <div className="card" style={{marginBottom:14}}><div style={{fontSize:13,fontWeight:700,marginBottom:14}}>📅 Registrar sueldo</div><div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}><div style={{flex:1,minWidth:130}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Mes</label><select className="inp" value={form.month} onChange={e=>setForm(f=>({...f,month:e.target.value}))}>{hist.map(m=><option key={m}>{m}</option>)}</select></div><div style={{flex:1,minWidth:150}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Sueldo neto (ARS)</label><input className="inp" placeholder={state.lastSalaryBase?String(state.lastSalaryBase):"800000"} value={form.base} onChange={e=>setForm(f=>({...f,base:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&saveSalary()}/></div><button className="btn bl" onClick={saveSalary}><ic.Refresh/>{curSal?"Actualizar":"Registrar"}</button></div>{state.lastSalaryBase>0&&!curSal&&<div style={{marginTop:10,fontSize:11,color:T.muted}}>💡 Último sueldo: <span className="mono" style={{color:T.mid}}>{fmt(state.lastSalaryBase)}</span></div>}</div>
+  <div className="card" style={{padding:0,overflow:"auto"}}><div style={{padding:"14px 18px",borderBottom:`1px solid ${T.border}`,fontSize:13,fontWeight:700}}>Historial de ingresos</div><table className="tbl"><thead><tr><th>Mes</th><th>Sueldo base</th><th>Extras</th><th>Total</th><th></th></tr></thead><tbody>{hist.slice().reverse().map(m=>{const sal=salaries.find(s=>s.month===m);const base=sal?.base||0;const exT=(sal?.extras||[]).reduce((s,e)=>s+e.amt,0);return(<tr key={m}><td className="mono" style={{fontSize:12,color:T.muted}}>{m}</td><td className="mono" style={{color:base>0?T.white:T.muted}}>{base>0?fmt(base):"—"}</td><td>{(sal?.extras||[]).length===0?<span style={{color:T.muted,fontSize:12}}>—</span>:<div style={{display:"flex",flexDirection:"column",gap:3}}>{(sal?.extras||[]).map(e=>(<div key={e.id} style={{display:"flex",gap:8,alignItems:"center"}}><span className="mono" style={{fontSize:11,color:T.blue}}>+{fmt(e.amt)}</span><span style={{fontSize:11,color:T.muted}}>{e.desc}</span><button className="btn bd bsm" style={{padding:"2px 6px",fontSize:10}} onClick={()=>delExtra(m,e.id)}><ic.Trash/></button></div>))}</div>}</td><td className="mono" style={{fontWeight:600,color:base+exT>0?T.lime:T.muted}}>{base+exT>0?fmt(base+exT):"—"}</td><td>{addingE===m?<div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}><input className="inp" style={{width:130,fontSize:12,padding:"6px 10px"}} placeholder="Descripción" value={ef.desc} onChange={e=>setEF(f=>({...f,desc:e.target.value}))} autoFocus/><input className="inp" style={{width:100,fontSize:12,padding:"6px 10px"}} placeholder="Monto ARS" value={ef.amt} onChange={e=>setEF(f=>({...f,amt:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&addExtra(m)}/><button className="btn bl bsm" onClick={()=>addExtra(m)}>+</button><button className="btn bg bsm" onClick={()=>{setAE(null);setEF({desc:"",amt:""});}}>✕</button></div>:<button className="btn bg bsm" onClick={()=>{setAE(m);if(!sal)setForm(f=>({...f,month:m}));}}><ic.Plus/> Extra</button>}</td></tr>);})}</tbody></table></div></div>);
+}
 
-  // Calculadora de Score Financiero (V5)
-  const calcScore = () => {
-     let score = 0;
-     const curMonthTxs = transactions.filter(t=>gMonth(t.date)===getCUR());
-     const mInc = curMonthTxs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
-     const mExp = curMonthTxs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
-     
-     // 1. Ahorro (30%)
-     const savRate = mInc > 0 ? ((mInc-mExp)/mInc) : 0;
-     score += clamp(savRate * 150, 0, 30);
-     
-     // 2. Diversificación (30%)
-     const assetTypes = new Set(holdings.map(h=>h.type)).size;
-     score += clamp(assetTypes * 10, 0, 30);
-     
-     // 3. Liquidez (20%)
-     const liqRatio = mExp > 0 ? (cash / mExp) : 1;
-     score += clamp(liqRatio * 20, 0, 20);
-     
-     // 4. Riesgo (20%)
-     const cryptoVal = holdings.filter(h=>h.type==="crypto").reduce((s,h)=>s+(h.currentValue||0),0);
-     const riskRatio = portVal > 0 ? (cryptoVal / portVal) : 0;
-     score += riskRatio > 0.5 ? 10 : 20; 
-     
-     return Math.round(score);
-  };
-  const finalScore = calcScore();
-
-  const genInsight = async () => {
-    setLI(true);
-    const prompt = `Data: NetWorth ${netWorth}, Portfolio ${portVal}, Cash ${cash}. Goal count: ${goals.length}. Score: ${finalScore}/100. Return 1 short Spanish financial tip or warning based on these metrics.`;
-    const res = await ai(prompt);
-    if(res) {
-      update({weeklyInsight: {headline: "Recomendación Personalizada", detail: res}});
-      notify("Insight IA Generado ✓");
-    } else {
-      notify("Error conectando con la IA", "err");
+function Transactions({state,update,notify}){
+  const {transactions,budgets,usdRate}=state;
+  const {fmt}=useDsp(state);
+  const CUR=getCUR();
+  const [showAdd,setSA]=useState(false);
+  const [editTx,setETx]=useState(null);
+  const [showBud,setSB]=useState(false);
+  const [filter,setFilter]=useState({month:"",type:"",cat:""});
+  const [form,setForm]=useState({date:todayISO(),description:"",amount:"",type:"expense",category:"❓ Otros",currency:"ARS"});
+  const [editCat,setEC]=useState(null);
+  const [bf,setBF]=useState({category:CATS[0],limit:""});
+  const rows=useMemo(()=>transactions.filter(t=>{if(filter.month&&gMonth(t.date)!==filter.month)return false;if(filter.type&&t.type!==filter.type)return false;if(filter.cat&&t.category!==filter.cat)return false;return true;}).sort((a,b)=>new Date(b.date)-new Date(a.date)),[transactions,filter]);
+  const cur=transactions.filter(t=>gMonth(t.date)===CUR);
+  const months=[...new Set(transactions.map(t=>gMonth(t.date)))].sort().reverse();
+  const saveTx=()=>{
+    if(!form.description||!form.amount)return notify("Completá descripción y monto","err");
+    const ars=Math.abs(px(form.amount))*(form.currency==="USD"?usdRate:1);
+    if(ars<=0)return notify("Monto inválido","err");
+    if(editTx){
+      update({transactions:transactions.map(t=>t.id===editTx?{...t,...form,amount:ars}:t)});
+      setETx(null);notify("Movimiento actualizado ✓");
+    }else{
+      update({transactions:[...transactions,{...form,id:`m_${uid()}`,amount:ars,source:"manual"}]});
+      notify("Movimiento agregado ✓");
     }
-    setLI(false);
+    setForm({date:todayISO(),description:"",amount:"",type:"expense",category:"❓ Otros",currency:"ARS"});
+    setSA(false);
   };
-
-  return(
-    <div className="up">
-      <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-end", marginBottom:24, flexWrap:"wrap"}}>
-        <div>
-          <div style={{fontSize:12, color:T.muted, textTransform:"uppercase", letterSpacing:"1px", marginBottom:4}}>Patrimonio Neto (Net Worth)</div>
-          <div style={{fontSize:36, fontWeight:800, color:T.lime, letterSpacing:"-1.5px"}}>{fmt(netWorth)}</div>
-        </div>
-      </div>
-
-      <div className="kpi-grid" style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:24}}>
-         <div className="card up">
-           <div style={{fontSize:10, color:T.muted, marginBottom:8}}>INVERSIONES</div>
-           <div className="mono" style={{fontSize:18, fontWeight:700}}>{fmt(portVal)}</div>
-           <div style={{fontSize:10, color:T.teal, marginTop:4}}>Representa el {netWorth>0 ? ((portVal/netWorth)*100).toFixed(0) : 0}% de tu capital</div>
-         </div>
-         <div className="card up">
-           <div style={{fontSize:10, color:T.muted, marginBottom:8}}>EFECTIVO / CAJA</div>
-           <div className="mono" style={{fontSize:18, fontWeight:700}}>{fmt(cash)}</div>
-         </div>
-         <div className="card up" style={{borderColor:finalScore>=70?T.lime:finalScore>=40?T.amber:T.red}}>
-           <div style={{fontSize:10, color:T.muted, marginBottom:8}}>HEALTH SCORE</div>
-           <div className="mono" style={{fontSize:18, fontWeight:700, color:finalScore>=70?T.lime:finalScore>=40?T.amber:T.red}}>{finalScore} / 100</div>
-         </div>
-      </div>
-
-      <div className="g2">
-        <div className="card up">
-          <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16}}>
-            <h3 style={{fontSize:14}}>Vigilancia de Metas</h3>
-            <button className="btn bg bsm" style={{padding:"4px 8px"}} onClick={()=>setView("goals")}>Ver todas</button>
-          </div>
-          <div style={{display:"flex", flexDirection:"column", gap:14}}>
-            {goals.filter(g => g.saved < g.target).slice(0,3).map(g => {
-              const linkedVal = holdings.filter(h => h.goalId === g.id).reduce((s,h) => s + (h.currentValue || h.totalInvested || 0), 0);
-              const total = g.saved + linkedVal;
-              const pct = clamp((total / g.target) * 100, 0, 100);
-              return (
-                <div key={g.id}>
-                  <div style={{display:"flex", justifyContent:"space-between", fontSize:11, marginBottom:6}}>
-                    <span>{g.icon} {g.name}</span>
-                    <span className="mono" style={{color:pct>=100?T.lime:T.white}}>{pct.toFixed(0)}%</span>
-                  </div>
-                  <div className="prog"><div className="progf" style={{width:`${pct}%`, background:pct>=100?T.lime:T.blue}}/></div>
-                </div>
-              );
-            })}
-            {goals.length===0 && <div style={{fontSize:12, color:T.muted}}>No hay metas configuradas.</div>}
-          </div>
-        </div>
-        
-        <div className="card up" style={{borderColor:state.weeklyInsight?T.blue:T.border}}>
-          <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10}}>
-            <h3 style={{fontSize:14}}>🤖 Insights Financieros</h3>
-            <button className="btn bg bsm" onClick={genInsight} disabled={loadingIns}>{loadingIns ? <Dots/> : "Refresh IA"}</button>
-          </div>
-          <div style={{fontSize:12, color:T.mid, lineHeight:1.6, marginTop:12}}>
-            {state.weeklyInsight ? state.weeklyInsight.detail : "Presiona Refresh IA para que el motor analice tu patrimonio, score y metas, y genere una recomendación."}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return(<div className="up"><PH title="Movimientos" sub={`${rows.length} registros`} right={<div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button className="btn bg" onClick={()=>setSB(true)}><ic.Bell/> Presupuestos</button><button className="btn bl" onClick={()=>{setETx(null);setForm({date:todayISO(),description:"",amount:"",type:"expense",category:"❓ Otros",currency:"ARS"});setSA(true);}}><ic.Plus/> Nuevo</button></div>}/>
+  {Object.keys(budgets||{}).length>0&&(<div style={{display:"flex",gap:10,marginBottom:14,overflowX:"auto",paddingBottom:4}}>{Object.entries(budgets).map(([cat,lim])=>{const spent=cur.filter(t=>t.category===cat&&t.type==="expense").reduce((s,t)=>s+t.amount,0);const pct=clamp(spent/lim*100,0,200);return<div key={cat} style={{background:T.raised,border:`1px solid ${pct>=100?T.red:pct>=80?T.amber:T.border}`,borderRadius:10,padding:"10px 14px",minWidth:150,flexShrink:0}}><div style={{fontSize:10,color:T.muted,marginBottom:4}}>{cat}</div><div className="mono" style={{fontSize:13,color:pct>=100?T.red:pct>=80?T.amber:T.white}}>{fmt(spent)}/{fmt(lim)}</div><div className="prog" style={{marginTop:6}}><div className="progf" style={{width:`${clamp(pct,0,100)}%`,background:pct>=100?T.red:pct>=80?T.amber:T.teal}}/></div></div>;})} </div>)}
+  <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}><select className="inp" style={{width:"auto",minWidth:100}} value={filter.month} onChange={e=>setFilter(f=>({...f,month:e.target.value}))}><option value="">Todos los meses</option>{months.map(m=><option key={m}>{m}</option>)}</select><select className="inp" style={{width:"auto"}} value={filter.type} onChange={e=>setFilter(f=>({...f,type:e.target.value}))}><option value="">Todos</option><option value="expense">Gastos</option><option value="income">Ingresos</option></select><select className="inp" style={{width:"auto",minWidth:100}} value={filter.cat} onChange={e=>setFilter(f=>({...f,cat:e.target.value}))}><option value="">Categorías</option>{CATS.map(c=><option key={c}>{c}</option>)}</select>{(filter.month||filter.type||filter.cat)&&<button className="btn bg bsm" onClick={()=>setFilter({month:"",type:"",cat:""})}>Limpiar</button>}</div>
+  <div className="card" style={{padding:0,overflow:"auto"}}><table className="tbl"><thead><tr><th className="hide-m">Fecha</th><th>Descripción</th><th>Categoría</th><th className="hide-m">Tipo</th><th>Monto</th><th></th></tr></thead><tbody>{rows.length===0?<tr><td colSpan={6} style={{textAlign:"center",padding:"36px 0",color:T.muted,fontSize:13}}>Sin movimientos</td></tr>:rows.map(t=>(<tr key={t.id}><td className="mono hide-m" style={{color:T.muted,fontSize:11}}>{t.date}</td><td style={{maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td><td><button onClick={()=>setEC({id:t.id,cat:t.category})} style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:6,padding:"3px 9px",fontSize:11,color:T.mid,cursor:"pointer"}}>{t.category}</button></td><td className="hide-m"><span className={`tag ${t.type==="income"?"ti":t.category==="💰 Ahorro"?"ts":"te"}`}>{t.type==="income"?"Ingreso":t.category==="💰 Ahorro"?"Ahorro":"Gasto"}</span></td><td className="mono" style={{color:t.type==="income"?T.teal:T.red,fontWeight:500}}>{t.type==="income"?"+":"-"}{fmt(t.amount)}</td><td style={{display:"flex",gap:6,justifyContent:"flex-end"}}><button className="btn bg bsm" style={{padding:"4px 8px"}} onClick={()=>{setForm({date:t.date,description:t.description,amount:t.amount,type:t.type,category:t.category,currency:"ARS"});setETx(t.id);setSA(true);}}>✎</button><button className="btn bd bsm" style={{padding:"4px 8px"}} onClick={()=>{update({transactions:transactions.filter(x=>x.id!==t.id)});notify("Eliminado","err");}}><ic.Trash/></button></td></tr>))}</tbody></table></div>
+  {showAdd&&<div className="ov" onClick={e=>{if(e.target===e.currentTarget){setSA(false);setETx(null);}}}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h2 style={{fontSize:18,fontWeight:700}}>{editTx?"Editar movimiento":"Nuevo movimiento"}</h2><button className="btn bg bsm" onClick={()=>{setSA(false);setETx(null);}}><ic.X/></button></div><div style={{display:"flex",flexDirection:"column",gap:12}}><div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha</label><input type="date" className="inp" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tipo</label><select className="inp" value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))}><option value="expense">💸 Gasto</option><option value="income">💵 Ingreso</option></select></div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Descripción</label><input className="inp" placeholder="ej: Supermercado Coto" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/></div><div className="g3"><div style={{gridColumn:"1/3"}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Monto (positivo siempre)</label><input className="inp" placeholder="15000" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda</label><select className="inp" value={form.currency} onChange={e=>setForm(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select></div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Categoría</label><select className="inp" value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select></div>{form.currency==="USD"&&px(form.amount)>0&&<div style={{background:"rgba(77,158,255,.08)",border:`1px solid rgba(77,158,255,.2)`,borderRadius:8,padding:"8px 12px",fontSize:11,color:T.blue}}>💡 = {fARS(Math.abs(px(form.amount))*usdRate)} ARS al tipo oficial ${usdRate}</div>}<div style={{background:form.type==="income"?"rgba(0,229,195,.06)":"rgba(255,77,106,.06)",border:`1px solid ${form.type==="income"?"rgba(0,229,195,.2)":"rgba(255,77,106,.2)"}`,borderRadius:8,padding:"8px 12px",fontSize:11,color:form.type==="income"?T.teal:T.red}}>{form.type==="income"?"✓ Se registrará como INGRESO (+)":"✓ Se registrará como GASTO (-)"}</div><button className="btn bl" style={{justifyContent:"center"}} onClick={saveTx}>{editTx?"Guardar cambios":"Agregar"}</button></div></div></div>}
+  {editCat&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setEC(null)}><div className="modal" style={{width:320}}><h2 style={{fontSize:16,fontWeight:700,marginBottom:14}}>Cambiar categoría</h2><select className="inp" style={{marginBottom:14}} value={editCat.cat} onChange={e=>setEC(c=>({...c,cat:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select><div style={{display:"flex",gap:8}}><button className="btn bl" style={{flex:1,justifyContent:"center"}} onClick={()=>{update({transactions:transactions.map(t=>t.id===editCat.id?{...t,category:editCat.cat}:t)});setEC(null);notify("Guardado ✓");}}>Guardar</button><button className="btn bg" onClick={()=>setEC(null)}>Cancelar</button></div></div></div>}
+  {showBud&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setSB(false)}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}><h2 style={{fontSize:18,fontWeight:700}}>Presupuestos</h2><button className="btn bg bsm" onClick={()=>setSB(false)}><ic.X/></button></div><div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}><select className="inp" style={{flex:1.5,minWidth:120}} value={bf.category} onChange={e=>setBF(f=>({...f,category:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select><input className="inp" style={{flex:1,minWidth:100}} placeholder="Límite ARS" value={bf.limit} onChange={e=>setBF(f=>({...f,limit:e.target.value}))}/><button className="btn bl" onClick={()=>{if(!bf.limit)return;update({budgets:{...budgets,[bf.category]:px(bf.limit)}});setSB(false);notify("Guardado ✓");}}><ic.Plus/></button></div>{Object.entries(budgets||{}).map(([cat,lim])=>(<div key={cat} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:T.raised,borderRadius:10,padding:"10px 14px",marginBottom:7,flexWrap:"wrap",gap:6}}><span style={{fontSize:13}}>{cat}</span><div style={{display:"flex",alignItems:"center",gap:10}}><span className="mono" style={{fontSize:12,color:T.mid}}>{fmt(lim)}/mes</span><button className="btn bd bsm" onClick={()=>{const b={...budgets};delete b[cat];update({budgets:b});}}>✕</button></div></div>))}</div></div>}</div>);
 }
 
-// ==========================================
-// MÓDULO 6: MOVIMIENTOS
-// ==========================================
-function Transactions({state, update, notify}){
-  const {transactions, usdRate, displayCurrency}=state;
-  const [showAdd, setSA]=useState(false);
-  const [editTx, setETx]=useState(null);
-  const [form, setForm]=useState({date:todayISO(), description:"", amount:"", type:"expense", category:"❓ Otros", currency:"ARS"});
-
-  const fmt = useCallback(a => displayCurrency==="USD" ? fUSD(a/usdRate) : fARS(a), [displayCurrency, usdRate]);
-
-  const save = () => {
-    if(!form.description || !form.amount) return notify("Completa descripción y monto", "err");
-    const ars = px(form.amount) * (form.currency==="USD" ? usdRate : 1);
-    if(editTx) update({transactions: transactions.map(t => t.id === editTx ? {...t, ...form, amount: ars} : t)});
-    else update({transactions: [...transactions, {id:`m_${uid()}`, ...form, amount: ars}]});
-    setSA(false); setETx(null); setForm({date:todayISO(), description:"", amount:"", type:"expense", category:"❓ Otros", currency:"ARS"});
-    notify("Movimiento guardado ✓");
-  };
-
-  return(
-    <div className="up">
-      <PH title="Movimientos" right={<button className="btn bl" onClick={()=>{setETx(null); setSA(true)}}><ic.Plus/> Nuevo Gasto/Ingreso</button>}/>
-      <div className="card" style={{padding:0, overflow:"auto"}}>
-        <table className="tbl">
-          <thead><tr><th className="hide-m">Fecha</th><th>Detalle</th><th>Categoría</th><th>Monto</th><th></th></tr></thead>
-          <tbody>
-            {transactions.slice().reverse().map(t => (
-              <tr key={t.id}>
-                <td className="mono hide-m" style={{fontSize:11, color:T.muted}}>{t.date}</td>
-                <td style={{fontSize:13, fontWeight:600}}>{t.description}</td>
-                <td style={{fontSize:11, color:T.mid}}>{t.category}</td>
-                <td className="mono" style={{color:t.type==="income"?T.teal:T.red, fontWeight:700}}>{t.type==="income"?"+":"-"}{fmt(t.amount)}</td>
-                <td style={{textAlign:"right"}}>
-                  <button className="btn bg bsm" onClick={()=>{setForm({...t, amount:t.amount}); setETx(t.id); setSA(true)}}>✎</button>
-                  <button className="btn bd bsm" style={{marginLeft:6}} onClick={()=>update({transactions:transactions.filter(x=>x.id!==t.id)})}>×</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {transactions.length === 0 && <div style={{padding:"40px", textAlign:"center", color:T.muted}}>Sin movimientos registrados</div>}
-      </div>
-      
-      {showAdd && (
-        <div className="ov" onClick={e=>e.target===e.currentTarget&&setSA(false)}>
-          <div className="modal up">
-            <h3>{editTx ? "Modificar" : "Nuevo"} Movimiento</h3>
-            <div style={{display:"flex", flexDirection:"column", gap:14, marginTop:24}}>
-              <div className="g2">
-                <input type="date" className="inp" value={form.date} onChange={e=>setForm({...form, date:e.target.value})}/>
-                <select className="inp" value={form.type} onChange={e=>setForm({...form, type:e.target.value})}>
-                  <option value="expense">Gasto (-)</option>
-                  <option value="income">Ingreso (+)</option>
-                </select>
-              </div>
-              <input className="inp" placeholder="Descripción (ej: Supermercado)" value={form.description} onChange={e=>setForm({...form, description:e.target.value})}/>
-              <div className="g3">
-                <input className="inp" style={{gridColumn:"1/3"}} placeholder="Monto (ej: 15.000,50)" value={form.amount} onChange={e=>setForm({...form, amount:e.target.value})}/>
-                <select className="inp" value={form.currency} onChange={e=>setForm({...form, currency:e.target.value})}>
-                  <option>ARS</option><option>USD</option>
-                </select>
-              </div>
-              <select className="inp" value={form.category} onChange={e=>setForm({...form, category:e.target.value})}>
-                {CATS.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <button className="btn bl" style={{justifyContent:"center"}} onClick={save}>Confirmar</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+function Goals({state,update,notify}){
+  const {goals,transactions,usdRate,salaries}=state;
+  const {fmt}=useDsp(state);
+  const NOW=getNow();
+  const [sf,setSF]=useState(false);
+  const [addTo,setAT]=useState(null);
+  const [addAmt,setAA]=useState("");
+  const [addCur,setAC]=useState("ARS");
+  const [form,setForm]=useState({name:"",target:"",currency:"ARS",saved:"",icon:"🎯",deadline:""});
+  const ICONS=["🎯","✈️","🚗","🏠","💻","📱","💍","🎓","🏖️","💰","🏋️","🎸","🛵","🌎","👶","🏡"];
+  const {disponible,perGoal}=goalPlan(goals,salaries,transactions,state.holdings||[]);
+  const addG=()=>{if(!form.name||!form.target)return notify("Nombre y monto requeridos","err");const t=Math.abs(px(form.target))*(form.currency==="USD"?usdRate:1);update({goals:[...goals,{id:`g_${uid()}`,name:form.name,target:t,saved:Math.abs(px(form.saved))||0,icon:form.icon,deadline:form.deadline,createdAt:todayISO()}]});setForm({name:"",target:"",currency:"ARS",saved:"",icon:"🎯",deadline:""});setSF(false);notify("Meta creada ✓");};
+  const addSav=g=>{const a=Math.abs(px(addAmt))*(addCur==="USD"?usdRate:1);if(!a)return notify("Ingresá un monto","err");update({goals:goals.map(gl=>gl.id===g.id?{...gl,saved:gl.saved+a}:gl),transactions:[...transactions,{id:`s_${uid()}`,date:todayISO(),description:`Ahorro: ${g.name}`,amount:a,type:"expense",category:"💰 Ahorro",currency:"ARS",source:"manual"}]});setAT(null);setAA("");setAC("ARS");notify(`+${fmt(a)} sumado ✓`);};
+  return(<div className="up"><PH title="Metas" sub={`${goals.filter(g=>g.saved<g.target).length} activas`} right={<button className="btn bl" onClick={()=>setSF(true)}><ic.Plus/> Nueva meta</button>}/>
+  {disponible>0&&perGoal.length>0&&(<div className="card" style={{marginBottom:16,borderColor:"rgba(200,255,87,.18)"}}><div style={{fontSize:13,fontWeight:700,marginBottom:10}}>💡 Plan de ahorro recomendado</div><div style={{fontSize:12,color:T.mid,marginBottom:12}}>Tenés <span className="mono" style={{color:T.lime}}>{fmt(disponible)}</span> disponibles este mes. Distribución sugerida:</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:10}}>{perGoal.map(g=>(<div key={g.id} style={{background:T.raised,borderRadius:10,padding:"12px 14px",border:`1px solid ${g.feasible?T.border:"rgba(255,184,48,.3)"}`}}><div style={{fontSize:12,marginBottom:6}}>{g.icon} {g.name}</div><div className="mono" style={{fontSize:18,fontWeight:600,color:g.feasible?T.lime:T.amber}}>{fmt(g.needed)}<span style={{fontSize:11,fontWeight:400,color:T.muted}}>/mes</span></div><div style={{fontSize:10,color:T.muted,marginTop:3}}>{g.months} mes{g.months>1?"es":""} · Falta {fmt(g.rem)}</div>{!g.feasible&&<div style={{fontSize:10,color:T.amber,marginTop:4}}>⚠ Ajustá el plazo o el monto</div>}{g.couldUsePortfolio&&<div style={{fontSize:10,color:T.blue,marginTop:4}}>📊 Portfolio cubre {g.portfolioCover}%</div>}</div>))}</div></div>)}
+  {goals.length===0?<div className="card" style={{textAlign:"center",padding:"64px 32px"}}><div style={{fontSize:52,marginBottom:14}}>🎯</div><div style={{fontSize:20,fontWeight:700,marginBottom:8}}>Sin metas todavía</div><div style={{fontSize:13,color:T.muted,marginBottom:20}}>Creá una meta y empezá a trackear tu progreso</div><button className="btn bl" onClick={()=>setSF(true)}><ic.Plus/> Crear meta</button></div>:
+  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:14}}>{goals.map(g=>{const pct=clamp((g.saved/g.target)*100,0,100);const rem=g.target-g.saved;const days=g.deadline?Math.ceil((new Date(g.deadline)-NOW)/864e5):null;const months=days&&days>0?Math.ceil(days/30):null;const needed=months?rem/months:null;const pc=pct>=100?T.lime:pct>=60?T.blue:T.amber;return<div key={g.id} className="card up"><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}><div style={{display:"flex",gap:10,alignItems:"center"}}><span style={{fontSize:28}}>{g.icon}</span><div><div style={{fontSize:14,fontWeight:700}}>{g.name}</div>{g.deadline&&<div style={{fontSize:10,color:T.muted,marginTop:2}}>📅 {g.deadline}{days!==null&&` · ${days>0?days+"d":"¡Hoy!"}`}</div>}</div></div><button className="btn bd bsm" onClick={()=>{update({goals:goals.filter(x=>x.id!==g.id)});notify("Eliminado","err");}}><ic.Trash/></button></div><div className="g2" style={{marginBottom:12}}><div style={{background:T.raised,borderRadius:10,padding:"10px 12px"}}><div style={{fontSize:10,color:T.muted,marginBottom:3}}>Ahorrado</div><div className="mono" style={{fontSize:15,color:pc}}>{fmt(g.saved)}</div></div><div style={{background:T.raised,borderRadius:10,padding:"10px 12px"}}><div style={{fontSize:10,color:T.muted,marginBottom:3}}>Objetivo</div><div className="mono" style={{fontSize:15}}>{fmt(g.target)}</div></div></div><div style={{marginBottom:12}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{fontSize:11,color:T.muted}}>Progreso</span><span className="mono" style={{fontSize:11,color:pc,fontWeight:600}}>{pct.toFixed(1)}%</span></div><div className="prog" style={{height:8}}><div className="progf" style={{width:`${pct}%`,background:pct>=100?`linear-gradient(90deg,${T.lime},${T.teal})`:pct>=60?T.blue:T.amber}}/></div></div>{needed&&needed>0&&<div style={{background:"rgba(77,158,255,.07)",border:`1px solid rgba(77,158,255,.15)`,borderRadius:8,padding:"8px 10px",fontSize:11,color:T.blue,marginBottom:12}}>💡 Guardá <span className="mono">{fmt(needed)}</span>/mes para llegar en {months} mes{months>1?"es":""}</div>}{pct>=100?<div style={{background:"rgba(200,255,87,.08)",border:`1px solid rgba(200,255,87,.25)`,borderRadius:10,padding:10,textAlign:"center",fontSize:13,color:T.lime,fontWeight:600}}>🎉 ¡Meta alcanzada!</div>:addTo===g.id?<div style={{display:"flex",gap:8,flexWrap:"wrap"}}><input className="inp" style={{flex:1,fontSize:12,minWidth:80}} placeholder="Monto" value={addAmt} onChange={e=>setAA(e.target.value)} autoFocus onKeyDown={e=>e.key==="Enter"&&addSav(g)}/><select className="inp" style={{width:70,fontSize:12,padding:"10px 6px"}} value={addCur} onChange={e=>setAC(e.target.value)}><option>ARS</option><option>USD</option></select><button className="btn bl bsm" onClick={()=>addSav(g)}>+</button><button className="btn bg bsm" onClick={()=>{setAT(null);setAA("");}}>✕</button></div>:<button className="btn bg" style={{width:"100%",justifyContent:"center"}} onClick={()=>setAT(g.id)}><ic.Plus/> Agregar ahorro</button>}</div>;})}
+  </div>}
+  {sf&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setSF(false)}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h2 style={{fontSize:18,fontWeight:700}}>Nueva meta</h2><button className="btn bg bsm" onClick={()=>setSF(false)}><ic.X/></button></div><div style={{display:"flex",flexDirection:"column",gap:12}}><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:7}}>Ícono</label><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{ICONS.map(ic2=><button key={ic2} onClick={()=>setForm(f=>({...f,icon:ic2}))} style={{width:36,height:36,fontSize:18,borderRadius:8,border:`1.5px solid ${form.icon===ic2?T.lime:T.border}`,background:form.icon===ic2?"rgba(200,255,87,.1)":T.raised,cursor:"pointer"}}>{ic2}</button>)}</div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Nombre</label><input className="inp" placeholder="ej: Viaje a Europa" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))}/></div><div className="g3"><div style={{gridColumn:"1/3"}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Monto objetivo</label><input className="inp" placeholder="500000" value={form.target} onChange={e=>setForm(f=>({...f,target:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda</label><select className="inp" value={form.currency} onChange={e=>setForm(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select></div></div><div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Ya tengo</label><input className="inp" placeholder="0" value={form.saved} onChange={e=>setForm(f=>({...f,saved:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha límite</label><input type="date" className="inp" value={form.deadline} onChange={e=>setForm(f=>({...f,deadline:e.target.value}))}/></div></div><button className="btn bl" style={{justifyContent:"center"}} onClick={addG}>Crear meta</button></div></div></div>}</div>);
 }
 
-// ==========================================
-// MÓDULO 7: METAS Y SIMULADOR
-// ==========================================
-function Goals({state, update, notify}){
-  const {goals, holdings=[], transactions, displayCurrency, usdRate}=state;
-  const [addTo, setAT]=useState(null);
-  const [addAmt, setAA]=useState("");
-  const [sf, setSF]=useState(false);
-  const [form, setForm]=useState({name:"", target:"", icon:"🎯", deadline:""});
+function Analytics({state}){
+  const {transactions,displayCurrency}=state;
+  const {fmt,toDsp}=useDsp(state);
+  const NOW=getNow();
+  const [range,setRange]=useState(6);
+  const [comparing,setComp]=useState(false);
+  const [result,setResult]=useState(null);
+  const [cf,setCF]=useState({monthly:"200000",months:"12"});
+  const months=useMemo(()=>Array.from({length:range},(_,i)=>{const d=new Date(NOW.getFullYear(),NOW.getMonth()-range+1+i,1);const m=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;const txs=transactions.filter(t=>gMonth(t.date)===m);const e=txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);const inc=txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);return{name:MOS[d.getMonth()],Gastos:toDsp(e),Ingresos:toDsp(inc),Ahorro:toDsp(txs.filter(t=>t.category==="💰 Ahorro").reduce((s,t)=>s+t.amount,0)),balance:toDsp(inc-e)};}),[transactions,range,toDsp]);
+  const cm={};transactions.filter(t=>t.type==="expense").forEach(t=>{cm[t.category]=(cm[t.category]||0)+t.amount;});
+  const ctot=Object.values(cm).reduce((s,v)=>s+v,0);
+  const cats=Object.entries(cm).sort((a,b)=>b[1]-a[1]).map(([c,v],i)=>({c,v:toDsp(v),pct:ctot>0?(v/ctot*100).toFixed(1):0,col:CPAL[i%CPAL.length]}));
+  const totInc=transactions.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
+  const totExp=transactions.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
+  const savR=totInc>0?clamp(((totInc-totExp)/totInc)*100,-100,100).toFixed(1):"0";
+  const savN=parseFloat(savR);
+  const rc={none:T.teal,low:T.lime,very_low:T.teal,medium:T.amber,medium_high:T.amber,high:T.red};
+  const holdings=state.holdings||[];
+  const portfolioVal=holdings.reduce((s,h)=>s+(h.currentValue||h.totalInvested||0),0);
+  const totalSavings=transactions.filter(t=>t.category==="💰 Ahorro").reduce((s,t)=>s+t.amount,0);
+  const patrimonio=portfolioVal+totalSavings;
+  return(<div className="up"><PH title="Analíticas" sub="Histórico · Proyecciones · Patrimonio" right={<select className="inp" style={{width:"auto"}} value={range} onChange={e=>setRange(+e.target.value)}><option value={3}>3 meses</option><option value={6}>6 meses</option><option value={12}>12 meses</option></select>}/>
+  {(portfolioVal>0||totalSavings>0)&&<div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>{[{l:"Portfolio",v:fmt(portfolioVal),c:T.blue,i:"📊"},{l:"Ahorros",v:fmt(totalSavings),c:T.teal,i:"💰"},{l:"Patrimonio total",v:fmt(patrimonio),c:T.lime,i:"🏛️"}].map((k,i)=><div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".5px"}}>{k.l}</span><span>{k.i}</span></div><div className="mono" title={k.v} style={{fontSize:16,fontWeight:600,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div></div>)}</div>}
+  <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>{[{l:"Total ingresos",v:fmt(totInc),c:T.teal},{l:"Total gastos",v:fmt(totExp),c:T.red},{l:"Tasa de ahorro",v:`${savR}%`,c:savN>=20?T.lime:savN>=10?T.amber:T.red,sub:savN>=20?"✓ Excelente":savN>=10?"Regular":savN<0?"⚠ Gastás más de lo que ingresás":"⚠ Mejorar"}].map((k,i)=>(<div key={i} className="card csm"><div style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".6px",marginBottom:8}}>{k.l}</div><div className="mono" title={k.v} style={{fontSize:22,fontWeight:500,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div>{k.sub&&<div style={{fontSize:11,color:T.muted,marginTop:3}}>{k.sub}</div>}</div>))}</div>
+  <div className="card" style={{marginBottom:14}}><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Comparativa mensual ({displayCurrency})</div><div style={{width:"100%",minWidth:0,overflow:"hidden"}}><ResponsiveContainer width="100%" height={210}><BarChart data={months} barGap={3}><CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" tick={{fill:T.muted,fontSize:10}} axisLine={false} tickLine={false}/><YAxis tick={{fill:T.muted,fontSize:9}} axisLine={false} tickLine={false} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:v}/><Tooltip content={<CTip dc={displayCurrency}/>}/><Legend wrapperStyle={{fontSize:11,color:T.muted}}/><Bar dataKey="Ingresos" fill={T.teal} radius={[4,4,0,0]} opacity={.9}/><Bar dataKey="Gastos" fill={T.red} radius={[4,4,0,0]} opacity={.9}/><Bar dataKey="Ahorro" fill={T.blue} radius={[4,4,0,0]} opacity={.9}/></BarChart></ResponsiveContainer></div></div>
+  <div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}><div className="card"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Gastos por categoría</div>{cats.length===0?<div style={{color:T.muted,textAlign:"center",padding:20,fontSize:13}}>Sin datos</div>:cats.slice(0,8).map((c,i)=>(<div key={i} style={{marginBottom:9}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:12,color:T.mid}}>{c.c}</span><span className="mono" style={{fontSize:11,color:T.muted}}>{c.pct}%</span></div><div className="prog" style={{height:4}}><div style={{height:"100%",borderRadius:2,background:c.col,width:`${clamp(c.pct,0,100)}%`,transition:"width .6s"}}/></div></div>))}</div><div className="card"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Balance mensual</div><div style={{width:"100%",minWidth:0,overflow:"hidden"}}><ResponsiveContainer width="100%" height={185}><LineChart data={months}><CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" tick={{fill:T.muted,fontSize:10}} axisLine={false} tickLine={false}/><YAxis tick={{fill:T.muted,fontSize:9}} axisLine={false} tickLine={false} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:v}/><Tooltip content={<CTip dc={displayCurrency}/>}/><Line type="monotone" dataKey="balance" stroke={T.lime} strokeWidth={2.5} dot={{fill:T.lime,r:3}} activeDot={{r:5,fill:T.lime,stroke:T.bg}}/></LineChart></ResponsiveContainer></div></div></div>
+  <div className="card"><div style={{marginBottom:14}}><div style={{fontSize:14,fontWeight:700}}>🏦 Comparador de instrumentos</div><div style={{fontSize:11,color:T.muted,marginTop:2}}>FCI, plazo fijo, bonos CER, CEDEARs — contexto argentino 2025</div></div><div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}><div style={{flex:1,minWidth:130}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Ahorro mensual (ARS)</label><input className="inp" value={cf.monthly} onChange={e=>setCF(f=>({...f,monthly:e.target.value}))}/></div><div style={{flex:1,minWidth:90}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Plazo (meses)</label><input className="inp" value={cf.months} onChange={e=>setCF(f=>({...f,months:e.target.value}))}/></div><div style={{display:"flex",alignItems:"flex-end"}}><button className="btn bl" onClick={async()=>{setComp(true);const r=await compareInstruments(px(cf.monthly),px(cf.months),state.usdRate);setResult(r);setComp(false);}} disabled={comparing}>{comparing?<Dots/>:<><ic.Refresh/> Analizar</>}</button></div></div>{result?<div><div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:12}}>{result.instruments?.map((inst,i)=>(<div key={i} style={{background:T.raised,borderRadius:12,padding:"12px 16px",border:`1px solid ${T.border}`,display:"flex",flexWrap:"wrap",gap:10,alignItems:"center"}}><div style={{flex:"2 1 140px"}}><div style={{fontSize:12,fontWeight:600}}>{inst.name}</div><div style={{fontSize:10,color:T.muted,marginTop:2}}>{inst.pros}</div></div><div style={{flex:"1 1 60px"}}><div style={{fontSize:10,color:T.muted,marginBottom:2}}>Ret. anual</div><div className="mono" style={{fontSize:13,color:T.lime}}>{inst.annualReturn?.toFixed(1)}%</div></div><div style={{flex:"1 1 60px"}}><div style={{fontSize:10,color:T.muted,marginBottom:2}}>Final USD</div><div className="mono" style={{fontSize:13,color:T.teal}}>{fUSD(inst.finalUSD||0)}</div></div><div style={{flex:"1 1 60px"}}><div style={{fontSize:10,color:T.muted,marginBottom:2}}>Riesgo</div><span style={{fontSize:11,padding:"2px 8px",borderRadius:99,background:`${rc[inst.risk]||T.mid}1A`,color:rc[inst.risk]||T.mid}}>{(inst.risk||"").replace(/_/g," ")}</span></div><div style={{flex:"1.5 1 100px",fontSize:10,color:T.muted}}>{inst.cons}</div></div>))}</div>{result.recommendation&&<div style={{background:"rgba(200,255,87,.06)",border:`1px solid rgba(200,255,87,.2)`,borderRadius:10,padding:"12px 16px"}}><div style={{fontSize:11,color:T.lime,fontWeight:600,marginBottom:4}}>💡 Recomendación</div><div style={{fontSize:12,color:T.mid}}>{result.recommendation}</div><div style={{fontSize:10,color:T.muted,marginTop:6}}>{result.disclaimer}</div></div>}</div>:<div style={{textAlign:"center",padding:"20px 0",color:T.muted,fontSize:13}}>Ingresá monto y plazo para comparar instrumentos</div>}</div></div>);
+}
+
+function Investments({state,update,notify}){
+  const {savedAnalyses=[],riskProfile}=state;
+  const [tab,setTab]=useState("portfolio");
+  const [hFilter,setHFilter]=useState("all");
+  const [scanning,setScan]=useState(false);
+  const [scanResult,setSR]=useState(null);
+  const [scanErr,setSE]=useState(null);
+  const [ticker,setTicker]=useState("");
+  const [tname,setTname]=useState("");
+  const [loading,setLoad]=useState(false);
+  const [loadErr,setLE]=useState(null);
+  const [sel,setSel]=useState(null);
+  const [justSaved,setJS]=useState(null);
+  const [showHForm,setSHF]=useState(false);
+  const [hForm,setHF]=useState({type:"accion",ticker:"",name:"",quantity:"",buyPrice:"",totalInvested:"",currency:"ARS",buyDate:todayISO(),maturityDate:"",rate:""});
   
-  const [simGoal, setSimGoal]=useState(null);
-  const [simData, setSimData]=useState({monthly:100000, rate:35});
+  // Estado para el refresh individual (guarda el ID de la inversión que se está actualizando)
+  const [refreshingId,setRI]=useState(null);
+  const [loadingTNA,setLoadingTNA]=useState(false); 
+  
+  const holdings=state.holdings||[];
+  const filteredHoldings=hFilter==="all"?holdings:holdings.filter(h=>h.type===hFilter);
+  const holdingTypes=[...new Set(holdings.map(h=>h.type))];
+  
+  const totalInvested=holdings.reduce((s,h)=>s+(h.totalInvested||0),0);
+  const totalCurrent=holdings.reduce((s,h)=>s+(h.currentValue||h.totalInvested||0),0);
+  const totalPnL=totalCurrent-totalInvested;
 
-  const fmt = useCallback(a => displayCurrency==="USD" ? fUSD(a/usdRate) : fARS(a), [displayCurrency, usdRate]);
-
-  const liquidar = (g, linkedH) => {
-    const ids = linkedH.map(h => h.id);
-    const expense = {id:`m_${uid()}`, date:todayISO(), description:`Liquidación Meta: ${g.name}`, amount: g.target, type:"expense", category:"💰 Ahorro", currency:"ARS", source:"auto"};
-    update({
-      transactions: [...transactions, expense],
-      holdings: holdings.filter(h => !ids.includes(h.id)),
-      goals: goals.filter(x => x.id !== g.id)
-    });
-    notify(`¡Felicidades! Meta '${g.name}' cumplida y activos liquidados 🎉`);
-  };
-
-  const addG = () => {
-    if(!form.name || !form.target) return notify("Nombre y monto son requeridos","err");
-    update({goals: [...goals, {id:`g_${uid()}`, name:form.name, target:px(form.target), saved:0, icon:form.icon, deadline:form.deadline}]});
-    setSF(false); setForm({name:"", target:"", icon:"🎯", deadline:""}); notify("Meta creada ✓");
-  }
-
-  const simulateMonths = (target, current, monthly, annualRate) => {
-      const r = (annualRate / 100) / 12; 
-      const p = px(monthly);
-      if(p <= 0) return "Ingresa aporte";
-      if(r === 0) return Math.ceil((target - current) / p) + " meses";
-      const months = Math.log(1 + (target - current) * r / p) / Math.log(1 + r);
-      if(isNaN(months)) return "Inválido";
-      return Math.ceil(months) + " meses";
-  };
-
-  return(
-    <div className="up">
-      <PH title="Metas & Simulador" right={<button className="btn bl" onClick={()=>setSF(true)}><ic.Plus/> Nueva Meta</button>}/>
-      <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(320px, 1fr))", gap:16}}>
-        {goals.map(g => {
-          const linkedH = holdings.filter(h => h.goalId === g.id);
-          const linkedVal = linkedH.reduce((s,h) => s + (h.currentValue || h.totalInvested || 0), 0);
-          const total = g.saved + linkedVal;
-          const pct = clamp((total / g.target) * 100, 0, 100);
-          
-          return (
-            <div key={g.id} className="card up" style={{border: pct>=100?`1px solid ${T.lime}`:`1px solid ${T.border}`}}>
-              <div style={{display:"flex", justifyContent:"space-between", marginBottom:14}}>
-                <div style={{display:"flex", gap:12}}>
-                  <span style={{fontSize:28}}>{g.icon}</span>
-                  <div>
-                    <div style={{fontWeight:700, fontSize:15}}>{g.name}</div>
-                    <div style={{fontSize:10, color:T.muted}}>{pct>=100 ? "¡Objetivo Alcanzado!" : `Faltan ${fmt(g.target-total)}`}</div>
-                  </div>
-                </div>
-                <button className="btn bd bsm" onClick={()=>update({goals:goals.filter(x=>x.id!==g.id)})}>×</button>
-              </div>
-              <div className="prog" style={{height:10}}><div className="progf" style={{width:`${pct}%`, background:pct>=100?T.lime:T.blue}}/></div>
-              <div style={{marginTop:12, fontSize:11, color:T.mid, display:"flex", justifyContent:"space-between", background:T.raised, padding:8, borderRadius:8}}>
-                <span>Cash: <span className="mono">{fmt(g.saved)}</span></span>
-                <span>Inversiones: <span className="mono">{fmt(linkedVal)}</span></span>
-              </div>
-              
-              {pct >= 100 ? (
-                <button className="btn bl" style={{width:"100%", marginTop:16, justifyContent:"center"}} onClick={()=>liquidar(g, linkedH)}>💸 Liquidar Activos y Cumplir</button>
-              ) : (
-                <div style={{display:"flex", gap:8, marginTop:16}}>
-                  {addTo === g.id ? (
-                    <div style={{display:"flex", gap:6, flex:1}}>
-                      <input autoFocus className="inp" placeholder="Ahorro $" value={addAmt} onChange={e=>setAA(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"){update({goals:goals.map(x=>x.id===g.id?{...x, saved:x.saved+px(addAmt)}:x)}); setAT(null); setAA("");}}}/>
-                      <button className="btn bl bsm" onClick={()=>{update({goals:goals.map(x=>x.id===g.id?{...x, saved:x.saved+px(addAmt)}:x)}); setAT(null); setAA("")}}>✓</button>
-                    </div>
-                  ) : (
-                    <>
-                      <button className="btn bg bsm" style={{flex:1, justifyContent:"center"}} onClick={()=>setAT(g.id)}>+ Cash</button>
-                      <button className="btn bg bsm" style={{flex:1, justifyContent:"center", color:T.blue}} onClick={()=>setSimGoal(g)}>🔮 Simular</button>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-        {goals.length === 0 && <div className="card" style={{gridColumn:"1/-1", textAlign:"center", padding:"40px", color:T.muted}}>No tienes metas activas.</div>}
-      </div>
-
-      {simGoal && (
-        <div className="ov" onClick={e=>e.target===e.currentTarget&&setSimGoal(null)}>
-          <div className="modal up">
-             <h3>🔮 Simulador Financiero</h3>
-             <div style={{fontSize:12, color:T.muted, marginTop:4}}>Meta: {simGoal.name} (Faltan {fmt(simGoal.target - (simGoal.saved + holdings.filter(h=>h.goalId===simGoal.id).reduce((s,h)=>s+(h.currentValue||h.totalInvested),0)))})</div>
-             
-             <div style={{marginTop:20, display:"flex", flexDirection:"column", gap:14}}>
-                <div>
-                  <label style={{fontSize:11, color:T.muted}}>Aporte mensual estimado (ARS)</label>
-                  <input className="inp" value={simData.monthly} onChange={e=>setSimData({...simData, monthly:e.target.value})}/>
-                </div>
-                <div>
-                  <label style={{fontSize:11, color:T.muted}}>Tasa Anual Estimada (TNA %)</label>
-                  <input className="inp" value={simData.rate} onChange={e=>setSimData({...simData, rate:e.target.value})}/>
-                </div>
-                
-                <div style={{background:`${T.blue}22`, padding:16, borderRadius:12, border:`1px solid ${T.blue}44`, textAlign:"center", marginTop:10}}>
-                   <div style={{fontSize:11, color:T.blue, textTransform:"uppercase", letterSpacing:"1px", marginBottom:6}}>Tiempo estimado invirtiendo</div>
-                   <div style={{fontSize:24, fontWeight:800, color:T.white}}>
-                     {simulateMonths(simGoal.target, simGoal.saved + holdings.filter(h=>h.goalId===simGoal.id).reduce((s,h)=>s+(h.currentValue||h.totalInvested),0), simData.monthly, px(simData.rate))}
-                   </div>
-                </div>
-                <button className="btn bg" style={{justifyContent:"center"}} onClick={()=>setSimGoal(null)}>Cerrar</button>
-             </div>
-          </div>
-        </div>
-      )}
-
-      {sf && (
-        <div className="ov" onClick={e=>e.target===e.currentTarget&&setSF(false)}>
-          <div className="modal up">
-            <h3>Nueva Meta</h3>
-            <div style={{display:"flex", flexDirection:"column", gap:14, marginTop:20}}>
-              <div style={{display:"flex", gap:8, fontSize:20}}>
-                {["🎯","✈️","🚗","🏠","💻","📱","💍","🎓"].map(i=><button key={i} onClick={()=>setForm({...form, icon:i})} style={{padding:8, background:form.icon===i?T.raised:"transparent", borderRadius:8, border:`1px solid ${form.icon===i?T.lime:T.border}`}}>{i}</button>)}
-              </div>
-              <input className="inp" placeholder="Nombre (ej: Cambiar el auto)" value={form.name} onChange={e=>setForm({...form, name:e.target.value})}/>
-              <input className="inp" placeholder="Monto objetivo (ARS)" value={form.target} onChange={e=>setForm({...form, target:e.target.value})}/>
-              <input type="date" className="inp" value={form.deadline} onChange={e=>setForm({...form, deadline:e.target.value})}/>
-              <button className="btn bl" style={{justifyContent:"center"}} onClick={addG}>Crear Meta</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ==========================================
-// MÓDULO 8: INVERSIONES (Hybrid Engine)
-// ==========================================
-function Investments({state, update, notify}){
-  const {holdings=[], goals=[], usdRate, transactions, displayCurrency}=state;
-  const [showHForm, setSHF]=useState(false);
-  const [hForm, setHF]=useState({type:"accion", ticker:"", name:"", quantity:"", buyPrice:"", totalInvested:"", currency:"ARS", buyDate:todayISO(), rate:"", goalId:""});
-  const [refreshingId, setRI]=useState(null);
-
-  const fmt = useCallback(a => displayCurrency==="USD" ? fUSD(a/usdRate) : fARS(a), [displayCurrency, usdRate]);
-
-  const refreshSingle = async (h) => {
-    setRI(h.id);
-    let updatedHolding = {...h};
+  const handleAutoTNA = async () => {
+    setLoadingTNA(true);
     try {
-      if(h.type === "crypto") {
-        let sym = h.ticker.toUpperCase().replace(/[^A-Z]/g,"");
-        if(!sym.endsWith("USDT") && !sym.endsWith("BUSD") && !sym.endsWith("USDC")) sym += "USDT";
-        const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${sym}`);
-        const d = await r.json();
-        if(d.price) {
-          let cp = parseFloat(d.price);
-          if(h.currency==="ARS") cp *= usdRate;
-          const cv = h.quantity ? px(h.quantity) * cp : px(h.totalInvested) * (cp/px(h.buyPrice));
-          updatedHolding = {...updatedHolding, currentPrice:cp, currentValue:Math.round(cv), lastUpdated:todayISO()};
-          notify(`${h.ticker} actualizado vía Binance ✓`);
-        } else throw new Error();
-      } else if (["accion","cedear","etf","bono"].includes(h.type)) {
-        const raw = await ai(`Price for ticker: ${h.ticker}. Date: ${todayISO()}. Return JSON: {"price": number}. ARS for local AR instruments, USD for US.`, "Valid JSON only.");
-        if(raw){
-          const d = JSON.parse(raw);
-          let cp = d.price || d.prices?.[h.ticker] || null;
-          if(cp) {
-            if(h.currency==="ARS" && (h.type==="cedear" || h.type==="etf")) cp *= usdRate;
-            const cv = h.quantity ? px(h.quantity) * cp : px(h.totalInvested) * (cp/px(h.buyPrice));
-            updatedHolding = {...updatedHolding, currentPrice:cp, currentValue:Math.round(cv), lastUpdated:todayISO()};
-            notify(`${h.ticker} actualizado vía IA ✓`);
-          } else throw new Error();
-        } else throw new Error();
-      } else {
-        const days = Math.max(0, Math.floor((Date.now()-new Date(h.buyDate))/864e5));
-        const rateDec = px(h.rate)/100;
-        let cv = px(h.totalInvested);
-        if(h.type==="fci") cv *= Math.pow(1+(rateDec/365), days);
-        else cv *= (1 + rateDec*(days/365));
-        updatedHolding = {...updatedHolding, currentValue:Math.round(cv), lastUpdated:todayISO()};
-        notify("Rendimiento calculado a hoy ✓");
-      }
-      update({holdings: holdings.map(x=>x.id===h.id ? updatedHolding : x)});
-    } catch(e){ 
-      notify(`Fallo al actualizar ${h.ticker||h.name}`, "err"); 
+      const r = await fetch("https://api.argentinadatos.com/v1/finanzas/tasas/plazoFijo");
+      const d = await r.json();
+      const avg = d.slice(0,10).reduce((s,b)=>s+b.tna, 0) / Math.min(10, d.length);
+      setHF(f => ({...f, rate: avg.toFixed(1)}));
+      notify("TNA promedio de mercado actualizada ✓");
+    } catch(e) {
+      notify("Error al obtener TNA", "err");
     }
-    setRI(null);
+    setLoadingTNA(false);
   };
-
-  const addH = () => {
-    const isVar = ["accion","cedear","etf","crypto","bono"].includes(hForm.type);
-    if(isVar && (!hForm.ticker || !hForm.quantity || !hForm.buyPrice)) return notify("Completa Ticker, Cantidad y Precio", "err");
+  
+  const addHolding=()=>{
+    const isVar = ["accion", "cedear", "etf", "crypto"].includes(hForm.type);
+    const isFix = ["plazo_fijo", "fci", "bono"].includes(hForm.type);
     
+    // Validaciones estrictas
+    if(isVar && (!hForm.ticker || !hForm.quantity || !hForm.buyPrice)) return notify("Ticker, cantidad y precio de compra son obligatorios", "err");
+    if(isFix && (!hForm.name || !hForm.totalInvested || !hForm.rate || !hForm.buyDate)) return notify("Nombre, monto invertido, TNA y fecha son obligatorios", "err");
+
     let inv = px(hForm.totalInvested);
     if(isVar && !inv) inv = px(hForm.quantity) * px(hForm.buyPrice);
+
+    const h={...hForm, id:`h_${uid()}`, quantity:px(hForm.quantity), buyPrice:px(hForm.buyPrice), totalInvested:inv, rate:px(hForm.rate), currentValue:inv, currentPrice:px(hForm.buyPrice), lastUpdated:todayISO()};
     
-    const h = {...hForm, id:`h_${uid()}`, totalInvested:inv, currentValue:inv, lastUpdated:todayISO()};
-    update({holdings: [...holdings, h]});
-    setSHF(false); 
-    setHF({type:"accion", ticker:"", name:"", quantity:"", buyPrice:"", totalInvested:"", currency:"ARS", buyDate:todayISO(), rate:"", goalId:""});
-    notify("Activo registrado en Portfolio ✓");
+    update({holdings:[...holdings,h]});
+    setSHF(false);
+    setHF({type:"accion",ticker:"",name:"",quantity:"",buyPrice:"",totalInvested:"",currency:"ARS",buyDate:todayISO(),maturityDate:"",rate:""});
+    notify("Inversión agregada al portfolio ✓");
   };
-
-  const gSel = goals.find(gx=>gx.id===hForm.goalId);
-  const showRisk = gSel && gSel.deadline && (new Date(gSel.deadline)-getNow())/(864e5) < 180 && ["accion","crypto","cedear"].includes(hForm.type);
-
-  return(
-    <div className="up">
-      <PH title="Mi Portfolio" right={<button className="btn bl" onClick={()=>setSHF(true)}><ic.Plus/> Cargar Inversión</button>}/>
-      
-      {showHForm && (
-        <div className="card up" style={{marginBottom:24, borderColor:T.hi}}>
-          <h3 style={{fontSize:14, marginBottom:16}}>Registrar Activo Real</h3>
-          <div style={{display:"flex", flexDirection:"column", gap:12}}>
-            <div className="g2">
-              <select className="inp" value={hForm.type} onChange={e=>setHF({...hForm, type:e.target.value, ticker:"", quantity:"", buyPrice:"", rate:""})}>
-                <option value="accion">Acción / CEDEAR</option>
-                <option value="crypto">Criptomoneda</option>
-                <option value="plazo_fijo">Plazo Fijo</option>
-                <option value="fci">FCI / Billetera (MP, Ualá)</option>
-                <option value="bono">Bono / ETF</option>
-              </select>
-              <select className="inp" value={hForm.goalId} onChange={e=>setHF({...hForm, goalId:e.target.value})}>
-                <option value="">-- Sin meta vinculada --</option>
-                {goals.filter(g=>g.saved<g.target).map(g => <option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}
-              </select>
-            </div>
-            {showRisk && <div style={{background:`rgba(255,77,106,0.1)`, color:T.red, padding:10, borderRadius:8, fontSize:11, border:`1px solid rgba(255,77,106,0.3)`}}>⚠️ Atención: Estás atando un activo volátil a una meta de muy corto plazo.</div>}
-            
-            <div className="g2">
-              <input className="inp" placeholder={["plazo_fijo","fci"].includes(hForm.type)?"Banco / Entidad":"Ticker (ej: BTC, AAPL)"} value={hForm.ticker} onChange={e=>setHF({...hForm, ticker:e.target.value.toUpperCase()})}/>
-              <input className="inp" placeholder="Nombre (opcional)" value={hForm.name} onChange={e=>setHF({...hForm, name:e.target.value})}/>
-            </div>
-
-            {["accion","crypto","cedear","bono","etf"].includes(hForm.type) ? (
-              <div className="g3">
-                <input className="inp" placeholder="Cantidad (ej: 0.5)" value={hForm.quantity} onChange={e=>setHF({...hForm, quantity:e.target.value})}/>
-                <input className="inp" placeholder="Precio Compra $" value={hForm.buyPrice} onChange={e=>setHF({...hForm, buyPrice:e.target.value})}/>
-                <select className="inp" value={hForm.currency} onChange={e=>setHF({...hForm, currency:e.target.value})}>
-                  <option>ARS</option><option>USD</option>
-                </select>
-              </div>
-            ) : (
-              <div className="g3">
-                <input className="inp" placeholder="Capital Inicial $" value={hForm.totalInvested} onChange={e=>setHF({...hForm, totalInvested:e.target.value})}/>
-                <input className="inp" placeholder="TNA %" value={hForm.rate} onChange={e=>setHF({...hForm, rate:e.target.value})}/>
-                <input type="date" className="inp" value={hForm.buyDate} onChange={e=>setHF({...hForm, buyDate:e.target.value})}/>
-              </div>
-            )}
-            <div className="g2">
-              <button className="btn bl" style={{justifyContent:"center"}} onClick={addH}>Confirmar en Portfolio</button>
-              <button className="btn bg" style={{justifyContent:"center"}} onClick={()=>setSHF(false)}>Cancelar</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div style={{display:"flex", flexDirection:"column", gap:14}}>
-        {holdings.map(h => {
-          const linkedGoal = goals.find(g => g.id === h.goalId);
-          const gain = (h.currentValue || h.totalInvested) - h.totalInvested;
-          return (
-            <div key={h.id} className="card up" style={{borderColor: linkedGoal ? T.hi : T.border}}>
-              <div style={{display:"flex", justifyContent:"space-between", marginBottom:12, flexWrap:"wrap", gap:10}}>
-                <div style={{display:"flex", gap:12, alignItems:"center"}}>
-                  <span style={{fontSize:24, background:T.raised, padding:8, borderRadius:12}}>{h.type==="crypto"?"₿":h.type==="plazo_fijo"?"🏦":"📈"}</span>
-                  <div>
-                    <div style={{fontWeight:800, fontSize:15}}>{h.ticker || h.name}</div>
-                    <div style={{fontSize:10, color:T.muted, marginTop:2}}>
-                      {h.type.replace("_"," ")} {linkedGoal && <span style={{color:T.lime, marginLeft:4}}>🎯 Atado a: {linkedGoal.name}</span>}
-                    </div>
-                  </div>
-                </div>
-                <div style={{display:"flex", gap:8}}>
-                  <button className="btn bg bsm" onClick={()=>refreshSingle(h)} disabled={refreshingId===h.id}>{refreshingId===h.id ? <Dots/> : "🔄 Actualizar"}</button>
-                  <button className="btn bd bsm" onClick={()=>update({holdings: holdings.filter(x=>x.id!==h.id)})}>×</button>
-                </div>
-              </div>
-              
-              <div className="g3" style={{background:T.raised, padding:14, borderRadius:14}}>
-                <div><div style={{fontSize:9, color:T.muted, marginBottom:4}}>Inversión Inicial</div><div className="mono" style={{fontSize:14}}>{fARS(h.totalInvested)}</div></div>
-                <div><div style={{fontSize:9, color:T.muted, marginBottom:4}}>Valor de Mercado</div><div className="mono" style={{fontSize:14, color:T.white}}>{fARS(h.currentValue || h.totalInvested)}</div></div>
-                <div><div style={{fontSize:9, color:T.muted, marginBottom:4}}>P&L (Ganancia)</div><div className="mono" style={{fontSize:14, color:gain>=0?T.lime:T.red}}>{gain>=0?"+":""}{fARS(gain)}</div></div>
-              </div>
-
-              <div style={{marginTop:12, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10}}>
-                <div style={{display:"flex", gap:6}}>
-                  <input className="inp" style={{width:90, padding:"6px 10px"}} placeholder="Cupón $" id={`div_${h.id}`}/>
-                  <button className="btn bg bsm" onClick={()=>{
-                    const amt = px(document.getElementById(`div_${h.id}`).value);
-                    if(amt>0) {
-                      update({transactions: [...transactions, {id:`d_${uid()}`, date:todayISO(), description:`Dividendo/Cupón: ${h.ticker||h.name}`, amount:amt, type:"income", category:"💰 Ahorro", currency:"ARS"}]});
-                      document.getElementById(`div_${h.id}`).value = "";
-                      notify("Ingreso registrado en movimientos ✓");
-                    }
-                  }}>➕ Cobrar Div.</button>
-                </div>
-                {h.lastUpdated && <div style={{fontSize:9, color:T.muted}}>Actualizado: {h.lastUpdated}</div>}
-              </div>
-            </div>
-          );
-        })}
-        {holdings.length === 0 && !showHForm && <div className="card" style={{textAlign:"center", padding:"50px", color:T.muted}}>Tu portfolio está vacío. Carga activos para verlos crecer y atalos a tus metas.</div>}
-      </div>
-    </div>
-  );
-}
-
-// ==========================================
-// MÓDULO 9: ÍCONOS Y UI BASE
-// ==========================================
-const ic = {
-  Grid: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>,
-  Tx: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>,
-  Target: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>,
-  Stock: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>,
-  Plus: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
-  Menu: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>,
-  X: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-};
-
-const Dots = () => <span className="mono">...</span>;
-const PH = ({title, right}) => (<div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24, flexWrap:"wrap", gap:10}}><h1 style={{fontSize:26, fontWeight:800, letterSpacing:"-1px"}}>{title}</h1>{right}</div>);
-function useDsp({displayCurrency, usdRate}){ const fmt = useCallback(a => displayCurrency==="USD" ? fUSD(a/usdRate) : fARS(a), [displayCurrency, usdRate]); return {fmt}; }
-function useIsMobile(){ const [m,setM]=useState(window.innerWidth<=768); useEffect(()=>{ const h=()=>setM(window.innerWidth<=768); window.addEventListener("resize",h); return()=>window.removeEventListener("resize",h); },[]); return m; }
-
-function Onboarding({update, notify}){
-  const [d, setD] = useState({name:"", income:"", goalName:"", goalAmt:""});
-  const finish = () => {
-    const patch = {onboardingDone: true};
-    if (d.goalName && px(d.goalAmt) > 0) {
-        patch.goals = [{id:`g_${uid()}`, name:d.goalName, target:px(d.goalAmt), saved:0, icon:"🎯", deadline:""}];
+  
+  const delHolding=id=>update({holdings:holdings.filter(h=>h.id!==id)});
+  
+  // REFRESH INDIVIDUAL OPTIMIZADO
+  const refreshSingle = async (h) => {
+    setRI(h.id);
+    let updatedHolding = { ...h };
+    
+    const isVar = ["accion", "cedear", "etf", "crypto"].includes(h.type);
+    
+    if (isVar) {
+      notify(`Consultando mercado para ${h.ticker||h.name}...`, "info");
+      const query = h.type === "crypto" ? `${h.ticker} crypto in USD` : h.ticker;
+      const raw = await ai(`Current market price for: ${query}. Date: ${todayISO()}. Return ONLY valid JSON: {"price": number}. USD for Crypto/US stocks, ARS for local AR stocks.`, "Financial data. Valid JSON only. Return just the numeric value in the JSON.");
+      if (raw) {
+        try {
+          const d = JSON.parse(cleanJSON(raw));
+          let cp = d.price || d.prices?.[h.ticker] || null;
+          if (cp) {
+            if (h.currency === "ARS" && (h.type === "cedear" || h.type === "crypto")) cp = cp * state.usdRate;
+            const cv = h.quantity ? h.quantity * cp : h.totalInvested * (cp / (h.buyPrice || cp));
+            updatedHolding = { ...updatedHolding, currentPrice: cp, currentValue: Math.round(cv), lastUpdated: todayISO() };
+            notify(`Cotización de ${h.ticker} actualizada ✓`);
+          } else throw new Error();
+        } catch {
+          notify(`No se pudo obtener precio de ${h.ticker}`, "err");
+        }
+      }
+    } else {
+      // RENTA FIJA: Cálculo instantáneo de intereses (Sin consumir API)
+      const days = Math.max(0, Math.floor((Date.now() - new Date(h.buyDate)) / 864e5));
+      const rateDec = h.rate / 100;
+      let cv = h.totalInvested;
+      if (h.type === "fci") {
+          cv = h.totalInvested * Math.pow(1 + (rateDec / 365), days); // Compuesto Diario
+      } else {
+          cv = h.totalInvested * (1 + rateDec * (days / 365)); // Simple
+      }
+      updatedHolding = { ...updatedHolding, currentValue: Math.round(cv), lastUpdated: todayISO() };
+      notify(`Rendimientos de ${h.name} calculados a hoy ✓`);
     }
-    update(patch);
-    notify("¡Bienvenido al Wealth Manager!");
+
+    update({ holdings: holdings.map(x => x.id === h.id ? updatedHolding : x) });
+    setRI(null);
   };
-  return(
-    <div style={{display:"flex", alignItems:"center", justifyContent:"center", height:"100vh", padding:20, background:T.bg}}>
-      <div className="card" style={{maxWidth:400, width:"100%"}}>
-        <h2 style={{marginBottom:10}}>Bienvenido 👋</h2>
-        <div style={{display:"flex", flexDirection:"column", gap:16, marginTop:20}}>
-          <input className="inp" placeholder="Tu nombre" value={d.name} onChange={e=>setD({...d, name:e.target.value})}/>
-          <div style={{borderTop:`1px solid ${T.border}`, paddingTop:20, marginTop:10}}>
-             <div style={{fontSize:12, color:T.muted, marginBottom:12}}>Define un objetivo de ahorro inicial (opcional):</div>
-             <input className="inp" placeholder="Ej: Viaje a Europa" value={d.goalName} onChange={e=>setD({...d, goalName:e.target.value})}/>
-             <input className="inp" style={{marginTop:10}} placeholder="Monto Objetivo $" value={d.goalAmt} onChange={e=>setD({...d, goalAmt:e.target.value})}/>
-          </div>
-          <button className="btn bl" style={{justifyContent:"center", marginTop:10}} onClick={finish}>Comenzar →</button>
-        </div>
-      </div>
+  
+  const PRESETS=[{t:"BTC",n:"Bitcoin"},{t:"ETH",n:"Ethereum"},{t:"AAPL",n:"Apple"},{t:"NVDA",n:"NVIDIA"},{t:"MELI",n:"MercadoLibre"},{t:"VIST",n:"Vista Oil"},{t:"YPF",n:"YPF SA"},{t:"SPY",n:"S&P 500 ETF"}];
+  const runScanner=async()=>{if(!riskProfile)return notify("Configurá tu perfil en el onboarding","info");setScan(true);setSE(null);notify("Analizando mercado...","info");try{const r=await autoScanInvestments(riskProfile,state.usdRate);setSR(r);notify(`${r.opportunities?.length||0} oportunidades ✓`);}catch(e){setSE("No se pudo conectar con la IA. Reintentá en un momento.");notify("Error","err");}setScan(false);};
+  const analyze=async(t,n)=>{const ex=savedAnalyses.find(a=>a.ticker===t);if(ex){setSel(ex);return;}setLoad(true);setLE(null);notify(`Analizando ${t}...`,"info");const r=await analyzeStock(t,n||t);if(r){update({savedAnalyses:[r,...savedAnalyses.filter(a=>a.ticker!==r.ticker)]});setSel(r);notify(`${t} analizado ✓`);}else{setLE(`No se pudo analizar "${t}". Verificá el ticker e intentá de nuevo.`);notify("Error","err");}setLoad(false);};
+  const saveFromScan=opp=>{const a={ticker:opp.ticker,company:opp.name,sector:"",signal:opp.signal,timeframe:opp.timeframe,upside:opp.upside,currentEstimate:opp.currentEstimate,peRatio:opp.peRatio,revenueGrowth:opp.revenueGrowth,moat:opp.moat,bullCase:opp.thesis,bearCase:opp.bearRisk,catalysts:opp.catalysts||[],risks:[opp.bearRisk],summary:opp.thesis,confidenceScore:opp.confidenceScore};update({savedAnalyses:[a,...savedAnalyses.filter(s=>s.ticker!==a.ticker)]});setJS(opp.ticker);setTimeout(()=>setJS(null),2500);notify(`${opp.ticker} guardado ✓`);};
+  
+  return(<div className="up"><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:8}}><div><h1 style={{fontSize:24,fontWeight:800,letterSpacing:"-1px"}}>Inversiones</h1><div style={{fontSize:12,color:T.muted,marginTop:4}}>Perfil: <span style={{color:T.lime,fontWeight:600}}>{riskProfile?.risk||"no configurado"}</span> · Horizonte: <span style={{color:T.lime,fontWeight:600}}>{riskProfile?.horizon||"—"}</span></div></div>{savedAnalyses.length>0&&<div className="chip"><ic.Check/>{savedAnalyses.length} guardados</div>}</div>
+  <div className="tabbar" style={{marginBottom:18}}>{[{id:"portfolio",l:`📊 Portfolio (${holdings.length})`},{id:"scanner",l:"🔍 Scanner"},{id:"manual",l:"🔎 Analizar Activo"},{id:"saved",l:`📁 (${savedAnalyses.length})`}].map(t=>(<button key={t.id} className={`tab${tab===t.id?" on":""}`} onClick={()=>setTab(t.id)}>{t.l}</button>))}</div>
+  {tab==="portfolio"&&<div>
+  <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>{[{l:"Capital Invertido",v:fARS(totalInvested),c:T.blue,i:"💰"},{l:"Valor al día de hoy",v:fARS(totalCurrent),c:T.lime,i:"📈"},{l:"Ganancia Patrimonial",v:`${totalPnL>=0?"+":""}${fARS(totalPnL)}`,c:totalPnL>=0?T.teal:T.red,i:totalPnL>=0?"✅":"⚠️"}].map((k,i)=><div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".5px"}}>{k.l}</span><span>{k.i}</span></div><div className="mono" title={k.v} style={{fontSize:16,fontWeight:600,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div></div>)}</div>
+  <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}><button className="btn bl" onClick={()=>setSHF(true)}><ic.Plus/> Agregar inversión manual</button></div>
+  {holdings.length>0&&<div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap",overflowX:"auto",paddingBottom:4}}>
+      <button style={{padding:"5px 12px",borderRadius:8,fontSize:11,fontWeight:600,border:`1px solid ${hFilter==="all"?T.lime:T.border}`,background:hFilter==="all"?"rgba(200,255,87,.1)":T.raised,color:hFilter==="all"?T.lime:T.muted,cursor:"pointer",whiteSpace:"nowrap"}} onClick={()=>setHFilter("all")}>Todas</button>
+      {holdingTypes.map(t=>(<button key={t} style={{padding:"5px 12px",borderRadius:8,fontSize:11,fontWeight:600,border:`1px solid ${hFilter===t?T.lime:T.border}`,background:hFilter===t?"rgba(200,255,87,.1)":T.raised,color:hFilter===t?T.lime:T.muted,cursor:"pointer",whiteSpace:"nowrap",textTransform:"capitalize"}} onClick={()=>setHFilter(t)}>{t.replace("_"," ")}</button>))}
+  </div>}
+  {showHForm&&<div className="card" style={{marginBottom:14}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><div style={{fontSize:14,fontWeight:700}}>Cargar activo existente</div><button className="btn bg bsm" onClick={()=>setSHF(false)}><ic.X/></button></div>
+  <div style={{display:"flex",flexDirection:"column",gap:10}}>
+  <div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tipo de instrumento</label><select className="inp" value={hForm.type} onChange={e=>setHF(f=>({...f,type:e.target.value}))}><option value="accion">📈 Acción local</option><option value="cedear">🇺🇸 CEDEAR</option><option value="etf">📊 ETF</option><option value="crypto">₿ Crypto (BTC, ETH...)</option><option value="plazo_fijo">🏦 Plazo fijo</option><option value="fci">💼 FCI (MercadoPago, etc)</option><option value="bono">📜 Bono</option></select></div>
+  <div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>{["plazo_fijo","fci","bono"].includes(hForm.type)?"Banco / Entidad *":"Ticker *"}</label><input className="inp" placeholder={["plazo_fijo","fci","bono"].includes(hForm.type)?"ej: Mercado Pago":"ej: BTC"} value={hForm.ticker} onChange={e=>setHF(f=>({...f,ticker:e.target.value.toUpperCase()}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Nombre (opcional)</label><input className="inp" placeholder="ej: Bitcoin" value={hForm.name} onChange={e=>setHF(f=>({...f,name:e.target.value}))}/></div></div>
+  {(["accion","cedear","etf","crypto"].includes(hForm.type))&&<div className="g3"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Cantidad *</label><input className="inp" placeholder="ej: 0.05" value={hForm.quantity} onChange={e=>setHF(f=>({...f,quantity:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Precio compra *</label><input className="inp" placeholder="ej: 65000" value={hForm.buyPrice} onChange={e=>setHF(f=>({...f,buyPrice:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda</label><select className="inp" value={hForm.currency} onChange={e=>setHF(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select></div></div>}
+  {(["plazo_fijo","fci","bono"].includes(hForm.type))&&<div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Capital Inicial (ARS) *</label><input className="inp" placeholder="ej: 500000" value={hForm.totalInvested} onChange={e=>setHF(f=>({...f,totalInvested:e.target.value}))}/></div>
+  
+  {(["plazo_fijo","fci","bono"].includes(hForm.type))&&<div>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+      <label style={{fontSize:11,color:T.muted,display:"block",margin:0}}>TNA % *</label>
+      <button className="btn bg bsm" style={{padding:"2px 8px",fontSize:9,color:T.lime}} onClick={handleAutoTNA} disabled={loadingTNA}>{loadingTNA?"...":"✨ Auto (BCRA)"}</button>
     </div>
-  );
+    <input className="inp" placeholder="ej: 32.5" value={hForm.rate} onChange={e=>setHF(f=>({...f,rate:e.target.value}))}/>
+  </div>}
+  </div>}
+
+  <div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha de inversión *</label><input type="date" className="inp" value={hForm.buyDate} onChange={e=>setHF(f=>({...f,buyDate:e.target.value}))}/></div>{(["plazo_fijo","bono"].includes(hForm.type))&&<div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Vencimiento (Opcional)</label><input type="date" className="inp" value={hForm.maturityDate} onChange={e=>setHF(f=>({...f,maturityDate:e.target.value}))}/></div>}</div>
+  <button className="btn bl" style={{justifyContent:"center", marginTop:8}} onClick={addHolding}>✓ Guardar en mi portfolio</button></div></div>}
+  {holdings.length===0&&!showHForm&&<div style={{textAlign:"center",padding:"48px 32px",color:T.muted}}><div style={{fontSize:40,marginBottom:12}}>📊</div><div style={{fontSize:14,marginBottom:4}}>Tu portfolio está vacío</div><div style={{fontSize:12}}>Agregá tus inversiones reales para proyectar tus ganancias en el Dashboard</div></div>}
+  {filteredHoldings.length>0&&<div style={{display:"flex",flexDirection:"column",gap:8}}>{filteredHoldings.map(h=>{
+    const pnl=(h.currentValue||h.totalInvested)-(h.totalInvested||0);
+    const pnlPct=h.totalInvested?((pnl/h.totalInvested)*100).toFixed(1):0;
+    const typeEmoji={"accion":"📈","cedear":"🇺🇸","etf":"📊","plazo_fijo":"🏦","fci":"💼","bono":"📜","crypto":"₿"}[h.type]||"💰";
+    
+    let projectedMaturity = null;
+    if (h.maturityDate && h.rate && h.buyDate) {
+        const totalDays = Math.max(1, Math.floor((new Date(h.maturityDate) - new Date(h.buyDate)) / 864e5));
+        projectedMaturity = h.totalInvested * (1 + (h.rate/100) * (totalDays/365));
+    }
+
+    return<div key={h.id} className="card" style={{padding:"14px 16px"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+        <div style={{display:"flex",gap:10,alignItems:"center"}}><span style={{fontSize:22}}>{typeEmoji}</span><div style={{minWidth:0}}><div style={{display:"flex",gap:6,alignItems:"center"}}><span className="mono" title={h.ticker||h.name} style={{fontSize:15,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:140}}>{h.ticker||h.name}</span>{h.currency==="USD"&&<span style={{fontSize:10,color:T.blue,fontWeight:600,background:"rgba(77,158,255,.1)",padding:"2px 6px",borderRadius:4}}>USD</span>}</div><div style={{fontSize:11,color:T.muted,marginTop:2}}>{h.name!==h.ticker?h.name:""} {h.quantity?`· ${h.quantity} unid. a ${h.currency==="USD"?"U$D":"$"}${h.buyPrice}`:h.rate?`· TNA ${h.rate}%`:""}</div></div></div>
+        
+        <div style={{display:"flex",gap:6}}>
+            <button className="btn bg bsm" style={{padding:"6px 10px", color:T.lime}} onClick={()=>refreshSingle(h)} disabled={refreshingId===h.id}>{refreshingId===h.id?<Dots/>:<><ic.Refresh/> Actualizar</>}</button>
+            <button className="btn bd bsm" style={{padding:"6px 10px"}} onClick={()=>delHolding(h.id)}><ic.Trash/></button>
+        </div>
+    </div>
+    
+    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,background:T.raised,padding:"10px 12px",borderRadius:10}}>
+        <div><div style={{fontSize:9,color:T.muted,marginBottom:2}}>Inicial</div><div className="mono" style={{fontSize:12}}>{fARS(h.totalInvested||0)}</div></div>
+        <div><div style={{fontSize:9,color:T.muted,marginBottom:2}}>Actual (Hoy)</div><div className="mono" style={{fontSize:12,color:h.currentValue?T.white:T.muted}}>{h.currentValue?fARS(h.currentValue):"—"}</div></div>
+        <div><div style={{fontSize:9,color:T.muted,marginBottom:2}}>Ganancia</div><div className="mono" style={{fontSize:12,color:h.currentValue?(pnl>=0?T.teal:T.red):T.muted}}>{h.currentValue?`${pnl>=0?"+":""}${fARS(pnl)}`:"—"}</div></div>
+        <div><div style={{fontSize:9,color:T.muted,marginBottom:2}}>Rend. %</div><div className="mono" style={{fontSize:12,color:h.currentValue?(pnl>=0?T.teal:T.red):T.muted}}>{h.currentValue?`${pnl>=0?"+":""}${pnlPct}%`:"—"}</div></div>
+    </div>
+    
+    {projectedMaturity && <div style={{marginTop:8, background:"rgba(200,255,87,.05)", border:`1px dashed rgba(200,255,87,.2)`, borderRadius:8, padding:"8px 12px", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+        <div><div style={{fontSize:10, color:T.mid}}>Proyección al vencimiento</div><div style={{fontSize:9, color:T.muted}}>{h.maturityDate}</div></div>
+        <div className="mono" style={{fontSize:14, color:T.lime, fontWeight:600}}>{fARS(projectedMaturity)}</div>
+    </div>}
+    
+    {h.lastUpdated&&<div style={{fontSize:9,color:T.muted,marginTop:8,textAlign:"right"}}>Última act: {h.lastUpdated}</div>}</div>})}</div>}</div>}
+  {tab==="scanner"&&<div><div className="card" style={{marginBottom:14,background:`linear-gradient(135deg,${T.surface},#0f1525)`}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12,flexWrap:"wrap",gap:10}}><div><div style={{fontSize:15,fontWeight:700,marginBottom:4}}>🤖 Scanner automático con IA</div><div style={{fontSize:12,color:T.muted}}>Encuentra oportunidades adaptadas a tu perfil.</div></div><button className="btn bl" onClick={runScanner} disabled={scanning} style={{flexShrink:0}}>{scanning?<><Dots/> Analizando...</>:<><ic.Scan/> Escanear mercado</>}</button></div>{riskProfile&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}><div className="chip">🛡️ {riskProfile.risk}</div><div className="chip">⏱️ {riskProfile.horizon}</div></div>}</div>{scanErr&&<div style={{background:"rgba(255,77,106,.08)",border:`1px solid rgba(255,77,106,.25)`,borderRadius:10,padding:"10px 14px",fontSize:12,color:T.red,marginBottom:14}}>⚠ {scanErr}</div>}{scanning&&<div style={{textAlign:"center",padding:"48px 0",color:T.muted}}><div style={{fontSize:32,marginBottom:12}}>🔍</div><div style={{fontSize:14,marginBottom:8}}>Analizando el mercado...</div><Dots/></div>}{scanResult&&!scanning&&<div>{scanResult.marketContext&&<div style={{background:"rgba(77,158,255,.07)",border:`1px solid rgba(77,158,255,.15)`,borderRadius:12,padding:"12px 16px",marginBottom:14,fontSize:12,color:T.blue}}>🌍 {scanResult.marketContext}</div>}<div className="inv-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(270px,1fr))",gap:12}}>{scanResult.opportunities?.map((opp,i)=>(<div key={i} className="card" style={{cursor:"pointer",border:`1px solid ${opp.ticker===scanResult.topPick?T.lime:T.border}`,background:opp.ticker===scanResult.topPick?"rgba(200,255,87,.03)":T.surface,position:"relative",transition:"all .2s"}}>{opp.ticker===scanResult.topPick&&<div style={{position:"absolute",top:-8,right:12,background:T.lime,color:T.bg,fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:99}}>TOP PICK</div>}<div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}><div><div style={{display:"flex",gap:7,alignItems:"center",marginBottom:3}}><span className="mono" style={{fontSize:16,fontWeight:700}}>{opp.ticker}</span><span className={`tag ${sigCls(opp.signal)}`} style={{fontSize:10}}>{opp.signal}</span></div><div style={{fontSize:11,color:T.muted}}>{opp.name}</div></div></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginBottom:10}}>{[{l:"Upside",v:`${opp.upside>0?"+":""}${(opp.upside||0).toFixed(0)}%`,c:opp.upside>0?T.lime:T.red},{l:"Fit",v:`${opp.profileFit||0}%`,c:(opp.profileFit||0)>=70?T.teal:T.amber},{l:"Confianza",v:`${opp.confidenceScore||0}%`,c:(opp.confidenceScore||0)>=70?T.lime:T.amber}].map((s,j)=>(<div key={j} style={{background:T.raised,borderRadius:7,padding:"6px 8px"}}><div style={{fontSize:9,color:T.muted,marginBottom:2}}>{s.l}</div><div className="mono" style={{fontSize:12,color:s.c}}>{s.v}</div></div>))}</div><div style={{fontSize:11,color:T.muted,lineHeight:1.5,marginBottom:10,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{opp.thesis}</div><button className={`btn bsm ${justSaved===opp.ticker?"bl":"bg"}`} style={{width:"100%",justifyContent:"center"}} onClick={e=>{e.stopPropagation();saveFromScan(opp);}}>{justSaved===opp.ticker?<><ic.Check/> Guardado</>:"+ Analizar en detalle"}</button></div>))}</div><div style={{fontSize:10,color:T.muted,textAlign:"center",marginTop:12}}>⚠️ Análisis educativo. No constituye asesoramiento financiero.</div></div>}{!scanResult&&!scanning&&!scanErr&&<div style={{textAlign:"center",padding:"48px 32px",color:T.muted}}><div style={{fontSize:40,marginBottom:12}}>🔍</div><div style={{fontSize:14,marginBottom:4}}>El scanner analiza el mercado automáticamente</div><div style={{fontSize:12}}>Usa tu perfil de riesgo para encontrar oportunidades</div></div>}</div>}
+  {tab==="manual"&&<div><div className="card" style={{marginBottom:14}}><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:10}}>Buscar por ticker o moneda</div><div style={{display:"flex",gap:10,flexWrap:"wrap"}}><input className="inp" style={{flex:.6,minWidth:80}} placeholder="ej: BTC" value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&analyze(ticker,tname)}/><input className="inp" style={{flex:1.2,minWidth:120}} placeholder="Nombre (opcional)" value={tname} onChange={e=>setTname(e.target.value)} onKeyDown={e=>e.key==="Enter"&&analyze(ticker,tname)}/><button className="btn bl" onClick={()=>analyze(ticker,tname)} disabled={loading||!ticker}>{loading?<Dots/>:<><ic.Stock/> Analizar IA</>}</button></div>{loadErr&&<div style={{marginTop:10,background:"rgba(255,77,106,.08)",border:`1px solid rgba(255,77,106,.25)`,borderRadius:8,padding:"8px 12px",fontSize:12,color:T.red}}>{loadErr}</div>}<div style={{marginTop:12}}><div style={{fontSize:10,color:T.muted,marginBottom:7,textTransform:"uppercase",letterSpacing:".6px"}}>Acceso rápido</div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{PRESETS.map(p=><button key={p.t} onClick={()=>analyze(p.t,p.n)} disabled={loading} style={{padding:"5px 11px",borderRadius:7,fontSize:11,fontWeight:500,border:`1px solid ${savedAnalyses.find(a=>a.ticker===p.t)?T.lime:T.border}`,background:savedAnalyses.find(a=>a.ticker===p.t)?"rgba(200,255,87,.08)":T.raised,color:savedAnalyses.find(a=>a.ticker===p.t)?T.lime:T.mid,cursor:"pointer",transition:"all .15s"}}>{p.t}</button>)}</div></div></div>{sel&&<AnalysisDetail a={sel} onClose={()=>setSel(null)}/>}</div>}
+  {tab==="saved"&&<div>{savedAnalyses.length===0?<div style={{textAlign:"center",padding:"48px 32px",color:T.muted}}><div style={{fontSize:40,marginBottom:12}}>📁</div><div style={{fontSize:14}}>Sin análisis guardados</div></div>:<div><div className="inv-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(250px,1fr))",gap:10,marginBottom:14}}>{savedAnalyses.map(a=>(<div key={a.ticker} onClick={()=>setSel(sel?.ticker===a.ticker?null:a)} className="card" style={{cursor:"pointer",border:`1px solid ${sel?.ticker===a.ticker?T.lime:T.border}`,transition:"all .2s",position:"relative"}}><button onClick={e=>{e.stopPropagation();update({savedAnalyses:savedAnalyses.filter(x=>x.ticker!==a.ticker)});if(sel?.ticker===a.ticker)setSel(null);notify("Eliminado","err");}} className="btn bd bsm" style={{position:"absolute",top:12,right:12}}><ic.Trash/></button><div style={{display:"flex",gap:8,alignItems:"center",marginBottom:6,paddingRight:36}}><span className="mono" style={{fontSize:16,fontWeight:700}}>{a.ticker}</span><span className={`tag ${sigCls(a.signal)}`} style={{fontSize:10}}>{a.signal}</span></div><div style={{fontSize:11,color:T.muted,marginBottom:8}}>{a.company}</div><div style={{display:"flex",gap:7}}>{[{l:"Upside",v:`${a.upside>0?"+":""}${(a.upside||0).toFixed(0)}%`,c:a.upside>0?T.lime:T.red},{l:"Confianza",v:`${a.confidenceScore||0}%`,c:(a.confidenceScore||0)>=70?T.lime:T.amber}].map((s,i)=>(<div key={i} style={{background:T.raised,borderRadius:7,padding:"6px 10px"}}><div style={{fontSize:9,color:T.muted,marginBottom:2}}>{s.l}</div><div className="mono" style={{fontSize:12,color:s.c}}>{s.v}</div></div>))}</div></div>))}</div>{sel&&<AnalysisDetail a={sel} onClose={()=>setSel(null)}/>}</div>}</div>}</div>);
 }
 
-const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=DM+Mono:wght@300;400;500&display=swap');
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html,body{background:#07080D;color:#F0F2F7;font-family:'Sora',sans-serif;overflow:hidden;height:100%}
-::-webkit-scrollbar{width:3px}
-::-webkit-scrollbar-thumb{background:#3A4255;border-radius:99px}
-.mono{font-family:'DM Mono',monospace}
-input,select,textarea,button{font-family:inherit}
-button{cursor:pointer;border:none;background:none}
-.up{animation:up .35s ease both}
-@keyframes up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-.nav{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;font-size:14px;font-weight:500;color:#3A4255;transition:all .2s;width:100%;text-align:left}
-.nav:hover{color:#F0F2F7;background:#111520}
-.nav.on{color:#C8FF57;background:rgba(200,255,87,.07);font-weight:700}
-.inp{background:#111520;border:1px solid #1C2030;border-radius:12px;padding:12px 14px;font-size:14px;color:#F0F2F7;outline:none;width:100%;transition:all .2s}
-.inp:focus{border-color:#C8FF57;background:#161B2A}
-.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:12px;font-size:14px;font-weight:700;transition:all .2s;white-space:nowrap}
-.btn:active{transform:scale(0.96)}
-.bl{background:#C8FF57;color:#07080D}
-.bl:hover{background:#A8E030;box-shadow:0 0 15px rgba(200,255,87,0.3)}
-.bg{background:#111520;color:#8892A4;border:1px solid #1C2030}
-.bg:hover{background:#1C2030;color:white}
-.bd{background:rgba(255,77,106,.08);color:#FF4D6A;border:1px solid rgba(255,77,106,.2)}
-.bsm{padding:8px 12px;font-size:12px;border-radius:10px}
-.card{background:#0C0E15;border:1px solid #1C2030;border-radius:20px;padding:24px}
-.prog{height:8px;border-radius:4px;background:#111520;overflow:hidden}
-.progf{height:100%;border-radius:4px;transition:width .7s cubic-bezier(0.16, 1, 0.3, 1)}
-.ov{position:fixed;inset:0;background:rgba(0,0,0,.85);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px}
-.modal{background:#0C0E15;border:1px solid #1C2030;border-radius:28px;padding:32px;width:540px;max-width:100%;max-height:92vh;overflow-y:auto;box-shadow:0 20px 50px rgba(0,0,0,0.5)}
-.tbl{width:100%;border-collapse:collapse}
-.tbl th{padding:14px;font-size:11px;color:#3A4255;text-transform:uppercase;text-align:left;border-bottom:1px solid #1C2030;letter-spacing:1.5px}
-.tbl td{padding:14px;font-size:14px;border-bottom:1px solid #0E1117}
-.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
-.toast{position:fixed;bottom:24px;right:24px;padding:16px 28px;border-radius:16px;font-size:14px;font-weight:600;background:#C8FF57;color:#07080D;z-index:999;box-shadow:0 10px 30px rgba(200,255,87,0.3)}
-@media(max-width:768px){.hide-m{display:none!important}.g2,.g3{grid-template-columns:1fr!important}.kpi-grid{grid-template-columns:1fr 1fr!important}}
-`;
+function AnalysisDetail({a,onClose}){
+  if(!a)return null;
+  return(<div className="card up" style={{border:`1px solid ${T.hi}`,marginTop:14}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:18,flexWrap:"wrap",gap:8}}><div><div style={{display:"flex",gap:10,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}><span className="mono" style={{fontSize:22,fontWeight:700}}>{a.ticker}</span><span className={`tag ${sigCls(a.signal)}`}>{a.signal}</span><span className={`tag ${a.timeframe==="SHORT"?"te":a.timeframe==="LONG"?"ti":"ts"}`}>{a.timeframe}</span></div><div style={{fontSize:13,color:T.mid}}>{a.company}{a.sector?` · ${a.sector}`:""}</div></div><button className="btn bg bsm" onClick={onClose}><ic.X/></button></div><div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:18}}>{[{l:"Precio est.",v:`$${(a.currentEstimate||0).toFixed(0)}`},{l:"Target 12m",v:`$${(a.priceTarget12m||0).toFixed(0)}`,c:T.lime},{l:"Upside",v:`${a.upside>0?"+":""}${(a.upside||0).toFixed(1)}%`,c:a.upside>0?T.lime:T.red},{l:"P/E",v:a.peRatio?(a.peRatio.toFixed(1)):"—"},{l:"Rev. Growth",v:a.revenueGrowth?`${(a.revenueGrowth).toFixed(1)}%`:"—",c:a.revenueGrowth>0?T.teal:T.red}].map((s,i)=>(<div key={i} style={{background:T.raised,borderRadius:10,padding:"12px 14px"}}><div style={{fontSize:10,color:T.muted,marginBottom:5}}>{s.l}</div><div className="mono" style={{fontSize:16,fontWeight:500,color:s.c||T.white}}>{s.v}</div></div>))}</div><div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>{[{title:"🐂 Bull case",color:T.lime,body:a.bullCase,sub:"Catalizadores",items:a.catalysts},{title:"🐻 Bear case",color:T.red,body:a.bearCase,sub:"Riesgos",items:a.risks}].map((p,i)=>(<div key={i} style={{background:T.raised,borderRadius:12,padding:"14px 16px"}}><div style={{fontSize:11,color:p.color,fontWeight:600,marginBottom:7}}>{p.title}</div><div style={{fontSize:12,color:T.mid,lineHeight:1.6,marginBottom:8}}>{p.body}</div><div style={{fontSize:10,color:T.muted,marginBottom:5}}>{p.sub}</div>{p.items?.map((it,j)=><div key={j} style={{fontSize:11,color:T.mid,padding:"3px 0",borderBottom:`1px solid ${T.border}`}}>▸ {it}</div>)}</div>))}</div>{a.moat&&<div style={{background:"rgba(77,158,255,.06)",border:`1px solid rgba(77,158,255,.15)`,borderRadius:10,padding:"12px 16px",marginBottom:8}}><div style={{fontSize:11,color:T.blue,fontWeight:600,marginBottom:4}}>🏰 Moat</div><div style={{fontSize:12,color:T.mid}}>{a.moat}</div></div>}<div style={{fontSize:10,color:T.muted,textAlign:"center",marginTop:4}}>⚠️ Análisis educativo. No constituye asesoramiento financiero.</div></div>);
+}
+
+function Import({state,update,notify}){
+  const [tab,setTab]=useState("image");
+  const [imgSrc,setImgSrc]=useState(null);
+  const [imgMime,setImgMime]=useState("image/png");
+  const [extracting,setExt]=useState(null);
+  const [extractErr,setEE]=useState(null);
+  const [paste,setPaste]=useState("");
+  const [preview,setPreview]=useState([]);
+  const [over,setOver]=useState(false);
+  const [catE,setCE]=useState({});
+  const [autoRunning,setAR]=useState(false);
+  const imgRef=useRef();
+  const csvRef=useRef();
+  const handleImgFile=file=>{if(!file)return;const mime=["image/jpeg","image/png","image/gif","image/webp"].includes(file.type)?file.type:"image/png";const r=new FileReader();r.onload=e=>{setImgSrc(e.target.result);setImgMime(mime);setExt(null);setEE(null);};r.readAsDataURL(file);};
+  const extractImg=async()=>{if(!imgSrc)return;setExt("loading");setEE(null);notify("Analizando imagen con IA...","info");const b64=imgSrc.split(",")[1];const result=await extractFromImage(b64,imgMime);if(!result||!result.transactions?.length){setExt("error");setEE("No se detectaron transacciones. Probá con una imagen más nítida.");notify("Sin transacciones detectadas","err");return;}setPreview(result.transactions.map((t,i)=>({...t,id:`img_${uid()}_${i}`,currency:result.currency||"ARS",source:"image"})));setExt("done");notify(`${result.transactions.length} transacciones extraídas${result.appDetected?` · App: ${result.appDetected}`:""} ✓`);};
+  const handleCSV=file=>{const r=new FileReader();r.onload=e=>{const p=parseCSV(e.target.result);if(!p.length)return notify("Sin datos válidos en el CSV","err");setPreview(p);notify(`${p.length} movimientos detectados`);};r.readAsText(file,"utf-8");};
+  const doPaste=()=>{const lines=paste.trim().split("\n").filter(l=>l.trim());const out=[];for(const l of lines){const amts=[...l.matchAll(/[\d.,]+/g)].map(m=>px(m[0])).filter(a=>a>100);if(!amts.length)continue;const dm=l.match(/\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]?\d{0,4}/);const CUR=getCUR();out.push({id:`p_${uid()}`,date:dm?dm[0]:CUR+"-01",description:l.replace(/[\d.,$%\/\-]/g,"").trim().slice(0,60)||"TX",amount:amts[0],type:"expense",category:"❓ Otros",currency:"ARS"});}if(!out.length)return notify("Sin montos detectados","err");setPreview(out);notify(`${out.length} movimientos detectados`);};
+  const autoCatAll=async()=>{setAR(true);notify("Auto-categorizando con IA...","info");const upd=[];for(const t of preview){const r=await autoCat(t.description);upd.push({...t,category:r.category||t.category,type:r.type||t.type});}setPreview(upd);setAR(false);notify("Categorización completa ✓");};
+  const confirm=()=>{const toAdd=preview.map(t=>({...t,id:`i_${uid()}`,category:catE[t.id]||t.category}));update({transactions:[...state.transactions,...toAdd]});setPreview([]);setPaste("");setImgSrc(null);setExt(null);notify(`${toAdd.length} movimientos importados ✓`);};
+  return(<div className="up"><PH title="Importar datos" sub="Imagen · CSV · Texto pegado"/>
+  <div className="tabbar" style={{marginBottom:18}}>{[{id:"image",l:"📸 Imagen"},{id:"csv",l:"📁 CSV"},{id:"paste",l:"📋 Texto"},{id:"guide",l:"💡 Guía"}].map(t=>(<button key={t.id} className={`tab${tab===t.id?" on":""}`} onClick={()=>setTab(t.id)}>{t.l}</button>))}</div>
+  {tab==="image"&&<div><div style={{background:"rgba(167,139,250,.06)",border:`1px solid rgba(167,139,250,.2)`,borderRadius:12,padding:"12px 16px",marginBottom:14,fontSize:12,color:T.purple}}>✨ Subí un screenshot de Mercado Pago, Ualá, Brubank, o cualquier resumen bancario. La IA extrae las transacciones automáticamente.</div><div className={`imgdrop${over?" ov2":""}`} onDragOver={e=>{e.preventDefault();setOver(true);}} onDragLeave={()=>setOver(false)} onDrop={e=>{e.preventDefault();setOver(false);const f=e.dataTransfer.files[0];if(f)handleImgFile(f);}} onClick={()=>imgRef.current?.click()}>{imgSrc?<img src={imgSrc} alt="preview" style={{maxWidth:"100%",maxHeight:300,borderRadius:8,objectFit:"contain"}}/>:<><div style={{fontSize:40}}>📸</div><div style={{fontSize:15,fontWeight:600,color:T.mid}}>Arrastrá o hacé clic para subir</div><div style={{fontSize:12,color:T.muted}}>PNG, JPG, HEIC — screenshots bancarios</div></>}<input ref={imgRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>e.target.files[0]&&handleImgFile(e.target.files[0])}/></div>{imgSrc&&<div style={{display:"flex",gap:8,marginTop:10}}><button className="btn bl" style={{flex:1,justifyContent:"center"}} onClick={extractImg} disabled={extracting==="loading"}>{extracting==="loading"?<><Dots/> Extrayendo...</>:"🔍 Extraer con IA"}</button><button className="btn bg" onClick={()=>{setImgSrc(null);setExt(null);setEE(null);}}>Cambiar</button></div>}{extracting==="error"&&extractErr&&<div style={{marginTop:10,background:"rgba(255,77,106,.08)",border:`1px solid rgba(255,77,106,.25)`,borderRadius:8,padding:"10px 14px",fontSize:12,color:T.red}}>{extractErr}</div>}{extracting==="done"&&preview.length>0&&<div style={{marginTop:10,background:"rgba(0,229,195,.06)",border:`1px solid rgba(0,229,195,.2)`,borderRadius:8,padding:"10px 14px",fontSize:12,color:T.teal}}>✓ {preview.length} transacciones listas. Revisalas abajo antes de importar.</div>}</div>}
+  {tab==="csv"&&<div><div className={`dz${over?" ov2":""}`} onDragOver={e=>{e.preventDefault();setOver(true);}} onDragLeave={()=>setOver(false)} onDrop={e=>{e.preventDefault();setOver(false);const f=e.dataTransfer.files[0];if(f)handleCSV(f);}} onClick={()=>csvRef.current?.click()}><div style={{fontSize:40,marginBottom:10}}>📂</div><div style={{fontSize:15,fontWeight:600,color:T.mid}}>Arrastrá o hacé clic</div><div style={{fontSize:12,color:T.muted}}>CSV con coma, punto y coma o tabulación</div><input ref={csvRef} type="file" accept=".csv,.txt" style={{display:"none"}} onChange={e=>e.target.files[0]&&handleCSV(e.target.files[0])}/></div><div className="card csm" style={{marginTop:12}}><div style={{fontSize:11,color:T.mid,fontWeight:600,marginBottom:7}}>Formato esperado</div><code style={{fontSize:11,color:T.lime,display:"block",background:T.raised,padding:"10px 14px",borderRadius:8,lineHeight:1.7,fontFamily:"'DM Mono',monospace"}}>fecha;descripcion;importe<br/>2025-01-15;Supermercado Coto;-15000<br/>2025-01-20;Sueldo enero;350000</code></div></div>}
+  {tab==="paste"&&<div><div style={{fontSize:12,color:T.mid,marginBottom:8}}>Pegá el texto copiado de cualquier app o homebanking</div><textarea className="inp" style={{minHeight:150,resize:"vertical",lineHeight:1.6,fontSize:13}} placeholder={"15/01 Netflix $2.800\n16/01 Supermercado $15.200\n20/01 Sueldo $350.000"} value={paste} onChange={e=>setPaste(e.target.value)}/><button className="btn bl" style={{marginTop:10}} onClick={doPaste} disabled={!paste.trim()}>Analizar texto</button></div>}
+  {tab==="guide"&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:12}}>{[{app:"🟢 Mercado Pago",steps:["App → Actividad","Filtrar fecha → ⋮ → Exportar CSV","O capturá screenshot y subí la imagen"]},{app:"🟣 Ualá",steps:["Movimientos → ⬇ Descargar CSV","O screenshot del historial"]},{app:"🔵 Brubank",steps:["Cuenta → Movimientos → Exportar CSV","O screenshot del historial"]},{app:"🏦 Galicia / Nación",steps:["Homebanking → Extracto → CSV","Formato: fecha;descripcion;debito;credito"]},{app:"📸 Cualquier app",steps:["Capturá screenshot del historial","Subí la imagen en 'Imagen'","La IA detecta los movimientos"]}].map(({app,steps})=><div key={app} className="card csm"><div style={{fontSize:13,fontWeight:600,marginBottom:9}}>{app}</div><ol style={{paddingLeft:16,display:"flex",flexDirection:"column",gap:6}}>{steps.map((s,i)=><li key={i} style={{fontSize:12,color:T.muted}}>{s}</li>)}</ol></div>)}</div>}
+  {preview.length>0&&<div style={{marginTop:22}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}><h2 style={{fontSize:16,fontWeight:700}}>{preview.length} movimientos detectados</h2><div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button className="btn bg" onClick={autoCatAll} disabled={autoRunning}>{autoRunning?<><Dots/> Categorizando...</>:"✨ Auto-categorizar IA"}</button><button className="btn bg" onClick={()=>{setPreview([]);setCE({});}}>Cancelar</button><button className="btn bl" onClick={confirm}>✓ Importar todo</button></div></div><div className="card" style={{padding:0,overflow:"auto",maxHeight:380}}><table className="tbl"><thead><tr><th className="hide-m">Fecha</th><th>Descripción</th><th>Monto</th><th className="hide-m">Tipo</th><th>Categoría</th></tr></thead><tbody>{preview.slice(0,50).map(t=>(<tr key={t.id}><td className="mono hide-m" style={{fontSize:11,color:T.muted}}>{t.date}</td><td style={{fontSize:12,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td><td className="mono" style={{fontSize:12,color:t.type==="income"?T.teal:T.red}}>{t.type==="income"?"+":"-"}{fARS(t.amount)}</td><td className="hide-m"><span className={`tag ${t.type==="income"?"ti":"te"}`} style={{fontSize:10}}>{t.type==="income"?"Ingreso":"Gasto"}</span></td><td><select className="inp" style={{fontSize:11,padding:"4px 8px"}} value={catE[t.id]||t.category} onChange={e=>setCE(c=>({...c,[t.id]:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select></td></tr>))}</tbody></table>{preview.length>50&&<div style={{padding:"8px 16px",fontSize:11,color:T.muted,textAlign:"center"}}>...y {preview.length-50} más</div>}</div></div>}</div>);
+}
