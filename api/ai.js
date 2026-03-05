@@ -7,7 +7,6 @@ export default async function handler(req, res) {
 
   if (req.method === "OPTIONS") return res.status(200).end();
 
-  // GET = diagnostic
   if (req.method === "GET") {
     const key = (process.env.GEMINI_API_KEY || "").trim();
     return res.status(200).json({
@@ -17,7 +16,7 @@ export default async function handler(req, res) {
       hasKey: key.length > 0,
       keyPrefix: key.slice(0, 8) + "...",
       keyLength: key.length,
-      maxOutputTokens: 8192,
+      maxOutputTokens: 4096,
       timestamp: new Date().toISOString(),
     });
   }
@@ -36,7 +35,6 @@ export default async function handler(req, res) {
     if (!body || !body.messages || !Array.isArray(body.messages))
       return res.status(400).json({ error: "messages array required" });
 
-    // --- Convert Anthropic message format → Gemini format ---
     const contents = body.messages.map((msg) => {
       const role = msg.role === "assistant" ? "model" : "user";
       const parts = [];
@@ -61,20 +59,14 @@ export default async function handler(req, res) {
       return { role, parts };
     });
 
-    // Use 8192 tokens minimum — Gemini counts tokens differently than Claude,
-    // and financial JSON responses are verbose. The frontend sends 1500 which
-    // was fine for Claude but causes truncation on Gemini.
-    const maxTokens = Math.max(body.max_tokens || 1500, 4096);
-
     const geminiPayload = {
       contents,
       generationConfig: {
-        maxOutputTokens: maxTokens,
+        maxOutputTokens: 4096,
         temperature: 0.3,
       },
     };
 
-    // System instruction
     if (body.system && typeof body.system === "string" && body.system.trim()) {
       geminiPayload.systemInstruction = {
         parts: [{ text: body.system.trim() }],
@@ -102,28 +94,19 @@ export default async function handler(req, res) {
     }
 
     const geminiData = JSON.parse(geminiText);
-
-    // Check if response was truncated
     const finishReason = geminiData.candidates?.[0]?.finishReason;
-    if (finishReason === "MAX_TOKENS") {
-      console.warn("Gemini response truncated (MAX_TOKENS)");
-    }
 
-    // Extract text from response
     let outputText =
       geminiData.candidates?.[0]?.content?.parts
         ?.map((p) => p.text || "")
         .join("") || "";
 
-    // Clean markdown fences that Gemini sometimes adds
     outputText = outputText.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
 
-    // If the response looks like truncated JSON, try to repair it
     if (finishReason === "MAX_TOKENS" && outputText.includes("{")) {
       outputText = tryRepairJSON(outputText);
     }
 
-    // Return in Anthropic response format so frontend works unchanged
     return res.status(200).json({
       content: [{ type: "text", text: outputText }],
     });
@@ -133,18 +116,12 @@ export default async function handler(req, res) {
   }
 }
 
-// Attempts to close truncated JSON by balancing braces/brackets
 function tryRepairJSON(text) {
-  // Strip any trailing incomplete string value
-  // e.g. ..."thesis": "Some text that got cu
   text = text.replace(/,\s*"[^"]*":\s*"[^"]*$/s, "");
   text = text.replace(/,\s*"[^"]*$/, "");
+  text = text.replace(/,\s*\{[^}]*$/s, "");
 
-  let braces = 0;
-  let brackets = 0;
-  let inString = false;
-  let escape = false;
-
+  let braces = 0, brackets = 0, inString = false, escape = false;
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
     if (escape) { escape = false; continue; }
@@ -157,18 +134,10 @@ function tryRepairJSON(text) {
     if (c === "]") brackets--;
   }
 
-  // Close open arrays and objects
   let suffix = "";
   while (brackets > 0) { suffix += "]"; brackets--; }
   while (braces > 0) { suffix += "}"; braces--; }
 
   const repaired = text + suffix;
-
-  // Verify it actually parses
-  try {
-    JSON.parse(repaired);
-    return repaired;
-  } catch {
-    return text; // Return original if repair failed
-  }
+  try { JSON.parse(repaired); return repaired; } catch { return text; }
 }
