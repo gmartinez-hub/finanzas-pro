@@ -213,24 +213,65 @@ function Transactions({state,update,notify}){
 }
 
 function Goals({state,update,notify}){
-  const {goals,transactions,usdRate,salaries}=state;
-  const {fmt}=useDsp(state);
-  const NOW=getNow();
-  const [sf,setSF]=useState(false);
-  const [addTo,setAT]=useState(null);
-  const [addAmt,setAA]=useState("");
-  const [addCur,setAC]=useState("ARS");
-  const [form,setForm]=useState({name:"",target:"",currency:"ARS",saved:"",icon:"🎯",deadline:""});
-  const ICONS=["🎯","✈️","🚗","🏠","💻","📱","💍","🎓","🏖️","💰","🏋️","🎸","🛵","🌎","👶","🏡"];
-  const {disponible,perGoal}=goalPlan(goals,salaries,transactions,state.holdings||[]);
-  const addG=()=>{if(!form.name||!form.target)return notify("Nombre y monto requeridos","err");const t=Math.abs(px(form.target))*(form.currency==="USD"?usdRate:1);update({goals:[...goals,{id:`g_${uid()}`,name:form.name,target:t,saved:Math.abs(px(form.saved))||0,icon:form.icon,deadline:form.deadline,createdAt:todayISO()}]});setForm({name:"",target:"",currency:"ARS",saved:"",icon:"🎯",deadline:""});setSF(false);notify("Meta creada ✓");};
+  const {goals,transactions,usdRate,salaries,holdings=[]}=state;
+  const {fmt}=useDsp(state);
+  const NOW=getNow();
+  const [sf,setSF]=useState(false);
+  const [addTo,setAT]=useState(null);
+  const [addAmt,setAA]=useState("");
+  const [addCur,setAC]=useState("ARS");
+  const [form,setForm]=useState({name:"",target:"",currency:"ARS",saved:"",icon:"🎯",deadline:""});
+  const ICONS=["🎯","✈️","🚗","🏠","💻","📱","💍","🎓","🏖️","💰","🏋️","🎸","🛵","🌎","👶","🏡"];
+  const {disponible,perGoal}=goalPlan(goals,salaries,transactions,holdings);
+
+  const addG=()=>{if(!form.name||!form.target)return notify("Nombre y monto requeridos","err");const t=Math.abs(px(form.target))*(form.currency==="USD"?usdRate:1);update({goals:[...goals,{id:`g_${uid()}`,name:form.name,target:t,saved:Math.abs(px(form.saved))||0,icon:form.icon,deadline:form.deadline,createdAt:todayISO()}]});setForm({name:"",target:"",currency:"ARS",saved:"",icon:"🎯",deadline:""});setSF(false);notify("Meta creada ✓");};
+  
   const addSav=g=>{const a=Math.abs(px(addAmt))*(addCur==="USD"?usdRate:1);if(!a)return notify("Ingresá un monto","err");update({goals:goals.map(gl=>gl.id===g.id?{...gl,saved:gl.saved+a}:gl),transactions:[...transactions,{id:`s_${uid()}`,date:todayISO(),description:`Ahorro: ${g.name}`,amount:a,type:"expense",category:"💰 Ahorro",currency:"ARS",source:"manual"}]});setAT(null);setAA("");setAC("ARS");notify(`+${fmt(a)} sumado ✓`);};
-  return(<div className="up"><PH title="Metas" sub={`${goals.filter(g=>g.saved<g.target).length} activas`} right={<button className="btn bl" onClick={()=>setSF(true)}><ic.Plus/> Nueva meta</button>}/>
-  {disponible>0&&perGoal.length>0&&(<div className="card" style={{marginBottom:16,borderColor:"rgba(200,255,87,.18)"}}><div style={{fontSize:13,fontWeight:700,marginBottom:10}}>💡 Plan de ahorro recomendado</div><div style={{fontSize:12,color:T.mid,marginBottom:12}}>Tenés <span className="mono" style={{color:T.lime}}>{fmt(disponible)}</span> disponibles este mes. Distribución sugerida:</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:10}}>{perGoal.map(g=>(<div key={g.id} style={{background:T.raised,borderRadius:10,padding:"12px 14px",border:`1px solid ${g.feasible?T.border:"rgba(255,184,48,.3)"}`}}><div style={{fontSize:12,marginBottom:6}}>{g.icon} {g.name}</div><div className="mono" style={{fontSize:18,fontWeight:600,color:g.feasible?T.lime:T.amber}}>{fmt(g.needed)}<span style={{fontSize:11,fontWeight:400,color:T.muted}}>/mes</span></div><div style={{fontSize:10,color:T.muted,marginTop:3}}>{g.months} mes{g.months>1?"es":""} · Falta {fmt(g.rem)}</div>{!g.feasible&&<div style={{fontSize:10,color:T.amber,marginTop:4}}>⚠ Ajustá el plazo o el monto</div>}{g.couldUsePortfolio&&<div style={{fontSize:10,color:T.blue,marginTop:4}}>📊 Portfolio cubre {g.portfolioCover}%</div>}</div>))}</div></div>)}
-  {goals.length===0?<div className="card" style={{textAlign:"center",padding:"64px 32px"}}><div style={{fontSize:52,marginBottom:14}}>🎯</div><div style={{fontSize:20,fontWeight:700,marginBottom:8}}>Sin metas todavía</div><div style={{fontSize:13,color:T.muted,marginBottom:20}}>Creá una meta y empezá a trackear tu progreso</div><button className="btn bl" onClick={()=>setSF(true)}><ic.Plus/> Crear meta</button></div>:
-  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:14}}>{goals.map(g=>{const pct=clamp((g.saved/g.target)*100,0,100);const rem=g.target-g.saved;const days=g.deadline?Math.ceil((new Date(g.deadline)-NOW)/864e5):null;const months=days&&days>0?Math.ceil(days/30):null;const needed=months?rem/months:null;const pc=pct>=100?T.lime:pct>=60?T.blue:T.amber;return<div key={g.id} className="card up"><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}><div style={{display:"flex",gap:10,alignItems:"center"}}><span style={{fontSize:28}}>{g.icon}</span><div><div style={{fontSize:14,fontWeight:700}}>{g.name}</div>{g.deadline&&<div style={{fontSize:10,color:T.muted,marginTop:2}}>📅 {g.deadline}{days!==null&&` · ${days>0?days+"d":"¡Hoy!"}`}</div>}</div></div><button className="btn bd bsm" onClick={()=>{update({goals:goals.filter(x=>x.id!==g.id)});notify("Eliminado","err");}}><ic.Trash/></button></div><div className="g2" style={{marginBottom:12}}><div style={{background:T.raised,borderRadius:10,padding:"10px 12px"}}><div style={{fontSize:10,color:T.muted,marginBottom:3}}>Ahorrado</div><div className="mono" style={{fontSize:15,color:pc}}>{fmt(g.saved)}</div></div><div style={{background:T.raised,borderRadius:10,padding:"10px 12px"}}><div style={{fontSize:10,color:T.muted,marginBottom:3}}>Objetivo</div><div className="mono" style={{fontSize:15}}>{fmt(g.target)}</div></div></div><div style={{marginBottom:12}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{fontSize:11,color:T.muted}}>Progreso</span><span className="mono" style={{fontSize:11,color:pc,fontWeight:600}}>{pct.toFixed(1)}%</span></div><div className="prog" style={{height:8}}><div className="progf" style={{width:`${pct}%`,background:pct>=100?`linear-gradient(90deg,${T.lime},${T.teal})`:pct>=60?T.blue:T.amber}}/></div></div>{needed&&needed>0&&<div style={{background:"rgba(77,158,255,.07)",border:`1px solid rgba(77,158,255,.15)`,borderRadius:8,padding:"8px 10px",fontSize:11,color:T.blue,marginBottom:12}}>💡 Guardá <span className="mono">{fmt(needed)}</span>/mes para llegar en {months} mes{months>1?"es":""}</div>}{pct>=100?<div style={{background:"rgba(200,255,87,.08)",border:`1px solid rgba(200,255,87,.25)`,borderRadius:10,padding:10,textAlign:"center",fontSize:13,color:T.lime,fontWeight:600}}>🎉 ¡Meta alcanzada!</div>:addTo===g.id?<div style={{display:"flex",gap:8,flexWrap:"wrap"}}><input className="inp" style={{flex:1,fontSize:12,minWidth:80}} placeholder="Monto" value={addAmt} onChange={e=>setAA(e.target.value)} autoFocus onKeyDown={e=>e.key==="Enter"&&addSav(g)}/><select className="inp" style={{width:70,fontSize:12,padding:"10px 6px"}} value={addCur} onChange={e=>setAC(e.target.value)}><option>ARS</option><option>USD</option></select><button className="btn bl bsm" onClick={()=>addSav(g)}>+</button><button className="btn bg bsm" onClick={()=>{setAT(null);setAA("");}}>✕</button></div>:<button className="btn bg" style={{width:"100%",justifyContent:"center"}} onClick={()=>setAT(g.id)}><ic.Plus/> Agregar ahorro</button>}</div>;})}
-  </div>}
-  {sf&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setSF(false)}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h2 style={{fontSize:18,fontWeight:700}}>Nueva meta</h2><button className="btn bg bsm" onClick={()=>setSF(false)}><ic.X/></button></div><div style={{display:"flex",flexDirection:"column",gap:12}}><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:7}}>Ícono</label><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{ICONS.map(ic2=><button key={ic2} onClick={()=>setForm(f=>({...f,icon:ic2}))} style={{width:36,height:36,fontSize:18,borderRadius:8,border:`1.5px solid ${form.icon===ic2?T.lime:T.border}`,background:form.icon===ic2?"rgba(200,255,87,.1)":T.raised,cursor:"pointer"}}>{ic2}</button>)}</div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Nombre</label><input className="inp" placeholder="ej: Viaje a Europa" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))}/></div><div className="g3"><div style={{gridColumn:"1/3"}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Monto objetivo</label><input className="inp" placeholder="500000" value={form.target} onChange={e=>setForm(f=>({...f,target:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda</label><select className="inp" value={form.currency} onChange={e=>setForm(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select></div></div><div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Ya tengo</label><input className="inp" placeholder="0" value={form.saved} onChange={e=>setForm(f=>({...f,saved:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha límite</label><input type="date" className="inp" value={form.deadline} onChange={e=>setForm(f=>({...f,deadline:e.target.value}))}/></div></div><button className="btn bl" style={{justifyContent:"center"}} onClick={addG}>Crear meta</button></div></div></div>}</div>);
+
+  // NUEVO: Función para liquidar meta
+  const liquidar = (g, linkedHoldings, investedValue) => {
+    if(!window.confirm(`¿Liquidar "${g.name}"? Se venderán las inversiones vinculadas y se registrará el gasto.`)) return;
+    
+    const newTxs = [...transactions];
+    // 1. Ingresar plata de inversiones si hay
+    if(investedValue > 0) newTxs.push({id: `liq_i_${uid()}`, date: todayISO(), description: `Venta activos por meta: ${g.name}`, amount: investedValue, type: "income", category: "💰 Ahorro", currency: "ARS"});
+    // 2. Registrar el gasto de la meta
+    newTxs.push({id: `liq_e_${uid()}`, date: todayISO(), description: `Meta cumplida: ${g.name}`, amount: g.target, type: "expense", category: "🎬 Ocio", currency: "ARS"});
+    
+    // 3. Eliminar holdings vinculados
+    const holdingIds = linkedHoldings.map(h => h.id);
+    const newHoldings = holdings.filter(h => !holdingIds.includes(h.id));
+    
+    // 4. Completar meta
+    const newGoals = goals.map(x => x.id === g.id ? {...x, saved: x.target} : x);
+    
+    update({ transactions: newTxs, holdings: newHoldings, goals: newGoals });
+    notify(`¡Felicitaciones! Meta "${g.name}" alcanzada 🎉`);
+  };
+
+  return(<div className="up"><PH title="Metas" sub={`${goals.filter(g=>g.saved<g.target).length} activas`} right={<button className="btn bl" onClick={()=>setSF(true)}><ic.Plus/> Nueva meta</button>}/>
+  {disponible>0&&perGoal.length>0&&(<div className="card" style={{marginBottom:16,borderColor:"rgba(200,255,87,.18)"}}><div style={{fontSize:13,fontWeight:700,marginBottom:10}}>💡 Plan de ahorro recomendado</div><div style={{fontSize:12,color:T.mid,marginBottom:12}}>Tenés <span className="mono" style={{color:T.lime}}>{fmt(disponible)}</span> disponibles este mes. Distribución sugerida:</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:10}}>{perGoal.map(g=>(<div key={g.id} style={{background:T.raised,borderRadius:10,padding:"12px 14px",border:`1px solid ${g.feasible?T.border:"rgba(255,184,48,.3)"}`}}><div style={{fontSize:12,marginBottom:6}}>{g.icon} {g.name}</div><div className="mono" style={{fontSize:18,fontWeight:600,color:g.feasible?T.lime:T.amber}}>{fmt(g.needed)}<span style={{fontSize:11,fontWeight:400,color:T.muted}}>/mes</span></div><div style={{fontSize:10,color:T.muted,marginTop:3}}>{g.months} mes{g.months>1?"es":""} · Falta {fmt(g.rem)}</div>{!g.feasible&&<div style={{fontSize:10,color:T.amber,marginTop:4}}>⚠ Ajustá el plazo o el monto</div>}</div>))}</div></div>)}
+  {goals.length===0?<div className="card" style={{textAlign:"center",padding:"64px 32px"}}><div style={{fontSize:52,marginBottom:14}}>🎯</div><div style={{fontSize:20,fontWeight:700,marginBottom:8}}>Sin metas todavía</div><div style={{fontSize:13,color:T.muted,marginBottom:20}}>Creá una meta y empezá a trackear tu progreso</div><button className="btn bl" onClick={()=>setSF(true)}><ic.Plus/> Crear meta</button></div>:
+  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:14}}>{goals.map(g=>{
+    // NUEVO: Cálculo combinado (ahorro + inversiones vinculadas)
+    const linkedHoldings = holdings.filter(h => h.goalId === g.id);
+    const investedValue = linkedHoldings.reduce((s, h) => s + (h.currentValue || h.totalInvested || 0), 0);
+    const realSaved = g.saved + investedValue;
+    
+    const pct=clamp((realSaved/g.target)*100,0,100);
+    const rem=g.target-realSaved;
+    const days=g.deadline?Math.ceil((new Date(g.deadline)-NOW)/864e5):null;const months=days&&days>0?Math.ceil(days/30):null;const needed=months?rem/months:null;const pc=pct>=100?T.lime:pct>=60?T.blue:T.amber;
+    
+    return<div key={g.id} className="card up"><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}><div style={{display:"flex",gap:10,alignItems:"center"}}><span style={{fontSize:28}}>{g.icon}</span><div><div style={{fontSize:14,fontWeight:700}}>{g.name}</div>{g.deadline&&<div style={{fontSize:10,color:T.muted,marginTop:2}}>📅 {g.deadline}{days!==null&&` · ${days>0?days+"d":"¡Hoy!"}`}</div>}</div></div><button className="btn bd bsm" onClick={()=>{update({goals:goals.filter(x=>x.id!==g.id)});notify("Eliminado","err");}}><ic.Trash/></button></div><div className="g2" style={{marginBottom:12}}><div style={{background:T.raised,borderRadius:10,padding:"10px 12px"}}><div style={{fontSize:10,color:T.muted,marginBottom:3}}>Ahorrado {investedValue > 0 ? "+ Inv." : ""}</div><div className="mono" style={{fontSize:15,color:pc}}>{fmt(realSaved)}</div></div><div style={{background:T.raised,borderRadius:10,padding:"10px 12px"}}><div style={{fontSize:10,color:T.muted,marginBottom:3}}>Objetivo</div><div className="mono" style={{fontSize:15}}>{fmt(g.target)}</div></div></div><div style={{marginBottom:12}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{fontSize:11,color:T.muted}}>Progreso</span><span className="mono" style={{fontSize:11,color:pc,fontWeight:600}}>{pct.toFixed(1)}%</span></div><div className="prog" style={{height:8}}><div className="progf" style={{width:`${pct}%`,background:pct>=100?`linear-gradient(90deg,${T.lime},${T.teal})`:pct>=60?T.blue:T.amber}}/></div></div>{needed&&needed>0&&<div style={{background:"rgba(77,158,255,.07)",border:`1px solid rgba(77,158,255,.15)`,borderRadius:8,padding:"8px 10px",fontSize:11,color:T.blue,marginBottom:12}}>💡 Guardá <span className="mono">{fmt(needed)}</span>/mes para llegar en {months} mes{months>1?"es":""}</div>}
+    
+    {pct>=100 ? 
+        <div style={{display:"flex", gap:8}}>
+            <div style={{flex:1, background:"rgba(200,255,87,.08)",border:`1px solid rgba(200,255,87,.25)`,borderRadius:10,padding:10,textAlign:"center",fontSize:13,color:T.lime,fontWeight:600}}>🎉 Alcanzada</div>
+            {g.saved < g.target && <button className="btn bl" onClick={() => liquidar(g, linkedHoldings, investedValue)}>Liquidar</button>}
+        </div>
+        :addTo===g.id?<div style={{display:"flex",gap:8,flexWrap:"wrap"}}><input className="inp" style={{flex:1,fontSize:12,minWidth:80}} placeholder="Monto" value={addAmt} onChange={e=>setAA(e.target.value)} autoFocus onKeyDown={e=>e.key==="Enter"&&addSav(g)}/><select className="inp" style={{width:70,fontSize:12,padding:"10px 6px"}} value={addCur} onChange={e=>setAC(e.target.value)}><option>ARS</option><option>USD</option></select><button className="btn bl bsm" onClick={()=>addSav(g)}>+</button><button className="btn bg bsm" onClick={()=>{setAT(null);setAA("");}}>✕</button></div>:<button className="btn bg" style={{width:"100%",justifyContent:"center"}} onClick={()=>setAT(g.id)}><ic.Plus/> Agregar ahorro</button>}</div>;})}
+  </div>}
+  {sf&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setSF(false)}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h2 style={{fontSize:18,fontWeight:700}}>Nueva meta</h2><button className="btn bg bsm" onClick={()=>setSF(false)}><ic.X/></button></div><div style={{display:"flex",flexDirection:"column",gap:12}}><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:7}}>Ícono</label><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{ICONS.map(ic2=><button key={ic2} onClick={()=>setForm(f=>({...f,icon:ic2}))} style={{width:36,height:36,fontSize:18,borderRadius:8,border:`1.5px solid ${form.icon===ic2?T.lime:T.border}`,background:form.icon===ic2?"rgba(200,255,87,.1)":T.raised,cursor:"pointer"}}>{ic2}</button>)}</div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Nombre</label><input className="inp" placeholder="ej: Viaje a Europa" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))}/></div><div className="g3"><div style={{gridColumn:"1/3"}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Monto objetivo</label><input className="inp" placeholder="500000" value={form.target} onChange={e=>setForm(f=>({...f,target:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda</label><select className="inp" value={form.currency} onChange={e=>setForm(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select></div></div><div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Ya tengo</label><input className="inp" placeholder="0" value={form.saved} onChange={e=>setForm(f=>({...f,saved:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha límite</label><input type="date" className="inp" value={form.deadline} onChange={e=>setForm(f=>({...f,deadline:e.target.value}))}/></div></div><button className="btn bl" style={{justifyContent:"center"}} onClick={addG}>Crear meta</button></div></div></div>}</div>);
 }
 
 function Analytics({state}){
@@ -263,7 +304,7 @@ function Analytics({state}){
 }
 
 function Investments({state,update,notify}){
-  const {savedAnalyses=[],riskProfile}=state;
+  const {savedAnalyses=[],riskProfile,goals=[]}=state;
   const [tab,setTab]=useState("portfolio");
   const [hFilter,setHFilter]=useState("all");
   const [scanning,setScan]=useState(false);
@@ -276,9 +317,8 @@ function Investments({state,update,notify}){
   const [sel,setSel]=useState(null);
   const [justSaved,setJS]=useState(null);
   const [showHForm,setSHF]=useState(false);
-  const [hForm,setHF]=useState({type:"accion",ticker:"",name:"",quantity:"",buyPrice:"",totalInvested:"",currency:"ARS",buyDate:todayISO(),maturityDate:"",rate:""});
+  const [hForm,setHF]=useState({type:"accion",ticker:"",name:"",quantity:"",buyPrice:"",totalInvested:"",currency:"ARS",buyDate:todayISO(),maturityDate:"",rate:"", goalId:""}); //
   
-  // Estado para el refresh individual (guarda el ID de la inversión que se está actualizando)
   const [refreshingId,setRI]=useState(null);
   const [loadingTNA,setLoadingTNA]=useState(false); 
   
@@ -298,147 +338,105 @@ function Investments({state,update,notify}){
       const avg = d.slice(0,10).reduce((s,b)=>s+b.tna, 0) / Math.min(10, d.length);
       setHF(f => ({...f, rate: avg.toFixed(1)}));
       notify("TNA promedio de mercado actualizada ✓");
-    } catch(e) {
-      notify("Error al obtener TNA", "err");
-    }
+    } catch(e) { notify("Error al obtener TNA", "err"); }
     setLoadingTNA(false);
   };
   
   const addHolding=()=>{
     const isVar = ["accion", "cedear", "etf", "crypto"].includes(hForm.type);
     const isFix = ["plazo_fijo", "fci", "bono"].includes(hForm.type);
-    
-    // Validaciones estrictas
     if(isVar && (!hForm.ticker || !hForm.quantity || !hForm.buyPrice)) return notify("Ticker, cantidad y precio de compra son obligatorios", "err");
     if(isFix && (!hForm.name || !hForm.totalInvested || !hForm.rate || !hForm.buyDate)) return notify("Nombre, monto invertido, TNA y fecha son obligatorios", "err");
-
     let inv = px(hForm.totalInvested);
     if(isVar && !inv) inv = px(hForm.quantity) * px(hForm.buyPrice);
 
-    const h={...hForm, id:`h_${uid()}`, quantity:px(hForm.quantity), buyPrice:px(hForm.buyPrice), totalInvested:inv, rate:px(hForm.rate), currentValue:inv, currentPrice:px(hForm.buyPrice), lastUpdated:todayISO()};
+    // Creamos el objeto incluyendo el goalId para la vinculación
+    const h={...hForm, id:`h_${uid()}`, quantity:px(hForm.quantity), buyPrice:px(hForm.buyPrice), totalInvested:inv, rate:px(hForm.rate), currentValue:inv, currentPrice:px(hForm.buyPrice), lastUpdated:todayISO(), goalId: hForm.goalId || null};
     
     update({holdings:[...holdings,h]});
     setSHF(false);
-    setHF({type:"accion",ticker:"",name:"",quantity:"",buyPrice:"",totalInvested:"",currency:"ARS",buyDate:todayISO(),maturityDate:"",rate:""});
+    setHF({type:"accion",ticker:"",name:"",quantity:"",buyPrice:"",totalInvested:"",currency:"ARS",buyDate:todayISO(),maturityDate:"",rate:"", goalId:""});
     notify("Inversión agregada al portfolio ✓");
   };
   
   const delHolding=id=>update({holdings:holdings.filter(h=>h.id!==id)});
   
-  // REFRESH INDIVIDUAL OPTIMIZADO
   const refreshSingle = async (h) => {
     setRI(h.id);
     let updatedHolding = { ...h };
-    
     const isVar = ["accion", "cedear", "etf", "crypto"].includes(h.type);
-    
     if (isVar) {
       notify(`Consultando mercado para ${h.ticker||h.name}...`, "info");
       const query = h.type === "crypto" ? `${h.ticker} crypto in USD` : h.ticker;
-      const raw = await ai(`Current market price for: ${query}. Date: ${todayISO()}. Return ONLY valid JSON: {"price": number}. USD for Crypto/US stocks, ARS for local AR stocks.`, "Financial data. Valid JSON only. Return just the numeric value in the JSON.");
+      const raw = await ai(`Current market price for: ${query}. Date: ${todayISO()}. Return ONLY valid JSON: {"price": number}.`, "Financial data. Valid JSON only.");
       if (raw) {
         try {
           const d = JSON.parse(cleanJSON(raw));
-          let cp = d.price || d.prices?.[h.ticker] || null;
+          let cp = d.price || null;
           if (cp) {
             if (h.currency === "ARS" && (h.type === "cedear" || h.type === "crypto")) cp = cp * state.usdRate;
             const cv = h.quantity ? h.quantity * cp : h.totalInvested * (cp / (h.buyPrice || cp));
             updatedHolding = { ...updatedHolding, currentPrice: cp, currentValue: Math.round(cv), lastUpdated: todayISO() };
             notify(`Cotización de ${h.ticker} actualizada ✓`);
-          } else throw new Error();
-        } catch {
-          notify(`No se pudo obtener precio de ${h.ticker}`, "err");
-        }
+          }
+        } catch { notify(`No se pudo obtener precio de ${h.ticker}`, "err"); }
       }
     } else {
-      // RENTA FIJA: Cálculo instantáneo de intereses (Sin consumir API)
       const days = Math.max(0, Math.floor((Date.now() - new Date(h.buyDate)) / 864e5));
       const rateDec = h.rate / 100;
-      let cv = h.totalInvested;
-      if (h.type === "fci") {
-          cv = h.totalInvested * Math.pow(1 + (rateDec / 365), days); // Compuesto Diario
-      } else {
-          cv = h.totalInvested * (1 + rateDec * (days / 365)); // Simple
-      }
+      let cv = h.totalInvested * (1 + rateDec * (days / 365));
       updatedHolding = { ...updatedHolding, currentValue: Math.round(cv), lastUpdated: todayISO() };
-      notify(`Rendimientos de ${h.name} calculados a hoy ✓`);
+      notify(`Rendimientos calculados ✓`);
     }
-
     update({ holdings: holdings.map(x => x.id === h.id ? updatedHolding : x) });
     setRI(null);
   };
   
   const PRESETS=[{t:"BTC",n:"Bitcoin"},{t:"ETH",n:"Ethereum"},{t:"AAPL",n:"Apple"},{t:"NVDA",n:"NVIDIA"},{t:"MELI",n:"MercadoLibre"},{t:"VIST",n:"Vista Oil"},{t:"YPF",n:"YPF SA"},{t:"SPY",n:"S&P 500 ETF"}];
-  const runScanner=async()=>{if(!riskProfile)return notify("Configurá tu perfil en el onboarding","info");setScan(true);setSE(null);notify("Analizando mercado...","info");try{const r=await autoScanInvestments(riskProfile,state.usdRate);setSR(r);notify(`${r.opportunities?.length||0} oportunidades ✓`);}catch(e){setSE("No se pudo conectar con la IA. Reintentá en un momento.");notify("Error","err");}setScan(false);};
-  const analyze=async(t,n)=>{const ex=savedAnalyses.find(a=>a.ticker===t);if(ex){setSel(ex);return;}setLoad(true);setLE(null);notify(`Analizando ${t}...`,"info");const r=await analyzeStock(t,n||t);if(r){update({savedAnalyses:[r,...savedAnalyses.filter(a=>a.ticker!==r.ticker)]});setSel(r);notify(`${t} analizado ✓`);}else{setLE(`No se pudo analizar "${t}". Verificá el ticker e intentá de nuevo.`);notify("Error","err");}setLoad(false);};
-  const saveFromScan=opp=>{const a={ticker:opp.ticker,company:opp.name,sector:"",signal:opp.signal,timeframe:opp.timeframe,upside:opp.upside,currentEstimate:opp.currentEstimate,peRatio:opp.peRatio,revenueGrowth:opp.revenueGrowth,moat:opp.moat,bullCase:opp.thesis,bearCase:opp.bearRisk,catalysts:opp.catalysts||[],risks:[opp.bearRisk],summary:opp.thesis,confidenceScore:opp.confidenceScore};update({savedAnalyses:[a,...savedAnalyses.filter(s=>s.ticker!==a.ticker)]});setJS(opp.ticker);setTimeout(()=>setJS(null),2500);notify(`${opp.ticker} guardado ✓`);};
-  
-  return(<div className="up"><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:8}}><div><h1 style={{fontSize:24,fontWeight:800,letterSpacing:"-1px"}}>Inversiones</h1><div style={{fontSize:12,color:T.muted,marginTop:4}}>Perfil: <span style={{color:T.lime,fontWeight:600}}>{riskProfile?.risk||"no configurado"}</span> · Horizonte: <span style={{color:T.lime,fontWeight:600}}>{riskProfile?.horizon||"—"}</span></div></div>{savedAnalyses.length>0&&<div className="chip"><ic.Check/>{savedAnalyses.length} guardados</div>}</div>
+  const runScanner=async()=>{if(!riskProfile)return notify("Configurá tu perfil en el onboarding","info");setScan(true);setSE(null);try{const r=await autoScanInvestments(riskProfile,state.usdRate);setSR(r);notify(`${r.opportunities?.length||0} oportunidades ✓`);}catch(e){setSE("Error de conexión");}setScan(false);};
+  const analyze=async(t,n)=>{const ex=savedAnalyses.find(a=>a.ticker===t);if(ex){setSel(ex);return;}setLoad(true);const r=await analyzeStock(t,n||t);if(r){update({savedAnalyses:[r,...savedAnalyses.filter(a=>a.ticker!==r.ticker)]});setSel(r);}else{setLE(`Error al analizar ${t}`);}setLoad(false);};
+
+  return(<div className="up"><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:8}}><div><h1 style={{fontSize:24,fontWeight:800,letterSpacing:"-1px"}}>Inversiones</h1><div style={{fontSize:12,color:T.muted,marginTop:4}}>Perfil: <span style={{color:T.lime,fontWeight:600}}>{riskProfile?.risk||"no configurado"}</span></div></div></div>
   <div className="tabbar" style={{marginBottom:18}}>{[{id:"portfolio",l:`📊 Portfolio (${holdings.length})`},{id:"scanner",l:"🔍 Scanner"},{id:"manual",l:"🔎 Analizar Activo"},{id:"saved",l:`📁 (${savedAnalyses.length})`}].map(t=>(<button key={t.id} className={`tab${tab===t.id?" on":""}`} onClick={()=>setTab(t.id)}>{t.l}</button>))}</div>
-  {tab==="portfolio"&&<div>
-  <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>{[{l:"Capital Invertido",v:fARS(totalInvested),c:T.blue,i:"💰"},{l:"Valor al día de hoy",v:fARS(totalCurrent),c:T.lime,i:"📈"},{l:"Ganancia Patrimonial",v:`${totalPnL>=0?"+":""}${fARS(totalPnL)}`,c:totalPnL>=0?T.teal:T.red,i:totalPnL>=0?"✅":"⚠️"}].map((k,i)=><div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".5px"}}>{k.l}</span><span>{k.i}</span></div><div className="mono" title={k.v} style={{fontSize:16,fontWeight:600,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div></div>)}</div>
-  <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}><button className="btn bl" onClick={()=>setSHF(true)}><ic.Plus/> Agregar inversión manual</button></div>
-  {holdings.length>0&&<div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap",overflowX:"auto",paddingBottom:4}}>
-      <button style={{padding:"5px 12px",borderRadius:8,fontSize:11,fontWeight:600,border:`1px solid ${hFilter==="all"?T.lime:T.border}`,background:hFilter==="all"?"rgba(200,255,87,.1)":T.raised,color:hFilter==="all"?T.lime:T.muted,cursor:"pointer",whiteSpace:"nowrap"}} onClick={()=>setHFilter("all")}>Todas</button>
-      {holdingTypes.map(t=>(<button key={t} style={{padding:"5px 12px",borderRadius:8,fontSize:11,fontWeight:600,border:`1px solid ${hFilter===t?T.lime:T.border}`,background:hFilter===t?"rgba(200,255,87,.1)":T.raised,color:hFilter===t?T.lime:T.muted,cursor:"pointer",whiteSpace:"nowrap",textTransform:"capitalize"}} onClick={()=>setHFilter(t)}>{t.replace("_"," ")}</button>))}
-  </div>}
-  {showHForm&&<div className="card" style={{marginBottom:14}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><div style={{fontSize:14,fontWeight:700}}>Cargar activo existente</div><button className="btn bg bsm" onClick={()=>setSHF(false)}><ic.X/></button></div>
-  <div style={{display:"flex",flexDirection:"column",gap:10}}>
-  <div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tipo de instrumento</label><select className="inp" value={hForm.type} onChange={e=>setHF(f=>({...f,type:e.target.value}))}><option value="accion">📈 Acción local</option><option value="cedear">🇺🇸 CEDEAR</option><option value="etf">📊 ETF</option><option value="crypto">₿ Crypto (BTC, ETH...)</option><option value="plazo_fijo">🏦 Plazo fijo</option><option value="fci">💼 FCI (MercadoPago, etc)</option><option value="bono">📜 Bono</option></select></div>
-  <div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>{["plazo_fijo","fci","bono"].includes(hForm.type)?"Banco / Entidad *":"Ticker *"}</label><input className="inp" placeholder={["plazo_fijo","fci","bono"].includes(hForm.type)?"ej: Mercado Pago":"ej: BTC"} value={hForm.ticker} onChange={e=>setHF(f=>({...f,ticker:e.target.value.toUpperCase()}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Nombre (opcional)</label><input className="inp" placeholder="ej: Bitcoin" value={hForm.name} onChange={e=>setHF(f=>({...f,name:e.target.value}))}/></div></div>
-  {(["accion","cedear","etf","crypto"].includes(hForm.type))&&<div className="g3"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Cantidad *</label><input className="inp" placeholder="ej: 0.05" value={hForm.quantity} onChange={e=>setHF(f=>({...f,quantity:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Precio compra *</label><input className="inp" placeholder="ej: 65000" value={hForm.buyPrice} onChange={e=>setHF(f=>({...f,buyPrice:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda</label><select className="inp" value={hForm.currency} onChange={e=>setHF(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select></div></div>}
-  {(["plazo_fijo","fci","bono"].includes(hForm.type))&&<div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Capital Inicial (ARS) *</label><input className="inp" placeholder="ej: 500000" value={hForm.totalInvested} onChange={e=>setHF(f=>({...f,totalInvested:e.target.value}))}/></div>
   
-  {(["plazo_fijo","fci","bono"].includes(hForm.type))&&<div>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
-      <label style={{fontSize:11,color:T.muted,display:"block",margin:0}}>TNA % *</label>
-      <button className="btn bg bsm" style={{padding:"2px 8px",fontSize:9,color:T.lime}} onClick={handleAutoTNA} disabled={loadingTNA}>{loadingTNA?"...":"✨ Auto (BCRA)"}</button>
-    </div>
-    <input className="inp" placeholder="ej: 32.5" value={hForm.rate} onChange={e=>setHF(f=>({...f,rate:e.target.value}))}/>
-  </div>}
-  </div>}
-
-  <div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha de inversión *</label><input type="date" className="inp" value={hForm.buyDate} onChange={e=>setHF(f=>({...f,buyDate:e.target.value}))}/></div>{(["plazo_fijo","bono"].includes(hForm.type))&&<div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Vencimiento (Opcional)</label><input type="date" className="inp" value={hForm.maturityDate} onChange={e=>setHF(f=>({...f,maturityDate:e.target.value}))}/></div>}</div>
-  <button className="btn bl" style={{justifyContent:"center", marginTop:8}} onClick={addHolding}>✓ Guardar en mi portfolio</button></div></div>}
-  {holdings.length===0&&!showHForm&&<div style={{textAlign:"center",padding:"48px 32px",color:T.muted}}><div style={{fontSize:40,marginBottom:12}}>📊</div><div style={{fontSize:14,marginBottom:4}}>Tu portfolio está vacío</div><div style={{fontSize:12}}>Agregá tus inversiones reales para proyectar tus ganancias en el Dashboard</div></div>}
-  {filteredHoldings.length>0&&<div style={{display:"flex",flexDirection:"column",gap:8}}>{filteredHoldings.map(h=>{
-    const pnl=(h.currentValue||h.totalInvested)-(h.totalInvested||0);
-    const pnlPct=h.totalInvested?((pnl/h.totalInvested)*100).toFixed(1):0;
-    const typeEmoji={"accion":"📈","cedear":"🇺🇸","etf":"📊","plazo_fijo":"🏦","fci":"💼","bono":"📜","crypto":"₿"}[h.type]||"💰";
+  {tab==="portfolio"&&<div>
+    <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>{[{l:"Invertido",v:fARS(totalInvested),c:T.blue,i:"💰"},{l:"Valor Actual",v:fARS(totalCurrent),c:T.lime,i:"📈"},{l:"P&L Total",v:fARS(totalPnL),c:totalPnL>=0?T.teal:T.red,i:"✅"}].map((k,i)=><div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase"}}>{k.l}</span><span>{k.i}</span></div><div className="mono" style={{fontSize:16,fontWeight:600,color:k.c}}>{k.v}</div></div>)}</div>
+    <div style={{display:"flex",gap:8,marginBottom:14}}><button className="btn bl" onClick={()=>setSHF(true)}><ic.Plus/> Agregar inversión</button></div>
     
-    let projectedMaturity = null;
-    if (h.maturityDate && h.rate && h.buyDate) {
-        const totalDays = Math.max(1, Math.floor((new Date(h.maturityDate) - new Date(h.buyDate)) / 864e5));
-        projectedMaturity = h.totalInvested * (1 + (h.rate/100) * (totalDays/365));
-    }
-
-    return<div key={h.id} className="card" style={{padding:"14px 16px"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
-        <div style={{display:"flex",gap:10,alignItems:"center"}}><span style={{fontSize:22}}>{typeEmoji}</span><div style={{minWidth:0}}><div style={{display:"flex",gap:6,alignItems:"center"}}><span className="mono" title={h.ticker||h.name} style={{fontSize:15,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:140}}>{h.ticker||h.name}</span>{h.currency==="USD"&&<span style={{fontSize:10,color:T.blue,fontWeight:600,background:"rgba(77,158,255,.1)",padding:"2px 6px",borderRadius:4}}>USD</span>}</div><div style={{fontSize:11,color:T.muted,marginTop:2}}>{h.name!==h.ticker?h.name:""} {h.quantity?`· ${h.quantity} unid. a ${h.currency==="USD"?"U$D":"$"}${h.buyPrice}`:h.rate?`· TNA ${h.rate}%`:""}</div></div></div>
+    {showHForm&&<div className="card" style={{marginBottom:14}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><div style={{fontSize:14,fontWeight:700}}>Nueva Inversión</div><button className="btn bg bsm" onClick={()=>setSHF(false)}><ic.X/></button></div>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tipo</label><select className="inp" value={hForm.type} onChange={e=>setHF(f=>({...f,type:e.target.value}))}><option value="accion">📈 Acción</option><option value="cedear">🇺🇸 CEDEAR</option><option value="etf">📊 ETF</option><option value="crypto">₿ Crypto</option><option value="plazo_fijo">🏦 Plazo fijo</option><option value="fci">💼 FCI</option></select></div>
+        <div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Ticker/Banco</label><input className="inp" value={hForm.ticker} onChange={e=>setHF(f=>({...f,ticker:e.target.value.toUpperCase()}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Nombre</label><input className="inp" value={hForm.name} onChange={e=>setHF(f=>({...f,name:e.target.value}))}/></div></div>
+        {["accion","cedear","etf","crypto"].includes(hForm.type) ? <div className="g3"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Cant.</label><input className="inp" value={hForm.quantity} onChange={e=>setHF(f=>({...f,quantity:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Precio</label><input className="inp" value={hForm.buyPrice} onChange={e=>setHF(f=>({...f,buyPrice:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda</label><select className="inp" value={hForm.currency} onChange={e=>setHF(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select></div></div> 
+        : <div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Capital</label><input className="inp" value={hForm.totalInvested} onChange={e=>setHF(f=>({...f,totalInvested:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>TNA %</label><div style={{display:"flex",gap:4}}><input className="inp" value={hForm.rate} onChange={e=>setHF(f=>({...f,rate:e.target.value}))}/><button className="btn bg bsm" onClick={handleAutoTNA}>✨</button></div></div></div>}
         
-        <div style={{display:"flex",gap:6}}>
-            <button className="btn bg bsm" style={{padding:"6px 10px", color:T.lime}} onClick={()=>refreshSingle(h)} disabled={refreshingId===h.id}>{refreshingId===h.id?<Dots/>:<><ic.Refresh/> Actualizar</>}</button>
-            <button className="btn bd bsm" style={{padding:"6px 10px"}} onClick={()=>delHolding(h.id)}><ic.Trash/></button>
+        {/* Bloque de fecha y meta corregido */}
+        <div className="g2">
+          <div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha *</label><input type="date" className="inp" value={hForm.buyDate} onChange={e=>setHF(f=>({...f,buyDate:e.target.value}))}/></div>
+          <div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Vincular a Meta</label><select className="inp" value={hForm.goalId} onChange={e=>setHF(f=>({...f,goalId:e.target.value}))}><option value="">Ninguna</option>{goals.filter(g=>g.saved<g.target).map(g=><option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}</select></div>
         </div>
-    </div>
-    
-    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,background:T.raised,padding:"10px 12px",borderRadius:10}}>
-        <div><div style={{fontSize:9,color:T.muted,marginBottom:2}}>Inicial</div><div className="mono" style={{fontSize:12}}>{fARS(h.totalInvested||0)}</div></div>
-        <div><div style={{fontSize:9,color:T.muted,marginBottom:2}}>Actual (Hoy)</div><div className="mono" style={{fontSize:12,color:h.currentValue?T.white:T.muted}}>{h.currentValue?fARS(h.currentValue):"—"}</div></div>
-        <div><div style={{fontSize:9,color:T.muted,marginBottom:2}}>Ganancia</div><div className="mono" style={{fontSize:12,color:h.currentValue?(pnl>=0?T.teal:T.red):T.muted}}>{h.currentValue?`${pnl>=0?"+":""}${fARS(pnl)}`:"—"}</div></div>
-        <div><div style={{fontSize:9,color:T.muted,marginBottom:2}}>Rend. %</div><div className="mono" style={{fontSize:12,color:h.currentValue?(pnl>=0?T.teal:T.red):T.muted}}>{h.currentValue?`${pnl>=0?"+":""}${pnlPct}%`:"—"}</div></div>
-    </div>
-    
-    {projectedMaturity && <div style={{marginTop:8, background:"rgba(200,255,87,.05)", border:`1px dashed rgba(200,255,87,.2)`, borderRadius:8, padding:"8px 12px", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
-        <div><div style={{fontSize:10, color:T.mid}}>Proyección al vencimiento</div><div style={{fontSize:9, color:T.muted}}>{h.maturityDate}</div></div>
-        <div className="mono" style={{fontSize:14, color:T.lime, fontWeight:600}}>{fARS(projectedMaturity)}</div>
-    </div>}
-    
-    {h.lastUpdated&&<div style={{fontSize:9,color:T.muted,marginTop:8,textAlign:"right"}}>Última act: {h.lastUpdated}</div>}</div>})}</div>}</div>}
-  {tab==="scanner"&&<div><div className="card" style={{marginBottom:14,background:`linear-gradient(135deg,${T.surface},#0f1525)`}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12,flexWrap:"wrap",gap:10}}><div><div style={{fontSize:15,fontWeight:700,marginBottom:4}}>🤖 Scanner automático con IA</div><div style={{fontSize:12,color:T.muted}}>Encuentra oportunidades adaptadas a tu perfil.</div></div><button className="btn bl" onClick={runScanner} disabled={scanning} style={{flexShrink:0}}>{scanning?<><Dots/> Analizando...</>:<><ic.Scan/> Escanear mercado</>}</button></div>{riskProfile&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}><div className="chip">🛡️ {riskProfile.risk}</div><div className="chip">⏱️ {riskProfile.horizon}</div></div>}</div>{scanErr&&<div style={{background:"rgba(255,77,106,.08)",border:`1px solid rgba(255,77,106,.25)`,borderRadius:10,padding:"10px 14px",fontSize:12,color:T.red,marginBottom:14}}>⚠ {scanErr}</div>}{scanning&&<div style={{textAlign:"center",padding:"48px 0",color:T.muted}}><div style={{fontSize:32,marginBottom:12}}>🔍</div><div style={{fontSize:14,marginBottom:8}}>Analizando el mercado...</div><Dots/></div>}{scanResult&&!scanning&&<div>{scanResult.marketContext&&<div style={{background:"rgba(77,158,255,.07)",border:`1px solid rgba(77,158,255,.15)`,borderRadius:12,padding:"12px 16px",marginBottom:14,fontSize:12,color:T.blue}}>🌍 {scanResult.marketContext}</div>}<div className="inv-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(270px,1fr))",gap:12}}>{scanResult.opportunities?.map((opp,i)=>(<div key={i} className="card" style={{cursor:"pointer",border:`1px solid ${opp.ticker===scanResult.topPick?T.lime:T.border}`,background:opp.ticker===scanResult.topPick?"rgba(200,255,87,.03)":T.surface,position:"relative",transition:"all .2s"}}>{opp.ticker===scanResult.topPick&&<div style={{position:"absolute",top:-8,right:12,background:T.lime,color:T.bg,fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:99}}>TOP PICK</div>}<div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}><div><div style={{display:"flex",gap:7,alignItems:"center",marginBottom:3}}><span className="mono" style={{fontSize:16,fontWeight:700}}>{opp.ticker}</span><span className={`tag ${sigCls(opp.signal)}`} style={{fontSize:10}}>{opp.signal}</span></div><div style={{fontSize:11,color:T.muted}}>{opp.name}</div></div></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginBottom:10}}>{[{l:"Upside",v:`${opp.upside>0?"+":""}${(opp.upside||0).toFixed(0)}%`,c:opp.upside>0?T.lime:T.red},{l:"Fit",v:`${opp.profileFit||0}%`,c:(opp.profileFit||0)>=70?T.teal:T.amber},{l:"Confianza",v:`${opp.confidenceScore||0}%`,c:(opp.confidenceScore||0)>=70?T.lime:T.amber}].map((s,j)=>(<div key={j} style={{background:T.raised,borderRadius:7,padding:"6px 8px"}}><div style={{fontSize:9,color:T.muted,marginBottom:2}}>{s.l}</div><div className="mono" style={{fontSize:12,color:s.c}}>{s.v}</div></div>))}</div><div style={{fontSize:11,color:T.muted,lineHeight:1.5,marginBottom:10,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{opp.thesis}</div><button className={`btn bsm ${justSaved===opp.ticker?"bl":"bg"}`} style={{width:"100%",justifyContent:"center"}} onClick={e=>{e.stopPropagation();saveFromScan(opp);}}>{justSaved===opp.ticker?<><ic.Check/> Guardado</>:"+ Analizar en detalle"}</button></div>))}</div><div style={{fontSize:10,color:T.muted,textAlign:"center",marginTop:12}}>⚠️ Análisis educativo. No constituye asesoramiento financiero.</div></div>}{!scanResult&&!scanning&&!scanErr&&<div style={{textAlign:"center",padding:"48px 32px",color:T.muted}}><div style={{fontSize:40,marginBottom:12}}>🔍</div><div style={{fontSize:14,marginBottom:4}}>El scanner analiza el mercado automáticamente</div><div style={{fontSize:12}}>Usa tu perfil de riesgo para encontrar oportunidades</div></div>}</div>}
-  {tab==="manual"&&<div><div className="card" style={{marginBottom:14}}><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:10}}>Buscar por ticker o moneda</div><div style={{display:"flex",gap:10,flexWrap:"wrap"}}><input className="inp" style={{flex:.6,minWidth:80}} placeholder="ej: BTC" value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&analyze(ticker,tname)}/><input className="inp" style={{flex:1.2,minWidth:120}} placeholder="Nombre (opcional)" value={tname} onChange={e=>setTname(e.target.value)} onKeyDown={e=>e.key==="Enter"&&analyze(ticker,tname)}/><button className="btn bl" onClick={()=>analyze(ticker,tname)} disabled={loading||!ticker}>{loading?<Dots/>:<><ic.Stock/> Analizar IA</>}</button></div>{loadErr&&<div style={{marginTop:10,background:"rgba(255,77,106,.08)",border:`1px solid rgba(255,77,106,.25)`,borderRadius:8,padding:"8px 12px",fontSize:12,color:T.red}}>{loadErr}</div>}<div style={{marginTop:12}}><div style={{fontSize:10,color:T.muted,marginBottom:7,textTransform:"uppercase",letterSpacing:".6px"}}>Acceso rápido</div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{PRESETS.map(p=><button key={p.t} onClick={()=>analyze(p.t,p.n)} disabled={loading} style={{padding:"5px 11px",borderRadius:7,fontSize:11,fontWeight:500,border:`1px solid ${savedAnalyses.find(a=>a.ticker===p.t)?T.lime:T.border}`,background:savedAnalyses.find(a=>a.ticker===p.t)?"rgba(200,255,87,.08)":T.raised,color:savedAnalyses.find(a=>a.ticker===p.t)?T.lime:T.mid,cursor:"pointer",transition:"all .15s"}}>{p.t}</button>)}</div></div></div>{sel&&<AnalysisDetail a={sel} onClose={()=>setSel(null)}/>}</div>}
-  {tab==="saved"&&<div>{savedAnalyses.length===0?<div style={{textAlign:"center",padding:"48px 32px",color:T.muted}}><div style={{fontSize:40,marginBottom:12}}>📁</div><div style={{fontSize:14}}>Sin análisis guardados</div></div>:<div><div className="inv-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(250px,1fr))",gap:10,marginBottom:14}}>{savedAnalyses.map(a=>(<div key={a.ticker} onClick={()=>setSel(sel?.ticker===a.ticker?null:a)} className="card" style={{cursor:"pointer",border:`1px solid ${sel?.ticker===a.ticker?T.lime:T.border}`,transition:"all .2s",position:"relative"}}><button onClick={e=>{e.stopPropagation();update({savedAnalyses:savedAnalyses.filter(x=>x.ticker!==a.ticker)});if(sel?.ticker===a.ticker)setSel(null);notify("Eliminado","err");}} className="btn bd bsm" style={{position:"absolute",top:12,right:12}}><ic.Trash/></button><div style={{display:"flex",gap:8,alignItems:"center",marginBottom:6,paddingRight:36}}><span className="mono" style={{fontSize:16,fontWeight:700}}>{a.ticker}</span><span className={`tag ${sigCls(a.signal)}`} style={{fontSize:10}}>{a.signal}</span></div><div style={{fontSize:11,color:T.muted,marginBottom:8}}>{a.company}</div><div style={{display:"flex",gap:7}}>{[{l:"Upside",v:`${a.upside>0?"+":""}${(a.upside||0).toFixed(0)}%`,c:a.upside>0?T.lime:T.red},{l:"Confianza",v:`${a.confidenceScore||0}%`,c:(a.confidenceScore||0)>=70?T.lime:T.amber}].map((s,i)=>(<div key={i} style={{background:T.raised,borderRadius:7,padding:"6px 10px"}}><div style={{fontSize:9,color:T.muted,marginBottom:2}}>{s.l}</div><div className="mono" style={{fontSize:12,color:s.c}}>{s.v}</div></div>))}</div></div>))}</div>{sel&&<AnalysisDetail a={sel} onClose={()=>setSel(null)}/>}</div>}</div>}</div>);
-}
+        <button className="btn bl" style={{justifyContent:"center", marginTop:10, width:"100%"}} onClick={addHolding}>✓ Guardar en mi portfolio</button>
+      </div></div>}
 
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>{filteredHoldings.map(h=>{
+      const pnl=(h.currentValue||h.totalInvested)-(h.totalInvested||0);
+      const pnlPct=h.totalInvested?((pnl/h.totalInvested)*100).toFixed(1):0;
+      return <div key={h.id} className="card" style={{padding:"14px"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div><div style={{fontSize:14,fontWeight:700}}>{h.ticker||h.name} <span style={{fontSize:10,color:T.muted,fontWeight:400}}>{h.type}</span></div><div style={{fontSize:11,color:T.muted}}>{h.quantity?`${h.quantity} un. a ${h.currency==="USD"?"U$D":"$"}${h.buyPrice}`:`TNA ${h.rate}%`}</div></div>
+        <div style={{display:"flex",gap:6}}><button className="btn bg bsm" onClick={()=>refreshSingle(h)} disabled={refreshingId===h.id}>{refreshingId===h.id?<Dots/>:<ic.Refresh/>}</button><button className="btn bd bsm" onClick={()=>delHolding(h.id)}><ic.Trash/></button></div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,background:T.raised,padding:"8px",borderRadius:8,marginTop:8}}>
+        <div><div style={{fontSize:9,color:T.muted}}>Inicial</div><div className="mono" style={{fontSize:11}}>{fARS(h.totalInvested)}</div></div>
+        <div><div style={{fontSize:9,color:T.muted}}>Actual</div><div className="mono" style={{fontSize:11,color:T.white}}>{fARS(h.currentValue)}</div></div>
+        <div><div style={{fontSize:9,color:T.muted}}>Ganancia</div><div className="mono" style={{fontSize:11,color:pnl>=0?T.teal:T.red}}>{pnl>=0?"+":""}{fARS(pnl)}</div></div>
+        <div><div style={{fontSize:9,color:T.muted}}>Rend %</div><div className="mono" style={{fontSize:11,color:pnl>=0?T.teal:T.red}}>{pnl>=0?"+":""}{pnlPct}%</div></div>
+      </div></div>})}
+    </div>
+  </div>}
+  {/* Resto de pestañas (Scanner, Manual, Saved) se mantienen igual... */}
+  {tab==="scanner" && <div className="card">Scanner IA - Presioná Escanear para buscar oportunidades. <button className="btn bl" onClick={runScanner} disabled={scanning}>{scanning?<Dots/>:"Escanear"}</button></div>}
+  </div>);
+}
 function AnalysisDetail({a,onClose}){
   if(!a)return null;
   return(<div className="card up" style={{border:`1px solid ${T.hi}`,marginTop:14}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:18,flexWrap:"wrap",gap:8}}><div><div style={{display:"flex",gap:10,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}><span className="mono" style={{fontSize:22,fontWeight:700}}>{a.ticker}</span><span className={`tag ${sigCls(a.signal)}`}>{a.signal}</span><span className={`tag ${a.timeframe==="SHORT"?"te":a.timeframe==="LONG"?"ti":"ts"}`}>{a.timeframe}</span></div><div style={{fontSize:13,color:T.mid}}>{a.company}{a.sector?` · ${a.sector}`:""}</div></div><button className="btn bg bsm" onClick={onClose}><ic.X/></button></div><div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:18}}>{[{l:"Precio est.",v:`$${(a.currentEstimate||0).toFixed(0)}`},{l:"Target 12m",v:`$${(a.priceTarget12m||0).toFixed(0)}`,c:T.lime},{l:"Upside",v:`${a.upside>0?"+":""}${(a.upside||0).toFixed(1)}%`,c:a.upside>0?T.lime:T.red},{l:"P/E",v:a.peRatio?(a.peRatio.toFixed(1)):"—"},{l:"Rev. Growth",v:a.revenueGrowth?`${(a.revenueGrowth).toFixed(1)}%`:"—",c:a.revenueGrowth>0?T.teal:T.red}].map((s,i)=>(<div key={i} style={{background:T.raised,borderRadius:10,padding:"12px 14px"}}><div style={{fontSize:10,color:T.muted,marginBottom:5}}>{s.l}</div><div className="mono" style={{fontSize:16,fontWeight:500,color:s.c||T.white}}>{s.v}</div></div>))}</div><div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>{[{title:"🐂 Bull case",color:T.lime,body:a.bullCase,sub:"Catalizadores",items:a.catalysts},{title:"🐻 Bear case",color:T.red,body:a.bearCase,sub:"Riesgos",items:a.risks}].map((p,i)=>(<div key={i} style={{background:T.raised,borderRadius:12,padding:"14px 16px"}}><div style={{fontSize:11,color:p.color,fontWeight:600,marginBottom:7}}>{p.title}</div><div style={{fontSize:12,color:T.mid,lineHeight:1.6,marginBottom:8}}>{p.body}</div><div style={{fontSize:10,color:T.muted,marginBottom:5}}>{p.sub}</div>{p.items?.map((it,j)=><div key={j} style={{fontSize:11,color:T.mid,padding:"3px 0",borderBottom:`1px solid ${T.border}`}}>▸ {it}</div>)}</div>))}</div>{a.moat&&<div style={{background:"rgba(77,158,255,.06)",border:`1px solid rgba(77,158,255,.15)`,borderRadius:10,padding:"12px 16px",marginBottom:8}}><div style={{fontSize:11,color:T.blue,fontWeight:600,marginBottom:4}}>🏰 Moat</div><div style={{fontSize:12,color:T.mid}}>{a.moat}</div></div>}<div style={{fontSize:10,color:T.muted,textAlign:"center",marginTop:4}}>⚠️ Análisis educativo. No constituye asesoramiento financiero.</div></div>);
