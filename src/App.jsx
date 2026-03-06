@@ -659,37 +659,52 @@ function Investments({state,update,notify}){
 }
 
 function Analytics({state}){
-  // 1. Extraer todo del estado PRIMERO
-  const {transactions, holdings=[], marketPrices={}, usdRate, displayCurrency}=state;
+  const {transactions, holdings=[], marketPrices={}, usdRate, displayCurrency, goals=[], salaries=[]}=state;
   const {fmt, toDsp}=useDsp(state);
   const NOW = getNow();
   const [range, setRange] = useState(6);
 
-  // 2. Cálculos de Patrimonio (Inversiones + Ahorros)
-  let pValArs = 0;
-  holdings.forEach(h => { 
-    pValArs += calcHoldingValueArs(h, marketPrices, usdRate).curArs; 
-  });
-  
-  const totalSavingsArs = transactions
-    .filter(t => t.category === "💰 Ahorro")
-    .reduce((s, t) => s + t.amount, 0);
-    
-  const patrimonioTotalArs = pValArs + totalSavingsArs;
+  // 1. CÁLCULO DE PATRIMONIO (Motor Maestro)
+  const pValArs = holdings.reduce((s, h) => s + calcHoldingValueArs(h, marketPrices, usdRate).curArs, 0);
+  const savingsArs = transactions.filter(t => t.category === "💰 Ahorro").reduce((s, t) => s + t.amount, 0);
+  const patrimonioTotalArs = pValArs + savingsArs;
 
-  // 3. Gráficos y Ratios
+  // 2. FLUJO DE CAJA HISTÓRICO (Bar Chart)
   const months = useMemo(() => Array.from({length:range}, (_,i) => {
     const d = new Date(NOW.getFullYear(), NOW.getMonth() - range + 1 + i, 1);
     const m = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
     const txs = transactions.filter(t => gMonth(t.date) === m);
+    const e = txs.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
+    const inc = txs.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0);
     return {
       name: MOS[d.getMonth()],
-      Gastos: toDsp(txs.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0)),
-      Ingresos: toDsp(txs.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0)),
+      Gastos: toDsp(e),
+      Ingresos: toDsp(inc),
       Ahorro: toDsp(txs.filter(t => t.category === "💰 Ahorro").reduce((s,t) => s + t.amount, 0)),
-      balance: toDsp(txs.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0) - txs.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0))
+      balance: toDsp(inc - e)
     };
   }), [transactions, range, toDsp]);
+
+  // 3. ANÁLISIS DE GASTOS POR CATEGORÍA
+  const cm = {};
+  transactions.filter(t => t.type === "expense").forEach(t => {
+    cm[t.category] = (cm[t.category] || 0) + t.amount;
+  });
+  const ctot = Object.values(cm).reduce((s,v) => s + v, 0);
+  const cats = Object.entries(cm)
+    .sort((a,b) => b[1] - a[1])
+    .map(([c,v], i) => ({
+      c, 
+      v: toDsp(v), 
+      pct: ctot > 0 ? (v / ctot * 100).toFixed(1) : 0, 
+      col: CPAL[i % CPAL.length]
+    }));
+
+  // 4. RATIOS DE EFICIENCIA
+  const totInc = transactions.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0);
+  const totExp = transactions.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
+  const savR = totInc > 0 ? clamp(((totInc - totExp) / totInc) * 100, -100, 100).toFixed(1) : "0";
+  const savN = parseFloat(savR);
 
   return (
     <div className="up">
@@ -701,69 +716,96 @@ function Analytics({state}){
         </select>
       }/>
 
-      <div className="kpi-grid" style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:14}}>
+      {/* BLOQUE 1: PATRIMONIO TOTAL */}
+      <div className="kpi-grid" style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:16}}>
         <div className="card csm">
-          <div style={{fontSize:10, color:T.muted, textTransform:"uppercase"}}>Portfolio</div>
-          <div className="mono" style={{fontSize:16, fontWeight:600, color:T.blue, marginTop:4}}>{fmt(pValArs)}</div>
+          <div style={{fontSize:10, color:T.muted, textTransform:"uppercase", letterSpacing:".5px"}}>Portfolio Real</div>
+          <div className="mono" style={{fontSize:18, fontWeight:600, color:T.blue, marginTop:4}}>{fmt(pValArs)}</div>
         </div>
         <div className="card csm">
-          <div style={{fontSize:10, color:T.muted, textTransform:"uppercase"}}>Ahorros</div>
-          <div className="mono" style={{fontSize:16, fontWeight:600, color:T.teal, marginTop:4}}>{fmt(totalSavingsArs)}</div>
+          <div style={{fontSize:10, color:T.muted, textTransform:"uppercase", letterSpacing:".5px"}}>Ahorros Efectivo</div>
+          <div className="mono" style={{fontSize:18, fontWeight:600, color:T.teal, marginTop:4}}>{fmt(savingsArs)}</div>
         </div>
-        <div className="card csm" style={{border:`1px solid ${T.lime}44`}}>
-          <div style={{fontSize:10, color:T.lime, fontWeight:700, textTransform:"uppercase"}}>Patrimonio Total</div>
-          <div className="mono" style={{fontSize:18, fontWeight:700, color:T.lime, marginTop:4}}>{fmt(patrimonioTotalArs)}</div>
+        <div className="card csm" style={{border:`1px solid ${T.lime}44`, background:`linear-gradient(135deg, ${T.surface}, ${T.bg})`}}>
+          <div style={{fontSize:10, color:T.lime, fontWeight:700, textTransform:"uppercase", letterSpacing:".5px"}}>Patrimonio Total</div>
+          <div className="mono" style={{fontSize:20, fontWeight:700, color:T.lime, marginTop:4}}>{fmt(patrimonioTotalArs)}</div>
         </div>
       </div>
 
-      <div className="card" style={{marginBottom:14}}>
-        <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:12}}>Evolución ({displayCurrency})</div>
-        <ResponsiveContainer width="100%" height={210}>
+      {/* BLOQUE 2: EFICIENCIA Y TASA DE AHORRO */}
+      <div className="kpi-grid" style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, marginBottom:16}}>
+        <div className="card csm">
+          <div style={{fontSize:10, color:T.muted}}>INGRESOS TOTALES</div>
+          <div className="mono" style={{fontSize:16, color:T.teal, marginTop:4}}>{fmt(totInc)}</div>
+        </div>
+        <div className="card csm">
+          <div style={{fontSize:10, color:T.muted}}>GASTOS TOTALES</div>
+          <div className="mono" style={{fontSize:16, color:T.red, marginTop:4}}>{fmt(totExp)}</div>
+        </div>
+        <div className="card csm">
+          <div style={{fontSize:10, color:T.muted}}>TASA DE AHORRO</div>
+          <div className="mono" style={{fontSize:16, color:savN>=20?T.lime:T.amber, marginTop:4}}>{savR}%</div>
+        </div>
+      </div>
+
+      {/* BLOQUE 3: GRÁFICO DE BARRAS EVOLUCIÓN */}
+      <div className="card" style={{marginBottom:16}}>
+        <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:16}}>Flujo de Caja Mensual ({displayCurrency})</div>
+        <ResponsiveContainer width="100%" height={220}>
           <BarChart data={months}>
             <CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/>
             <XAxis dataKey="name" tick={{fill:T.muted, fontSize:10}} axisLine={false}/>
-            <YAxis tick={{fill:T.muted, fontSize:9}} axisLine={false} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}/>
+            <YAxis tick={{fill:T.muted, fontSize:9}} axisLine={false} tickFormatter={v => v>=1000 ? `${(v/1000).toFixed(0)}k` : v}/>
             <Tooltip content={<CTip dc={displayCurrency}/>}/>
+            <Legend wrapperStyle={{fontSize:11, paddingTop:10}}/>
             <Bar dataKey="Ingresos" fill={T.teal} radius={[4,4,0,0]}/>
             <Bar dataKey="Gastos" fill={T.red} radius={[4,4,0,0]}/>
             <Bar dataKey="Ahorro" fill={T.blue} radius={[4,4,0,0]}/>
           </BarChart>
         </ResponsiveContainer>
       </div>
-    </div>
-  );
-}
-// ==========================================
-// 3. COMPONENTE DE APOYO
-// ==========================================
-function AnalysisDetail({a, onClose}){
-  if(!a) return null;
-  return (
-    <div className="card up" style={{border:`1px solid ${T.hi}`, marginTop:14}}>
-      <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:18}}>
-        <div>
-          <div style={{display:"flex", gap:10, alignItems:"center", marginBottom:4}}>
-            <span className="mono" style={{fontSize:22, fontWeight:700}}>{a.ticker}</span>
-            <span className={`tag ${sigCls(a.signal)}`}>{a.signal}</span>
-          </div>
-          <div style={{fontSize:13, color:T.mid}}>{a.company}</div>
+
+      {/* BLOQUE 4: CATEGORÍAS Y METAS */}
+      <div className="trend-grid" style={{display:"grid", gridTemplateColumns:isMobile?"1fr":"1fr 1fr", gap:14, marginBottom:16}}>
+        <div className="card">
+          <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:15}}>Gastos por Categoría</div>
+          {cats.length === 0 ? <div style={{color:T.muted, textAlign:"center", padding:20}}>Sin datos</div> : 
+            cats.slice(0,6).map((c,i) => (
+              <div key={i} style={{marginBottom:12}}>
+                <div style={{display:"flex", justifyContent:"space-between", marginBottom:5}}>
+                  <span style={{fontSize:12, color:T.mid}}>{c.c}</span>
+                  <span className="mono" style={{fontSize:11, color:T.muted}}>{c.pct}%</span>
+                </div>
+                <div className="prog" style={{height:5}}>
+                  <div style={{height:"100%", borderRadius:2, background:c.col, width:`${c.pct}%`}}/>
+                </div>
+              </div>
+          ))}
         </div>
-        <button className="btn bg bsm" onClick={onClose}><ic.X/></button>
+
+        <div className="card">
+          <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:15}}>Estado de Metas</div>
+          {goals.length === 0 ? <div style={{color:T.muted, textAlign:"center", padding:20}}>Sin metas activas</div> :
+            goals.slice(0,4).map(g => {
+              const linked = holdings.filter(h => h.goalId === g.id);
+              const invVal = linked.reduce((s, h) => s + calcHoldingValueArs(h, marketPrices, usdRate).curArs, 0);
+              const total = g.saved + invVal;
+              const pct = clamp((total / g.target) * 100, 0, 100);
+              return (
+                <div key={g.id} style={{marginBottom:12}}>
+                  <div style={{display:"flex", justifyContent:"space-between", marginBottom:5}}>
+                    <span style={{fontSize:12}}>{g.icon} {g.name}</span>
+                    <span style={{fontSize:11, color:T.lime}}>{pct.toFixed(0)}%</span>
+                  </div>
+                  <div className="prog" style={{height:5}}>
+                    <div className="progf" style={{width:`${pct}%`, background:T.lime}}/>
+                  </div>
+                </div>
+              );
+            })
+          }
+        </div>
       </div>
-      <div className="kpi-grid" style={{display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:10}}>
-        {[{l:"Precio est.", v:`$${(a.currentEstimate||0).toFixed(0)}`},
-          {l:"Target 12m", v:`$${(a.priceTarget12m||0).toFixed(0)}`, c:T.lime},
-          {l:"Upside", v:`${a.upside>0?"+":""}${(a.upside||0).toFixed(1)}%`, c:a.upside>0?T.lime:T.red},
-          {l:"P/E", v:a.peRatio?a.peRatio.toFixed(1):"—"},
-          {l:"Rev. Growth", v:a.revenueGrowth?`${a.revenueGrowth.toFixed(1)}%`:"—", c:T.teal}]
-          .map((s,i) => (
-            <div key={i} style={{background:T.raised, borderRadius:10, padding:"12px 14px"}}>
-              <div style={{fontSize:10, color:T.muted, marginBottom:5}}>{s.l}</div>
-              <div className="mono" style={{fontSize:16, fontWeight:500, color:s.c||T.white}}>{s.v}</div>
-            </div>
-        ))}
-      </div>
-      {/* ... (resto del contenido del bull/bear case si lo necesitas) */}
     </div>
   );
 }
