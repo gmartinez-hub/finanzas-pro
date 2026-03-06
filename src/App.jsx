@@ -247,6 +247,36 @@ function Dashboard({state,update,notify,setView}){
           <div style={{ fontSize: 14, color: T.muted }}>Generá tu reporte para ver cómo tus inversiones impulsan tus metas.</div>
         </div>
       )}
+      <div className="trend-grid" style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1.8fr 0.8fr",gap:14,marginTop:20}}>
+      <div className="card">
+        <div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Tendencia ({state.displayCurrency})</div>
+        <ResponsiveContainer width="100%" height={180}><AreaChart data={trend}><CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" tick={{fill:T.muted,fontSize:10}} axisLine={false}/><YAxis tick={{fill:T.muted,fontSize:9}} axisLine={false} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:v}/><Tooltip content={<CTip dc={state.displayCurrency}/>}/><Area type="monotone" dataKey="Ingresos" stroke={T.teal} fill={`${T.teal}15`} strokeWidth={2}/><Area type="monotone" dataKey="Gastos" stroke={T.red} fill={`${T.red}15`} strokeWidth={2}/></AreaChart></ResponsiveContainer>
+      </div>
+      <div className="card" style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+        <div style={{fontSize:10,color:T.muted,textTransform:"uppercase",fontWeight:600,marginBottom:10}}>Salud Financiera</div>
+        <svg width={85} height={85} viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="40" fill="none" stroke={T.raised} strokeWidth="8"/>
+          <circle cx="50" cy="50" r="40" fill="none" stroke={scColor} strokeWidth="8" strokeDasharray={`${(score/100)*251} 251`} strokeDashoffset="63" strokeLinecap="round" style={{transition:"stroke-dasharray 1s"}}/>
+          <text x="50" y="48" textAnchor="middle" fill={scColor} fontSize="24" fontWeight="700">{score}</text>
+          <text x="50" y="62" textAnchor="middle" fill={T.muted} fontSize="8">SCORE</text>
+        </svg>
+<div className="trend-grid" style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1.8fr 0.8fr",gap:14,marginTop:20}}>
+      <div className="card">
+        <div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Tendencia ({state.displayCurrency})</div>
+        <ResponsiveContainer width="100%" height={180}><AreaChart data={trend}><CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" tick={{fill:T.muted,fontSize:10}} axisLine={false}/><YAxis tick={{fill:T.muted,fontSize:9}} axisLine={false} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:v}/><Tooltip content={<CTip dc={state.displayCurrency}/>}/><Area type="monotone" dataKey="Ingresos" stroke={T.teal} fill={`${T.teal}15`} strokeWidth={2}/><Area type="monotone" dataKey="Gastos" stroke={T.red} fill={`${T.red}15`} strokeWidth={2}/></AreaChart></ResponsiveContainer>
+      </div>
+      <div className="card" style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+        <div style={{fontSize:10,color:T.muted,textTransform:"uppercase",fontWeight:600,marginBottom:10}}>Salud Financiera</div>
+        <svg width={85} height={85} viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="40" fill="none" stroke={T.raised} strokeWidth="8"/>
+          <circle cx="50" cy="50" r="40" fill="none" stroke={scColor} strokeWidth="8" strokeDasharray={`${(score/100)*251} 251`} strokeDashoffset="63" strokeLinecap="round" style={{transition:"stroke-dasharray 1s"}}/>
+          <text x="50" y="48" textAnchor="middle" fill={scColor} fontSize="24" fontWeight="700">{score}</text>
+          <text x="50" y="62" textAnchor="middle" fill={T.muted} fontSize="8">SCORE</text>
+        </svg>
+      </div>
+    </div>
+      </div>
+    </div>
     </div>
   </div>);
 }
@@ -608,6 +638,10 @@ function Investments({state,update,notify}){
 // 2. FUNCIÓN ANALYTICS COMPLETA Y LIMPIA
 // ==========================================
 function Analytics({state}){
+  let pValArs = 0;
+  holdings.forEach(h => { pValArs += calcHoldingValueArs(h, marketPrices, usdRate).curArs; });
+  const savingsArs = transactions.filter(t => t.category === "💰 Ahorro").reduce((s, t) => s + t.amount, 0);
+  const patrimonioTotal = pValArs + savingsArs;
   const {transactions,displayCurrency}=state;
   const {fmt,toDsp}=useDsp(state);
   const NOW=getNow();
