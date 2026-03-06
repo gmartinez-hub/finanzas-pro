@@ -515,7 +515,7 @@ function Investments({state,update,notify}){
     <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>{[{l:"Invertido",v:fmt(portfolioData.gInv),c:T.blue,i:"💰"},{l:"Valor Actual",v:fmt(portfolioData.gCur),c:T.lime,i:"📈"},{l:"P&L Total",v:`${portfolioData.gPnl>=0?"+":""}${fmt(portfolioData.gPnl)}`,c:portfolioData.gPnl>=0?T.teal:T.red,i:"✅"}].map((k,i)=><div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase"}}>{k.l}</span><span>{k.i}</span></div><div className="mono" style={{fontSize:16,fontWeight:600,color:k.c}}>{k.v}</div></div>)}</div>
     <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
         <button className="btn bl" onClick={()=>setSHF(true)}><ic.Plus/> Agregar inversión</button>
-        <button className="btn bg" onClick={refreshPortfolio} disabled={refreshingId==="all"}>{refreshingId==="all"?<><Dots/> Sincronizando Binance...</>:<><ic.Refresh/> Sincronizar Cryptos</>}</button>
+        <button className="btn bg" onClick={refreshPortfolio} disabled={refreshingId==="all"}>{refreshingId==="all"?<><Dots/> Sincronizando Binance...</>:<><ic.Refresh/> Sincronizar Ahora</>}</button>
     </div>
     
     {showHForm&&<div className="card" style={{marginBottom:14}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><div style={{fontSize:14,fontWeight:700}}>Nueva Inversión</div><button className="btn bg bsm" onClick={()=>setSHF(false)}><ic.X/></button></div>
