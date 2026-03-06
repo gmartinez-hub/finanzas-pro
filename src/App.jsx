@@ -178,37 +178,70 @@ async function genWeeklyInsight(transactions, usdRate, portfolioValueArs = 0, po
 
 // 2. EL DASHBOARD: La interfaz con las Cards
 function Dashboard({state,update,notify,setView}){
-  const {transactions,goals,salaries,marketPrices={},holdings=[],usdRate,weeklyInsight}=state;
-  const {fmt}=useDsp(state);
+  const {transactions,goals,salaries,marketPrices={},holdings=[],usdRate,weeklyInsight,weeklyInsightDate}=state;
+  const {fmt,toDsp}=useDsp(state);
   const [loadingIns,setLI]=useState(false);
   const isMobile=useIsMobile();
-  
-  // Cálculo de totales reales usando el motor maestro
-  let pValue=0; let pInv=0;
+  const NOW=getNow(); const CUR=getCUR();
+
+  // 1. Cálculos de Ingresos/Gastos del mes
+  const cur=transactions.filter(t=>gMonth(t.date)===CUR);
+  const prevM=(()=>{const d=new Date(NOW.getFullYear(),NOW.getMonth()-1,1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;})();
+  const prev=transactions.filter(t=>gMonth(t.date)===prevM);
+  const inc=cur.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
+  const exp=cur.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
+  const pExp=prev.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
+  const delta=pExp>0?((exp-pExp)/pExp*100).toFixed(1):null;
+  const salary=getSalaryTotal(salaries);
+
+  // 2. Salud Financiera y Metas
+  const {score,items}=healthScore(transactions,goals,holdings);
+  const sc=score>=70?T.lime:score>=45?T.amber:T.red;
+
+  // 3. Gráfico de Tendencia (Últimos 6 meses)
+  const trend=Array.from({length:6},(_,i)=>{
+    const d=new Date(NOW.getFullYear(),NOW.getMonth()-5+i,1);
+    const m=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+    const txs=transactions.filter(t=>gMonth(t.date)===m);
+    return{name:MOS[d.getMonth()],Gastos:toDsp(txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0)),Ingresos:toDsp(txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0))};
+  });
+
+  // 4. Cálculo del Portfolio Real usando el Motor Maestro
+  let portfolioValue=0; let portfolioInvested=0;
   holdings.forEach(h=>{ 
     const {invArs,curArs}=calcHoldingValueArs(h,marketPrices,usdRate); 
-    pInv+=invArs; pValue+=curArs; 
+    portfolioInvested+=invArs; portfolioValue+=curArs; 
   });
-  const pPnL = pValue - pInv;
+  const portfolioPnL = portfolioValue - portfolioInvested;
 
-const refreshInsight = async () => {
+  // 5. Definición de los KPIs que se ven arriba
+  const kpis=[
+    {l:"Sueldo del mes",v:salary>0?fmt(salary):"-",c:T.lime,i:"💵",sub:salary>0?"Registrado":"Falta registro"},
+    {l:"Ingresos",v:fmt(inc),c:T.teal,i:"📥",sub:"Total mensual"},
+    {l:"Gastos",v:fmt(exp),c:T.red,i:"💸",sub:delta?`${delta>0?"+":""}${delta}% vs mes ant.`:"-"},
+    {l:"Portfolio Real",v:fmt(portfolioValue),c:portfolioPnL>=0?T.lime:T.red,i:"📊",sub:portfolioValue>0?`P&L: ${portfolioPnL>=0?"+":""}${fmt(portfolioPnL)}`:"Sin activos"}
+  ];
+
+  // 6. Función para generar el reporte con IA
+  const refreshInsight = async () => {
     if (transactions.length < 3) return notify("Necesitás más transacciones", "info");
     setLI(true);
     const ins = await genWeeklyInsight(transactions, usdRate, portfolioValue, portfolioInvested, goals);
     if (ins) update({ weeklyInsight: ins, weeklyInsightDate: todayISO() });
     setLI(false);
-  }; // <--- ACÁ CERRAMOS LA FUNCIÓN (Línea 222 corregida)
+  };
 
   return (
     <div className="up">
       <PH title="Dashboard" sub={NOW.toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" })} />
 
       {/* KPIs SUPERIORES */}
-      <div className="kpi-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 20 }}>
+      <div className="kpi-grid" style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(4,1fr)", gap: 12, marginBottom: 20 }}>
         {kpis.map((k, i) => (
           <div key={i} className="card csm">
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: T.muted }}>{k.l} <span>{k.i}</span></div>
             <div className="mono" style={{ fontSize: 18, fontWeight: 600, color: k.c, marginTop: 5 }}>{k.v}</div>
+            <div style={{ fontSize: 10, color: T.muted, marginTop: 4 }}>{k.sub}</div>
           </div>
         ))}
       </div>
@@ -244,16 +277,18 @@ const refreshInsight = async () => {
       <div className="trend-grid" style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.8fr 0.8fr", gap: 14, marginTop: 20 }}>
         <div className="card">
           <div style={{ fontSize: 12, fontWeight: 600, color: T.mid, marginBottom: 12 }}>Tendencia ({state.displayCurrency})</div>
-          <ResponsiveContainer width="100%" height={180}>
-            <AreaChart data={trend}>
-              <CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="name" tick={{ fill: T.muted, fontSize: 10 }} axisLine={false} />
-              <YAxis tick={{ fill: T.muted, fontSize: 9 }} axisLine={false} tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} />
-              <Tooltip content={<CTip dc={state.displayCurrency} />} />
-              <Area type="monotone" dataKey="Ingresos" stroke={T.teal} fill={`${T.teal}15`} strokeWidth={2} />
-              <Area type="monotone" dataKey="Gastos" stroke={T.red} fill={`${T.red}15`} strokeWidth={2} />
-            </AreaChart>
-          </ResponsiveContainer>
+          <div style={{ width: "100%", height: 180 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={trend}>
+                <CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="name" tick={{ fill: T.muted, fontSize: 10 }} axisLine={false} />
+                <YAxis tick={{ fill: T.muted, fontSize: 9 }} axisLine={false} tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} />
+                <Tooltip content={<CTip dc={state.displayCurrency} />} />
+                <Area type="monotone" dataKey="Ingresos" stroke={T.teal} fill={`${T.teal}15`} strokeWidth={2} />
+                <Area type="monotone" dataKey="Gastos" stroke={T.red} fill={`${T.red}15`} strokeWidth={2} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
         </div>
 
         <div className="card" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
@@ -268,8 +303,7 @@ const refreshInsight = async () => {
       </div>
     </div>
   );
-} // <--- ACÁ CERRAMOS EL COMPONENTE DASHBOARD
-      
+}      
 function SalaryModule({state,update,notify}){
   const {salaries=[],transactions}=state;
   const {fmt}=useDsp(state);
