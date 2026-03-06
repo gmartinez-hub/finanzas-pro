@@ -330,45 +330,66 @@ function Investments({state,update,notify}){
   const rc={none:T.teal,low:T.lime,very_low:T.teal,medium:T.amber,medium_high:T.amber,high:T.red};
 
   const [refreshingId,setRI]=useState(null);
-  const [loadingTNA,setLoadingTNA]=useState(false); 
   
   const holdings=state.holdings||[];
-  const marketPrices=state.marketPrices||{}; // Nuestra caché de precios reales
+  const marketPrices=state.marketPrices||{};
   const filteredHoldings=hFilter==="all"?holdings:holdings.filter(h=>h.type===hFilter);
   const holdingTypes=[...new Set(holdings.map(h=>h.type))];
+
+  // TABLA DE TASAS HARDCODEADA (Evita el NaN y fallos de API)
+  const BANCOS_RATES = [
+    { id: "GALICIA", name: "Banco Galicia", tna: 36 },
+    { id: "NACION", name: "Banco Nación", tna: 37 },
+    { id: "PROVINCIA", name: "Banco Provincia", tna: 35 },
+    { id: "SANTANDER", name: "Santander", tna: 33 },
+    { id: "BBVA", name: "BBVA Francés", tna: 35 },
+    { id: "MACRO", name: "Banco Macro", tna: 36 },
+    { id: "MERCADOPAGO", name: "Mercado Pago (FCI)", tna: 38 },
+    { id: "UALA", name: "Ualá", tna: 40 },
+    { id: "NARANJAX", name: "Naranja X", tna: 42 },
+    { id: "OTRO", name: "Otro / Personalizado", tna: "" }
+  ];
   
   // ==========================================
-  // MOTOR MATEMÁTICO (Unificado en ARS)
+  // MOTOR MATEMÁTICO (Backend)
   // ==========================================
   const portfolioData = useMemo(() => {
     let gInv = 0, gCur = 0;
     
     const items = holdings.map(h => {
-      // 1. Inversión inicial en ARS absolutos
       let invArs = h.totalInvestedArs;
       if(!invArs) invArs = h.originalCurrency === "USD" ? (h.totalInvested||0) * usdRate : (h.totalInvested||0);
       
       let currentArs = invArs; 
       
-      // 2. Precio Actualizado de Mercado
       if (["accion", "cedear", "etf", "crypto"].includes(h.type)) {
         const mp = marketPrices[h.ticker];
         if (mp) {
-            // Aseguramos que el precio de mercado se convierta a pesos para calcular
             const priceArs = mp.currency === "USD" ? mp.price * usdRate : mp.price;
             currentArs = (h.quantity || 0) * priceArs;
         } else {
-            // Si no sincronizó, usamos el precio de compra como fallback
             const fallbackPriceArs = h.originalCurrency === "USD" ? (h.originalBuyPrice || h.buyPrice) * usdRate : (h.originalBuyPrice || h.buyPrice);
             currentArs = (h.quantity || 0) * fallbackPriceArs;
         }
       } else {
-        // Plazos Fijos
-        const days = Math.max(0, Math.floor((Date.now() - new Date(h.buyDate)) / 864e5));
-        currentArs = invArs * (1 + ((h.rate||0) / 100) * (days / 365));
+        // LÓGICA DE PLAZOS FIJOS Y FCI
+        const now = Date.now();
+        const start = new Date(h.buyDate).getTime();
+        const end = h.maturityDate ? new Date(h.maturityDate).getTime() : now;
+        
+        // Si es Plazo Fijo, el interés se calcula hasta hoy, o hasta el vencimiento si ya pasó
+        const calcDate = h.type === "plazo_fijo" ? Math.min(now, end) : now;
+        const daysElapsed = Math.max(0, Math.floor((calcDate - start) / 864e5));
+
+        if (h.type === "fci") {
+            // Interés compuesto diario (Ej: Mercado Pago)
+            currentArs = invArs * Math.pow(1 + ((h.rate||0) / 100 / 365), daysElapsed);
+        } else {
+            // Interés simple (Plazo fijo tradicional)
+            currentArs = invArs * (1 + ((h.rate||0) / 100) * (daysElapsed / 365));
+        }
       }
       
-      // 3. Conversión al Display Currency (Lo que elegiste ver en la barra lateral)
       const targetInv = displayCurrency === "USD" ? invArs / usdRate : invArs;
       const targetCur = displayCurrency === "USD" ? currentArs / usdRate : currentArs;
       const pnl = targetCur - targetInv;
@@ -385,78 +406,70 @@ function Investments({state,update,notify}){
 
 
   // ==========================================
-  // SINCRONIZADOR GLOBAL DE APIs (Binance + Yahoo)
+  // ACTUALIZACIÓN GLOBAL (Solo Cryptos)
   // ==========================================
   const refreshPortfolio = async () => {
     setRI("all");
-    notify("Sincronizando con APIs globales...", "info");
+    notify("Sincronizando Cryptos con Binance...", "info");
     let newPrices = { ...marketPrices };
     let updated = 0;
 
-    const varAssets = holdings.filter(x => ["accion", "cedear", "etf", "crypto"].includes(x.type));
+    const cryptos = holdings.filter(x => x.type === "crypto");
     
-    for (const h of varAssets) {
-        if (h.type === "crypto") {
-            try {
-                // Binance API
-                let sym = h.ticker.toUpperCase().replace("USDT", "").replace("USD", "") + "USDT";
-                const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${sym}`);
-                if(r.ok) {
-                    const d = await r.json();
-                    newPrices[h.ticker] = { price: parseFloat(d.price), currency: "USD" };
-                    updated++;
-                }
-            } catch(e) { console.warn("Binance err", e); }
-        } else {
-            try {
-                // Yahoo Finance API (vía proxy público)
-                let fetchTicker = h.ticker.toUpperCase();
-                // MAGIA: Si compraste un CEDEAR/Acción en Pesos, buscamos en la Bolsa de Bs As (.BA)
-                if (h.originalCurrency === "ARS" && !fetchTicker.includes(".")) {
-                    fetchTicker += ".BA"; 
-                }
-                
-                const yfUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${fetchTicker}?interval=1d`;
-                const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yfUrl)}`;
-                
-                const r = await fetch(proxyUrl);
-                if(r.ok) {
-                    const proxyData = await r.json();
-                    const d = JSON.parse(proxyData.contents);
-                    const price = d.chart?.result?.[0]?.meta?.regularMarketPrice;
-                    const currency = d.chart?.result?.[0]?.meta?.currency; // Trae "ARS" o "USD" oficial
-                    
-                    if (price) {
-                        newPrices[h.ticker] = { price: price, currency: currency || h.originalCurrency };
-                        updated++;
-                    }
-                }
-            } catch(e) { console.warn("YF err", e); }
-        }
+    for (const h of cryptos) {
+        try {
+            const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${h.ticker.toUpperCase()}USDT`);
+            if(r.ok) {
+                const d = await r.json();
+                newPrices[h.ticker] = { price: parseFloat(d.price), currency: "USD" };
+                updated++;
+            }
+        } catch(e) {}
     }
     
     update({ marketPrices: newPrices });
     setRI(null);
-    notify(`Mercado sincronizado: ${updated}/${varAssets.length} activos ✓`);
+    notify(`Mercado actualizado (${updated} cryptos) ✓. Acciones son manuales.`);
   };
 
-  const handleAutoTNA = async () => {
-    setLoadingTNA(true);
-    try {
-      const r = await fetch("https://api.argentinadatos.com/v1/finanzas/tasas/plazoFijo");
-      const d = await r.json();
-      const avg = d.slice(0,10).reduce((s,b)=>s+b.tna, 0) / Math.min(10, d.length);
-      setHF(f => ({...f, rate: avg.toFixed(1)}));
-      notify("TNA promedio actualizada ✓");
-    } catch(e) { notify("Error al obtener TNA", "err"); }
-    setLoadingTNA(false);
+  // ==========================================
+  // ACTUALIZACIÓN INDIVIDUAL
+  // ==========================================
+  const refreshSingle = async (h) => {
+    setRI(h.id);
+    let newPrices = { ...marketPrices };
+
+    if (h.type === "crypto") {
+      try {
+          const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${h.ticker.toUpperCase()}USDT`);
+          if(r.ok) {
+              const d = await r.json();
+              newPrices[h.ticker] = { price: parseFloat(d.price), currency: "USD" };
+              update({ marketPrices: newPrices });
+              notify(`Cotización Binance actualizada ✓`);
+          } else throw new Error();
+      } catch {
+          notify(`Error al obtener Binance para ${h.ticker}`, "err");
+      }
+    } else if (["accion", "cedear", "etf"].includes(h.type)) {
+      const currentPrice = marketPrices[h.ticker]?.price || h.originalBuyPrice || h.buyPrice;
+      const p = window.prompt(`Ingresá el precio actual de 1 unidad de ${h.ticker} en ${h.originalCurrency||"ARS"}:`, currentPrice);
+      if(p && !isNaN(px(p)) && px(p) > 0) {
+          newPrices[h.ticker] = { price: px(p), currency: h.originalCurrency || "ARS" };
+          update({ marketPrices: newPrices });
+          notify(`Precio de ${h.ticker} guardado ✓`);
+      }
+    } else {
+      notify(`Rendimiento calculado a hoy ✓`); 
+    }
+    setRI(null);
   };
   
   const addHolding=()=>{
     const isVar = ["accion", "cedear", "etf", "crypto"].includes(hForm.type);
     const isFix = ["plazo_fijo", "fci", "bono"].includes(hForm.type);
     if(isVar && (!hForm.ticker || !hForm.quantity || !hForm.buyPrice)) return notify("Ticker, cantidad y precio son obligatorios", "err");
-    if(isFix && (!hForm.name || !hForm.totalInvested || !hForm.rate || !hForm.buyDate)) return notify("Nombre, capital, TNA y fecha son obligatorios", "err");
+    if(isFix && (!hForm.name || !hForm.totalInvested || !hForm.rate || !hForm.buyDate)) return notify("Entidad, capital, TNA y fecha son obligatorios", "err");
     
     let rawBuyPrice = px(hForm.buyPrice);
     let qty = px(hForm.quantity);
@@ -469,7 +482,7 @@ function Investments({state,update,notify}){
     const h={
         id:`h_${uid()}`, 
         type: hForm.type,
-        ticker: hForm.ticker.toUpperCase(),
+        ticker: isFix ? hForm.name : hForm.ticker.toUpperCase(), // Usamos el nombre del banco como ticker en RF
         name: hForm.name,
         quantity: qty, 
         originalBuyPrice: rawBuyPrice,
@@ -502,19 +515,42 @@ function Investments({state,update,notify}){
     <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>{[{l:"Invertido",v:fmt(portfolioData.gInv),c:T.blue,i:"💰"},{l:"Valor Actual",v:fmt(portfolioData.gCur),c:T.lime,i:"📈"},{l:"P&L Total",v:`${portfolioData.gPnl>=0?"+":""}${fmt(portfolioData.gPnl)}`,c:portfolioData.gPnl>=0?T.teal:T.red,i:"✅"}].map((k,i)=><div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase"}}>{k.l}</span><span>{k.i}</span></div><div className="mono" style={{fontSize:16,fontWeight:600,color:k.c}}>{k.v}</div></div>)}</div>
     <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
         <button className="btn bl" onClick={()=>setSHF(true)}><ic.Plus/> Agregar inversión</button>
-        <button className="btn bg" onClick={refreshPortfolio} disabled={refreshingId==="all"}>{refreshingId==="all"?<><Dots/> Sincronizando APIs...</>:<><ic.Refresh/> Sincronizar Mercado</>}</button>
+        <button className="btn bg" onClick={refreshPortfolio} disabled={refreshingId==="all"}>{refreshingId==="all"?<><Dots/> Sincronizando Binance...</>:<><ic.Refresh/> Sincronizar Cryptos</>}</button>
     </div>
     
     {showHForm&&<div className="card" style={{marginBottom:14}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><div style={{fontSize:14,fontWeight:700}}>Nueva Inversión</div><button className="btn bg bsm" onClick={()=>setSHF(false)}><ic.X/></button></div>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         <div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tipo</label><select className="inp" value={hForm.type} onChange={e=>setHF(f=>({...f,type:e.target.value}))}><option value="accion">📈 Acción</option><option value="cedear">🇺🇸 CEDEAR</option><option value="etf">📊 ETF</option><option value="crypto">₿ Crypto</option><option value="plazo_fijo">🏦 Plazo fijo</option><option value="fci">💼 FCI</option></select></div>
-        <div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Ticker/Banco</label><input className="inp" placeholder="Ej: BTC, ASTS, Galicia" value={hForm.ticker} onChange={e=>setHF(f=>({...f,ticker:e.target.value.toUpperCase()}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Nombre</label><input className="inp" value={hForm.name} onChange={e=>setHF(f=>({...f,name:e.target.value}))}/></div></div>
-        {["accion","cedear","etf","crypto"].includes(hForm.type) ? <div className="g3"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Cant.</label><input className="inp" value={hForm.quantity} onChange={e=>setHF(f=>({...f,quantity:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Precio Unitario</label><input className="inp" value={hForm.buyPrice} onChange={e=>setHF(f=>({...f,buyPrice:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda Compra</label><select className="inp" value={hForm.currency} onChange={e=>setHF(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select></div></div> 
-        : <div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Capital</label><input className="inp" value={hForm.totalInvested} onChange={e=>setHF(f=>({...f,totalInvested:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>TNA %</label><div style={{display:"flex",gap:4}}><input className="inp" value={hForm.rate} onChange={e=>setHF(f=>({...f,rate:e.target.value}))}/><button className="btn bg bsm" onClick={handleAutoTNA}>✨</button></div></div></div>}
+        
+        {["accion","cedear","etf","crypto"].includes(hForm.type) ? 
+        <>
+            <div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Ticker/Símbolo</label><input className="inp" placeholder="Ej: BTC, ASTS" value={hForm.ticker} onChange={e=>setHF(f=>({...f,ticker:e.target.value.toUpperCase()}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Nombre</label><input className="inp" value={hForm.name} onChange={e=>setHF(f=>({...f,name:e.target.value}))}/></div></div>
+            <div className="g3"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Cant.</label><input className="inp" value={hForm.quantity} onChange={e=>setHF(f=>({...f,quantity:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Precio Unit.</label><input className="inp" value={hForm.buyPrice} onChange={e=>setHF(f=>({...f,buyPrice:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda Compra</label><select className="inp" value={hForm.currency} onChange={e=>setHF(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select></div></div> 
+        </>
+        : 
+        <>
+            <div className="g2">
+                <div>
+                    <label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Banco / Entidad</label>
+                    <select className="inp" value={hForm.name} onChange={e => {
+                        const selected = BANCOS_RATES.find(b => b.name === e.target.value);
+                        setHF(f => ({...f, name: e.target.value, rate: selected && selected.tna ? selected.tna : f.rate}));
+                    }}>
+                        <option value="">Seleccionar banco...</option>
+                        {BANCOS_RATES.map(b => <option key={b.id} value={b.name}>{b.name} {b.tna ? `(${b.tna}%)` : ""}</option>)}
+                    </select>
+                </div>
+                <div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>TNA %</label><input className="inp" value={hForm.rate} onChange={e=>setHF(f=>({...f,rate:e.target.value}))} placeholder="Ej: 35.5"/></div>
+            </div>
+            <div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Capital Inicial (ARS)</label><input className="inp" value={hForm.totalInvested} onChange={e=>setHF(f=>({...f,totalInvested:e.target.value}))}/></div>
+        </>}
+        
         <div className="g2">
-          <div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha *</label><input type="date" className="inp" value={hForm.buyDate} onChange={e=>setHF(f=>({...f,buyDate:e.target.value}))}/></div>
-          <div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Vincular a Meta</label><select className="inp" value={hForm.goalId} onChange={e=>setHF(f=>({...f,goalId:e.target.value}))}><option value="">Ninguna</option>{goals.filter(g=>g.saved<g.target).map(g=><option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}</select></div>
+          <div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha Inicial *</label><input type="date" className="inp" value={hForm.buyDate} onChange={e=>setHF(f=>({...f,buyDate:e.target.value}))}/></div>
+          {["plazo_fijo", "bono"].includes(hForm.type) && <div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha Vencimiento *</label><input type="date" className="inp" value={hForm.maturityDate} onChange={e=>setHF(f=>({...f,maturityDate:e.target.value}))}/></div>}
         </div>
+        <div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Vincular a Meta</label><select className="inp" value={hForm.goalId} onChange={e=>setHF(f=>({...f,goalId:e.target.value}))}><option value="">Ninguna</option>{goals.filter(g=>g.saved<g.target).map(g=><option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}</select></div>
+
         <button className="btn bl" style={{justifyContent:"center", marginTop:10, width:"100%"}} onClick={addHolding}>✓ Guardar Inversión</button>
       </div></div>}
 
@@ -524,7 +560,7 @@ function Investments({state,update,notify}){
       
       return <div key={h.id} className="card" style={{padding:"14px"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div><div style={{fontSize:14,fontWeight:700}}>{h.ticker||h.name} <span style={{fontSize:10,color:T.muted,fontWeight:400}}>{h.type}</span></div><div style={{fontSize:11,color:T.muted}}>{h.quantity?`${h.quantity} un. a ${symDisplay}${buyPriceDisplay.toLocaleString("en-US")}`:`TNA ${h.rate}%`}</div></div>
-        <button className="btn bd bsm" onClick={()=>delHolding(h.id)}><ic.Trash/></button>
+        <div style={{display:"flex",gap:6}}><button className="btn bg bsm" style={{color:T.lime}} onClick={()=>refreshSingle(h)} disabled={refreshingId===h.id}>{refreshingId===h.id?<Dots/>:<ic.Refresh/>}</button><button className="btn bd bsm" onClick={()=>delHolding(h.id)}><ic.Trash/></button></div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,background:T.raised,padding:"10px",borderRadius:8,marginTop:8}}>
         <div><div style={{fontSize:9,color:T.muted}}>Inicial</div><div className="mono" style={{fontSize:11}}>{fmt(h.targetInv)}</div></div>
@@ -544,36 +580,7 @@ function Investments({state,update,notify}){
   </div>}
 
   {/* TAB SCANNER */}
-  {tab==="scanner"&&<div><div className="card" style={{marginBottom:14,background:`linear-gradient(135deg,${T.surface},#0f1525)`}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12,flexWrap:"wrap",gap:10}}><div><div style={{fontSize:15,fontWeight:700,marginBottom:4}}>🤖 Scanner automático con IA</div><div style={{fontSize:12,color:T.muted}}>Encuentra oportunidades adaptadas a tu perfil.</div></div><button className="btn bl" onClick={runScanner} disabled={scanning} style={{flexShrink:0}}>{scanning?<><Dots/> Analizando...</>:<><ic.Scan/> Escanear mercado</>}</button></div>{riskProfile&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}><div className="chip">🛡️ {riskProfile.risk}</div><div className="chip">⏱️ {riskProfile.horizon}</div></div>}</div>{scanErr&&<div style={{background:"rgba(255,77,106,.08)",border:`1px solid rgba(255,77,106,.25)`,borderRadius:10,padding:"10px 14px",fontSize:12,color:T.red,marginBottom:14}}>⚠ {scanErr}</div>}{scanning&&<div style={{textAlign:"center",padding:"48px 0",color:T.muted}}><div style={{fontSize:32,marginBottom:12}}>🔍</div><div style={{fontSize:14,marginBottom:8}}>Analizando el mercado...</div><Dots/></div>}{scanResult&&!scanning&&<div>{scanResult.marketContext&&<div style={{background:"rgba(77,158,255,.07)",border:`1px solid rgba(77,158,255,.15)`,borderRadius:12,padding:"12px 16px",marginBottom:14,fontSize:12,color:T.blue}}>🌍 {scanResult.marketContext}</div>}<div className="inv-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(270px,1fr))",gap:12}}>{scanResult.opportunities?.map((opp,i)=>(<div key={i} className="card" style={{cursor:"pointer",border:`1px solid ${opp.ticker===scanResult.topPick?T.lime:T.border}`,background:opp.ticker===scanResult.topPick?"rgba(200,255,87,.03)":T.surface,position:"relative",transition:"all .2s"}}>{opp.ticker===scanResult.topPick&&<div style={{position:"absolute",top:-8,right:12,background:T.lime,color:T.bg,fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:99}}>TOP PICK</div>}<div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}><div><div style={{display:"flex",gap:7,alignItems:"center",marginBottom:3}}><span className="mono" style={{fontSize:16,fontWeight:700}}>{opp.ticker}</span><span className={`tag ${sigCls(opp.signal)}`} style={{fontSize:10}}>{opp.signal}</span></div><div style={{fontSize:11,color:T.muted}}>{opp.name}</div></div></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginBottom:10}}>{[{l:"Upside",v:`${opp.upside>0?"+":""}${(opp.upside||0).toFixed(0)}%`,c:opp.upside>0?T.lime:T.red},{l:"Fit",v:`${opp.profileFit||0}%`,c:(opp.profileFit||0)>=70?T.teal:T.amber},{l:"Confianza",v:`${opp.confidenceScore||0}%`,c:(opp.confidenceScore||0)>=70?T.lime:T.amber}].map((s,j)=>(<div key={j} style={{background:T.raised,borderRadius:7,padding:"6px 8px"}}><div style={{fontSize:9,color:T.muted,marginBottom:2}}>{s.l}</div><div className="mono" style={{fontSize:12,color:s.c}}>{s.v}</div></div>))}</div><div style={{fontSize:11,color:T.muted,lineHeight:1.5,marginBottom:10,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{opp.thesis}</div><button className={`btn bsm ${justSaved===opp.ticker?"bl":"bg"}`} style={{width:"100%",justifyContent:"center"}} onClick={e=>{e.stopPropagation();saveFromScan(opp);}}>{justSaved===opp.ticker?<><ic.Check/> Guardado</>:"+ Analizar en detalle"}</button></div>))}</div><div style={{fontSize:10,color:T.muted,textAlign:"center",marginTop:12}}>⚠️ Análisis educativo. No constituye asesoramiento financiero.</div></div>}{!scanResult&&!scanning&&!scanErr&&<div style={{textAlign:"center",padding:"48px 32px",color:T.muted}}><div style={{fontSize:40,marginBottom:12}}>🔍</div><div style={{fontSize:14,marginBottom:4}}>El scanner analiza el mercado automáticamente</div><div style={{fontSize:12}}>Usa tu perfil de riesgo para encontrar oportunidades</div></div>}</div>}
-
-  {/* TAB MANUAL */}
-  {tab==="manual"&&<div><div className="card" style={{marginBottom:14}}><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:10}}>Buscar Activo Manualmente</div><div style={{display:"flex",gap:10,flexWrap:"wrap"}}><input className="inp" style={{flex:.6,minWidth:80}} placeholder="ej: BTC" value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&analyze(ticker,tname)}/><input className="inp" style={{flex:1.2,minWidth:120}} placeholder="Nombre (opcional)" value={tname} onChange={e=>setTname(e.target.value)} onKeyDown={e=>e.key==="Enter"&&analyze(ticker,tname)}/><button className="btn bl" onClick={()=>analyze(ticker,tname)} disabled={loading||!ticker}>{loading?<Dots/>:<><ic.Stock/> Buscar y Analizar</>}</button></div>{loadErr&&<div style={{marginTop:10,background:"rgba(255,77,106,.08)",border:`1px solid rgba(255,77,106,.25)`,borderRadius:8,padding:"8px 12px",fontSize:12,color:T.red}}>{loadErr}</div>}<div style={{marginTop:12}}><div style={{fontSize:10,color:T.muted,marginBottom:7,textTransform:"uppercase",letterSpacing:".6px"}}>Acceso rápido</div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{PRESETS.map(p=><button key={p.t} onClick={()=>analyze(p.t,p.n)} disabled={loading} style={{padding:"5px 11px",borderRadius:7,fontSize:11,fontWeight:500,border:`1px solid ${savedAnalyses.find(a=>a.ticker===p.t)?T.lime:T.border}`,background:savedAnalyses.find(a=>a.ticker===p.t)?"rgba(200,255,87,.08)":T.raised,color:savedAnalyses.find(a=>a.ticker===p.t)?T.lime:T.mid,cursor:"pointer",transition:"all .15s"}}>{p.t}</button>)}</div></div></div>{sel&&<AnalysisDetail a={sel} onClose={()=>setSel(null)}/>}</div>}
-
-  {/* TAB COMPARADOR */}
-  {tab==="comparador"&&<div className="card"><div style={{marginBottom:14}}><div style={{fontSize:14,fontWeight:700}}>🏦 Comparador de instrumentos</div><div style={{fontSize:11,color:T.muted,marginTop:2}}>FCI, plazo fijo, bonos CER, CEDEARs — contexto argentino 2026</div></div><div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}><div style={{flex:1,minWidth:130}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Ahorro mensual (ARS)</label><input className="inp" value={cf.monthly} onChange={e=>setCF(f=>({...f,monthly:e.target.value}))}/></div><div style={{flex:1,minWidth:90}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Plazo (meses)</label><input className="inp" value={cf.months} onChange={e=>setCF(f=>({...f,months:e.target.value}))}/></div><div style={{display:"flex",alignItems:"flex-end"}}><button className="btn bl" onClick={async()=>{setComp(true);const r=await compareInstruments(px(cf.monthly),px(cf.months),usdRate);setCompResult(r);setComp(false);}} disabled={comparing}>{comparing?<Dots/>:<><ic.Refresh/> Comparar</>}</button></div></div>{compResult?<div><div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:12}}>{compResult.instruments?.map((inst,i)=>(<div key={i} style={{background:T.raised,borderRadius:12,padding:"12px 16px",border:`1px solid ${T.border}`,display:"flex",flexWrap:"wrap",gap:10,alignItems:"center"}}><div style={{flex:"2 1 140px"}}><div style={{fontSize:12,fontWeight:600}}>{inst.name}</div><div style={{fontSize:10,color:T.muted,marginTop:2}}>{inst.pros}</div></div><div style={{flex:"1 1 60px"}}><div style={{fontSize:10,color:T.muted,marginBottom:2}}>Ret. anual</div><div className="mono" style={{fontSize:13,color:T.lime}}>{inst.annualReturn?.toFixed(1)}%</div></div><div style={{flex:"1 1 60px"}}><div style={{fontSize:10,color:T.muted,marginBottom:2}}>Final USD</div><div className="mono" style={{fontSize:13,color:T.teal}}>{fUSD(inst.finalUSD||0)}</div></div><div style={{flex:"1 1 60px"}}><div style={{fontSize:10,color:T.muted,marginBottom:2}}>Riesgo</div><span style={{fontSize:11,padding:"2px 8px",borderRadius:99,background:`${rc[inst.risk]||T.mid}1A`,color:rc[inst.risk]||T.mid}}>{(inst.risk||"").replace(/_/g," ")}</span></div><div style={{flex:"1.5 1 100px",fontSize:10,color:T.muted}}>{inst.cons}</div></div>))}</div>{compResult.recommendation&&<div style={{background:"rgba(200,255,87,.06)",border:`1px solid rgba(200,255,87,.2)`,borderRadius:10,padding:"12px 16px"}}><div style={{fontSize:11,color:T.lime,fontWeight:600,marginBottom:4}}>💡 Recomendación</div><div style={{fontSize:12,color:T.mid}}>{compResult.recommendation}</div><div style={{fontSize:10,color:T.muted,marginTop:6}}>{compResult.disclaimer}</div></div>}</div>:<div style={{textAlign:"center",padding:"20px 0",color:T.muted,fontSize:13}}>Ingresá monto y plazo para comparar instrumentos</div>}</div>}
-
-  {/* TAB SAVED */}
-  {tab==="saved" && <div>
-    {savedAnalyses.length===0 ? (
-      <div style={{textAlign:"center",padding:"48px 32px",color:T.muted}}><div style={{fontSize:40,marginBottom:12}}>📁</div><div style={{fontSize:14}}>Sin análisis guardados</div></div>
-    ) : (
-      <div>
-        <div className="inv-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(250px,1fr))",gap:10,marginBottom:14}}>
-          {savedAnalyses.map(a=>(
-            <div key={a.ticker} onClick={()=>setSel(sel?.ticker===a.ticker?null:a)} className="card" style={{cursor:"pointer",border:`1px solid ${sel?.ticker===a.ticker?T.lime:T.border}`,transition:"all .2s",position:"relative"}}>
-              <button onClick={e=>{e.stopPropagation();update({savedAnalyses:savedAnalyses.filter(x=>x.ticker!==a.ticker)});if(sel?.ticker===a.ticker)setSel(null);notify("Eliminado","err");}} className="btn bd bsm" style={{position:"absolute",top:12,right:12}}><ic.Trash/></button>
-              <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:6,paddingRight:36}}><span className="mono" style={{fontSize:16,fontWeight:700}}>{a.ticker}</span><span className={`tag ${sigCls(a.signal)}`} style={{fontSize:10}}>{a.signal}</span></div>
-              <div style={{fontSize:11,color:T.muted,marginBottom:8}}>{a.company}</div>
-              <div style={{display:"flex",gap:7}}>{[{l:"Upside",v:`${a.upside>0?"+":""}${(a.upside||0).toFixed(0)}%`,c:a.upside>0?T.lime:T.red},{l:"Confianza",v:`${a.confidenceScore||0}%`,c:(a.confidenceScore||0)>=70?T.lime:T.amber}].map((s,i)=>(<div key={i} style={{background:T.raised,borderRadius:7,padding:"6px 10px"}}><div style={{fontSize:9,color:T.muted,marginBottom:2}}>{s.l}</div><div className="mono" style={{fontSize:12,color:s.c}}>{s.v}</div></div>))}</div>
-            </div>
-          ))}
-        </div>
-        {sel&&<AnalysisDetail a={sel} onClose={()=>setSel(null)}/>}
-      </div>
-    )}
-  </div>}
-  </div>);
-}
+  {tab==="scanner"&&<div><div className="card" style={{marginBottom:14,background:`linear-gradient(135deg,${T.surface},#0f1525)`}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12,flexWrap:"wrap",gap:10}}><div><div style={{fontSize:15,fontWeight:700,marginBottom:4}}>🤖 Scanner automático con IA</div><div style={{fontSize:12,color:T.muted}}>Encuentra oportunidades adaptadas a tu perfil.</div></div><button className="btn bl" onClick={runScanner} disabled={scanning} style={{flexShrink:0}}>{scanning?<><Dots/> Analizando...</>:<><ic.Scan/> Escanear mercado</>}</button></div>{riskProfile&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}><div className="chip">🛡️ {riskProfile.risk}</div><div className="chip">⏱️ {riskProfile.horizon}</div></div>}</div>{scanErr&&<div style={{background:"rgba(255,77,106,.08)",border:`1px solid rgba(255,77,106,.25)`,borderRadius:10,padding:"10px 14px",fontSize:12,color:T.red,marginBottom:14}}>⚠ {scanErr}</div>}{scanning&&<div style={{textAlign:"center",padding:"48px 0",color:T.muted}}><div style={{fontSize:32,marginBottom:12}}>🔍</div><div style={{fontSize:14,marginBottom:8}}>Analizando el mercado...</div><Dots/></div>}{scanResult&&!scanning&&<div>{scanResult.marketContext&&<div style={{background:"rgba(77,158,255,.07)",border:`1px solid rgba(77,158,255,.15)`,borderRadius:12,padding:"12px 16px",marginBottom:14,fontSize:12,color:T.blue}}>🌍 {scanResult.marketContext}</div>}<div className="inv-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(270px,1fr))",gap:12}}>{scanResult.opportunities?.map((opp,i)=>(<div key={i} className="card" style={{cursor:"pointer",border:`1px solid ${opp.ticker===scanResult.topPick?T.lime:T.border}`,background:opp.ticker===scanResult.topPick?"rgba(200,255,87,.03)":T.surface,position:"relative",transition:"all .2s"}}>{opp.ticker===scanResult.topPick&&<div style={{position:"absolute",top:-8,right:12,background:T.lime,color:T.bg,fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:99}}>TOP PICK</div>}<div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}><div><div style={{display:"flex",gap:7,alignItems:"center",marginBottom:3}}><span className="mono" style={{fontSize:16,fontWeight:700}}>{opp.ticker}</span><span className={`tag ${sigCls(opp.signal)}`} style={{fontSize:10}}>{opp.signal}</span></div><div style={{fontSize:11,color:T.muted}}>{opp.name}</div></div></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginBottom:10}}>{[{l:"Upside",v:`${opp.upside>0?"+":""}${(opp.upside||0).toFixed(0)}%`,c:opp.upside>0?T.lime:T.red},{l:"Fit",v:`${opp.profileFit||0}%`,c:(opp.profileFit||0)>=70?T.teal
 function AnalysisDetail({a,onClose}){
   if(!a)return null;
   return(<div className="card up" style={{border:`1px solid ${T.hi}`,marginTop:14}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:18,flexWrap:"wrap",gap:8}}><div><div style={{display:"flex",gap:10,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}><span className="mono" style={{fontSize:22,fontWeight:700}}>{a.ticker}</span><span className={`tag ${sigCls(a.signal)}`}>{a.signal}</span><span className={`tag ${a.timeframe==="SHORT"?"te":a.timeframe==="LONG"?"ti":"ts"}`}>{a.timeframe}</span></div><div style={{fontSize:13,color:T.mid}}>{a.company}{a.sector?` · ${a.sector}`:""}</div></div><button className="btn bg bsm" onClick={onClose}><ic.X/></button></div><div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:18}}>{[{l:"Precio est.",v:`$${(a.currentEstimate||0).toFixed(0)}`},{l:"Target 12m",v:`$${(a.priceTarget12m||0).toFixed(0)}`,c:T.lime},{l:"Upside",v:`${a.upside>0?"+":""}${(a.upside||0).toFixed(1)}%`,c:a.upside>0?T.lime:T.red},{l:"P/E",v:a.peRatio?(a.peRatio.toFixed(1)):"—"},{l:"Rev. Growth",v:a.revenueGrowth?`${(a.revenueGrowth).toFixed(1)}%`:"—",c:a.revenueGrowth>0?T.teal:T.red}].map((s,i)=>(<div key={i} style={{background:T.raised,borderRadius:10,padding:"12px 14px"}}><div style={{fontSize:10,color:T.muted,marginBottom:5}}>{s.l}</div><div className="mono" style={{fontSize:16,fontWeight:500,color:s.c||T.white}}>{s.v}</div></div>))}</div><div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>{[{title:"🐂 Bull case",color:T.lime,body:a.bullCase,sub:"Catalizadores",items:a.catalysts},{title:"🐻 Bear case",color:T.red,body:a.bearCase,sub:"Riesgos",items:a.risks}].map((p,i)=>(<div key={i} style={{background:T.raised,borderRadius:12,padding:"14px 16px"}}><div style={{fontSize:11,color:p.color,fontWeight:600,marginBottom:7}}>{p.title}</div><div style={{fontSize:12,color:T.mid,lineHeight:1.6,marginBottom:8}}>{p.body}</div><div style={{fontSize:10,color:T.muted,marginBottom:5}}>{p.sub}</div>{p.items?.map((it,j)=><div key={j} style={{fontSize:11,color:T.mid,padding:"3px 0",borderBottom:`1px solid ${T.border}`}}>▸ {it}</div>)}</div>))}</div>{a.moat&&<div style={{background:"rgba(77,158,255,.06)",border:`1px solid rgba(77,158,255,.15)`,borderRadius:10,padding:"12px 16px",marginBottom:8}}><div style={{fontSize:11,color:T.blue,fontWeight:600,marginBottom:4}}>🏰 Moat</div><div style={{fontSize:12,color:T.mid}}>{a.moat}</div></div>}<div style={{fontSize:10,color:T.muted,textAlign:"center",marginTop:4}}>⚠️ Análisis educativo. No constituye asesoramiento financiero.</div></div>);
