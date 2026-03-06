@@ -45,6 +45,26 @@ async function compareInstruments(monthly,months,usdRate){const raw=await ai(`Co
 
 async function autoCat(desc){const raw=await ai(`Transaction: "${desc}". Return ONLY: {"category":"<one of: ${CATS.join(", ")}>","type":"income|expense"} Rules: sueldo/salary/acreditacion→income type; netflix/spotify→🧛 Suscripciones; rappi/pedidosya→🍔 Comida y delivery; gym→💪 Deporte; coto/carrefour/dia→🛒 Supermercado; cuota/credito→💳 Cuotas. IMPORTANT: category MUST include the emoji prefix exactly as listed.`);if(!raw)return{category:"❓ Otros",type:"expense"};try{const p=JSON.parse(cleanJSON(raw));return{category:matchCat(p.category),type:p.type||"expense"};}catch{return{category:"❓ Otros",type:"expense"};}}
 
+async function genWeeklyInsight(transactions, usdRate, portfolioValueArs = 0, portfolioInvestedArs = 0){
+  const now = Date.now();
+  const w1 = transactions.filter(t => (now - new Date(t.date)) <= 7 * 864e5);
+  if (!w1.length) return null;
+  const e1 = w1.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
+  const w2 = transactions.filter(t => { const d = now - new Date(t.date); return d > 7 * 864e5 && d <= 14 * 864e5; });
+  const e2 = w2.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
+  const cm = {}; 
+  w1.filter(t => t.type === "expense").forEach(t => { cm[t.category] = (cm[t.category] || 0) + t.amount; });
+  const top = Object.entries(cm).sort((a,b) => b[1] - a[1]).slice(0,3).map(([c,v]) => `${c}:${fARS(v)}`).join(", ");
+  
+  // Usamos los totales perfectos que pasaron por el Motor Maestro
+  const pInfo = portfolioValueArs > 0 ? ` Portfolio: valor ${fARS(portfolioValueArs)}, invertido ${fARS(portfolioInvestedArs)}.` : "";
+  
+  // Le pedimos un array de 3 recomendaciones accionables
+  const raw = await ai(`Argentina personal finance. Last 7d expenses: ${fARS(e1)}. Prior week: ${fARS(e2)}. Top: ${top}. USD:${usdRate}.${pInfo} Return ONLY valid JSON: {"headline":"<Spanish 10 words max>","detail":"<2 Spanish sentences analyzing the data>","recommendations":["<action 1>","<action 2>","<action 3>"],"trend":"up|down|stable"}`, "Friendly financial coach. Spanish. Valid JSON only.");
+  
+  if(!raw) return null;
+  try { return JSON.parse(cleanJSON(raw)); } catch { return null; }
+}
 function parseCSV(txt){const lines=txt.trim().split("\n").filter(l=>l.trim());if(lines.length<2)return[];const sep=lines[0].includes(";")?";":lines[0].includes("\t")?"\t":",";const hdrs=lines[0].split(sep).map(h=>h.trim().replace(/"/g,"").toLowerCase());const out=[];for(let i=1;i<lines.length;i++){const cols=lines[i].split(sep).map(c=>c.trim().replace(/^"|"$/g,""));const obj={};hdrs.forEach((h,idx)=>obj[h]=cols[idx]||"");const dK=hdrs.find(h=>/^(fecha|date|dia)$/i.test(h)||/fecha|date/.test(h));const dscK=hdrs.find(h=>/desc|concepto|detalle|comer|estab|ref/.test(h));const debK=hdrs.find(h=>/debito|debe|debit|cargo|egreso/.test(h));const creK=hdrs.find(h=>/credito|haber|credit|abono/.test(h));const aK=hdrs.find(h=>/import|monto|amount|total/.test(h));let amount=0,type="expense";if(debK&&creK){const deb=px(obj[debK]),cre=px(obj[creK]);if(cre>0){amount=cre;type="income";}else if(deb>0){amount=deb;type="expense";}else continue;}else if(aK){const raw2=String(obj[aK]).trim();amount=Math.abs(px(obj[aK]));type=raw2.startsWith("-")||px(obj[aK])<0?"expense":"income";}else{const numVal=Object.values(obj).map(v=>px(v)).find(v=>v>0);if(!numVal)continue;amount=numVal;type="expense";}if(amount<=0)continue;out.push({id:`csv_${uid()}_${i}`,currency:"ARS",date:obj[dK]||getCUR()+"-01",description:obj[dscK]||`TX ${i}`,amount,type,category:"❓ Otros"});}return out;}
 
 const getSalaryTotal=(salaries,month)=>{const m=month||getCUR();const s=salaries?.find(s=>s.month===m);return s?(s.base+(s.extras||[]).reduce((a,e)=>a+e.amt,0)):0;};
@@ -159,134 +179,55 @@ function Onboarding({update,notify}){
   <div style={{display:"flex",gap:10,marginTop:28}}>{step>0&&<button className="btn bg" style={{flex:.4,justifyContent:"center"}} onClick={()=>setStep(s=>s-1)}>← Atrás</button>}<button className="btn bl" style={{flex:1,justifyContent:"center"}} disabled={!canNext} onClick={step<5?()=>setStep(s=>s+1):finish}>{step===5?"Empezar →":"Continuar →"}</button></div>{step===5&&<button onClick={finish} style={{display:"block",margin:"12px auto 0",background:"none",border:"none",color:T.muted,fontSize:12,cursor:"pointer",textDecoration:"underline"}}>Saltear meta</button>}</div></div>);
 }
 
-// 1. EL CEREBRO: Generador de Cards Inteligentes
-async function genWeeklyInsight(transactions, usdRate, portfolioValueArs = 0, portfolioInvestedArs = 0, goals = []) {
-  const now = Date.now();
-  const w1 = transactions.filter(t => (now - new Date(t.date)) <= 7 * 864e5);
-  const expenses = w1.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
-  const pPnL = portfolioValueArs - portfolioInvestedArs;
-  const goalSummary = goals.map(g => `${g.name} (Faltan: ${fARS(g.target - g.saved)})`).join(", ");
-
-  const raw = await ai(`
-    Analizá estos datos financieros: Gastos: ${fARS(expenses)}, Portfolio: ${fARS(portfolioValueArs)} (P&L: ${fARS(pPnL)}), Metas: ${goalSummary}.
-    Generá un reporte motivador en JSON con 4 cards. Cruza inversiones con metas.
-    Devolvé ÚNICAMENTE JSON: {"cards": [{"type":"METAS|GASTOS|INVERSIONES|CONSEJO", "icon":"emoji", "title":"título", "text":"descripción", "highlight":"dato", "color":"hex"}]}
-  `, "Coach Financiero. Solo JSON.");
-  
-  try { return JSON.parse(cleanJSON(raw)); } catch { return null; }
-}
-
-// 2. EL DASHBOARD: Restaurado con Contexto de Salud
 function Dashboard({state,update,notify,setView}){
-  const {transactions,goals,salaries,marketPrices={},holdings=[],usdRate,weeklyInsight,weeklyInsightDate}=state;
+  const {transactions,goals,budgets,weeklyInsight,weeklyInsightDate,salaries,marketPrices={},holdings=[],usdRate}=state;
   const {fmt,toDsp}=useDsp(state);
   const [loadingIns,setLI]=useState(false);
   const isMobile=useIsMobile();
-  const NOW=getNow(); const CUR=getCUR();
-
-  // Cálculos de Flujo
+  const NOW=getNow();const CUR=getCUR();
   const cur=transactions.filter(t=>gMonth(t.date)===CUR);
+  const prevM=(()=>{const d=new Date(NOW.getFullYear(),NOW.getMonth()-1,1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;})();
+  const prev=transactions.filter(t=>gMonth(t.date)===prevM);
   const inc=cur.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
   const exp=cur.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
+  const pExp=prev.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
+  const delta=pExp>0?((exp-pExp)/pExp*100).toFixed(1):null;
   const salary=getSalaryTotal(salaries);
-
-  // Salud Financiera con Contexto
   const {score,items}=healthScore(transactions,goals,holdings);
   const sc=score>=70?T.lime:score>=45?T.amber:T.red;
-  const healthDesc = score >= 70 ? "¡Excelente! Tu ahorro y diversificación son sólidos." : score >= 45 ? "Buen camino. Podrías mejorar tu tasa de ahorro." : "Atención: Tus gastos están superando tu capacidad de ahorro.";
-
-  // Gráfico de Tendencia
-  const trend=Array.from({length:6},(_,i)=>{
-    const d=new Date(NOW.getFullYear(),NOW.getMonth()-5+i,1);
-    const m=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-    const txs=transactions.filter(t=>gMonth(t.date)===m);
-    return{name:MOS[d.getMonth()],Gastos:toDsp(txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0)),Ingresos:toDsp(txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0))};
-  });
-
-  // Portfolio Real
+  const {disponible,perGoal}=goalPlan(goals,salaries,transactions,holdings,marketPrices,usdRate);
+  const alerts=Object.entries(budgets||{}).filter(([cat,lim])=>cur.filter(t=>t.category===cat&&t.type==="expense").reduce((s,t)=>s+t.amount,0)>lim*0.8);
+  const trend=Array.from({length:6},(_,i)=>{const d=new Date(NOW.getFullYear(),NOW.getMonth()-5+i,1);const m=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;const txs=transactions.filter(t=>gMonth(t.date)===m);return{name:MOS[d.getMonth()],Gastos:toDsp(txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0)),Ingresos:toDsp(txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0))};});
+  const cm={};cur.filter(t=>t.type==="expense").forEach(t=>{cm[t.category]=(cm[t.category]||0)+t.amount;});
+  const catData=Object.entries(cm).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([k,v],i)=>({name:k.split(" ").slice(1).join(" "),value:toDsp(v),color:CPAL[i]}));
+  const recent=[...transactions].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,6);
+  
   let portfolioValue=0; let portfolioInvested=0;
-  holdings.forEach(h=>{ 
-    const {invArs,curArs}=calcHoldingValueArs(h,marketPrices,usdRate); 
-    portfolioInvested+=invArs; portfolioValue+=curArs; 
-  });
-
-  const kpis=[
-    {l:"Sueldo",v:salary>0?fmt(salary):"-",c:T.lime,i:"💵"},
-    {l:"Ingresos",v:fmt(inc),c:T.teal,i:"📥"},
-    {l:"Gastos",v:fmt(exp),c:T.red,i:"💸"},
-    {l:"Portfolio",v:fmt(portfolioValue),c:portfolioValue>=portfolioInvested?T.lime:T.red,i:"📊"}
-  ];
-
-  const refreshInsight = async () => {
-    if (transactions.length < 3) return notify("Necesitás más transacciones", "info");
+  holdings.forEach(h=>{ const {invArs,curArs}=calcHoldingValueArs(h,marketPrices,usdRate); portfolioInvested+=invArs; portfolioValue+=curArs; });
+  const portfolioPnL=portfolioValue-portfolioInvested;
+  
+  const kpis=[{l:"Sueldo del mes",v:salary>0?fmt(salary):"-",c:T.lime,i:"💵",sub:salary>0?"Registrado":"Registrá tu sueldo"},{l:"Ingresos",v:fmt(inc),c:T.teal,i:"📥",sub:"Total mensual"},{l:"Gastos",v:fmt(exp),c:T.red,i:"💸",sub:delta?`${delta>0?"+":""}${delta}% vs mes ant.`:"-"},{l:"Balance libre",v:fmt(inc-exp),c:(inc-exp)>=0?T.lime:T.red,i:"⚖️",sub:(inc-exp)>=0?"✓ Superávit":"⚠ Déficit"},{l:"Portfolio Real",v:fmt(portfolioValue),c:portfolioPnL>=0?T.blue:T.amber,i:"📊",sub:portfolioValue>0?`P&L: ${portfolioPnL>=0?"+":""}${fmt(portfolioPnL)}`:"Sin inversiones"}];
+  const refreshInsight=async()=>{
+    if(transactions.length<3)return notify("Necesitás más transacciones","info");
     setLI(true);
-    const ins = await genWeeklyInsight(transactions, usdRate, portfolioValue, portfolioInvested, goals);
-    if (ins) update({ weeklyInsight: ins, weeklyInsightDate: todayISO() });
+    // Acá le pasamos a la IA los números que el Motor Maestro acaba de calcular en ARS puros
+    const ins=await genWeeklyInsight(transactions, usdRate, portfolioValue, portfolioInvested);
+    if(ins){
+      update({weeklyInsight:ins,weeklyInsightDate:todayISO()});
+      notify("Resumen actualizado ✓");
+    } else {
+      notify("Error — reintentá","err");
+    }
     setLI(false);
   };
-
-  return (
-    <div className="up">
-      <PH title="Dashboard" sub={NOW.toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" })} />
-      
-      <div className="kpi-grid" style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(4,1fr)", gap: 12, marginBottom: 20 }}>
-        {kpis.map((k, i) => (
-          <div key={i} className="card csm">
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: T.muted }}>{k.l} <span>{k.i}</span></div>
-            <div className="mono" style={{ fontSize: 18, fontWeight: 600, color: k.c, marginTop: 5 }}>{k.v}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* IA CARDS */}
-      <div style={{ marginBottom: 26 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <h3 style={{ fontSize: 15, fontWeight: 800 }}>Análisis Semanal IA</h3>
-          <button className="btn bg bsm" onClick={refreshInsight} disabled={loadingIns}>{loadingIns ? <Dots /> : <><ic.Bolt /> {weeklyInsight ? "Refrescar" : "Generar"}</>}</button>
-        </div>
-        {weeklyInsight?.cards ? (
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
-            {weeklyInsight.cards.map((card, i) => (
-              <div key={i} className="card up" style={{ padding: "18px", borderLeft: `5px solid ${card.color}`, background: `linear-gradient(135deg, ${T.surface}, ${T.bg} 80%)`, display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span>{card.icon}</span><span style={{ fontSize: 10, fontWeight: 900, color: T.muted, textTransform: "uppercase" }}>{card.type}</span></div>
-                <div style={{ fontSize: 15, fontWeight: 700 }}>{card.title}</div>
-                <div style={{ fontSize: 12, color: T.mid, lineHeight: 1.6 }}>{card.text}</div>
-                {card.highlight && <div style={{ marginTop: 10, padding: "5px 12px", background: `${card.color}15`, borderRadius: "8px", fontSize: 11, fontWeight: 800, color: card.color, alignSelf: "flex-start", border: `1px solid ${card.color}25` }}>{card.highlight}</div>}
-              </div>
-            ))}
-          </div>
-        ) : <div className="card" style={{ textAlign: "center", padding: "40px", borderStyle: "dashed", borderColor: T.border, color: T.muted }}>Generá tu reporte para ver el impacto de tus inversiones.</div>}
-      </div>
-
-      {/* TENDENCIA Y SALUD */}
-      <div className="trend-grid" style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.8fr 0.8fr", gap: 14 }}>
-        <div className="card">
-          <div style={{ fontSize: 12, fontWeight: 600, color: T.mid, marginBottom: 12 }}>Tendencia ({state.displayCurrency})</div>
-          <ResponsiveContainer width="100%" height={180}>
-            <AreaChart data={trend}>
-              <CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="name" tick={{ fill: T.muted, fontSize: 10 }} axisLine={false} />
-              <YAxis tick={{ fill: T.muted, fontSize: 9 }} axisLine={false} />
-              <Tooltip content={<CTip dc={state.displayCurrency} />} />
-              <Area type="monotone" dataKey="Ingresos" stroke={T.teal} fill={`${T.teal}15`} strokeWidth={2} />
-              <Area type="monotone" dataKey="Gastos" stroke={T.red} fill={`${T.red}15`} strokeWidth={2} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-        <div className="card" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
-          <div style={{ fontSize: 10, color: T.muted, textTransform: "uppercase", fontWeight: 600, marginBottom: 10 }}>Salud Financiera</div>
-          <svg width={85} height={85} viewBox="0 0 100 100">
-            <circle cx="50" cy="50" r="40" fill="none" stroke={T.raised} strokeWidth="8" />
-            <circle cx="50" cy="50" r="40" fill="none" stroke={sc} strokeWidth="8" strokeDasharray={`${(score / 100) * 251} 251`} strokeDashoffset="63" strokeLinecap="round" style={{ transition: "stroke-dasharray 1s" }} />
-            <text x="50" y="48" textAnchor="middle" fill={sc} fontSize="24" fontWeight="700">{score}</text>
-            <text x="50" y="62" textAnchor="middle" fill={T.muted} fontSize="8">PUNTOS</text>
-          </svg>
-          <div style={{ fontSize: 10, color: T.mid, marginTop: 12, lineHeight: 1.4 }}>{healthDesc}</div>
-        </div>
-      </div>
-    </div>
-  );
+  return(<div className="up"><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:22,flexWrap:"wrap",gap:8}}><div><div style={{fontSize:11,color:T.muted,textTransform:"uppercase",letterSpacing:".8px",marginBottom:5}}>{NOW.toLocaleDateString("es-AR",{weekday:"long",day:"numeric",month:"long"})}</div><h1 style={{fontSize:isMobile?22:28,fontWeight:800,letterSpacing:"-1px"}}>Dashboard</h1></div>{alerts.length>0&&<div style={{background:"rgba(255,184,48,.08)",border:`1px solid rgba(255,184,48,.25)`,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:8,fontSize:12,color:T.amber,cursor:"pointer"}} onClick={()=>setView("transactions")}><ic.Bell/>{alerts.length} alerta{alerts.length>1?"s":""}</div>}</div>
+  <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:14}}>{kpis.map((k,i)=>(<div key={i} className={`card csm up d${i+1}`} style={{cursor:i===0?"pointer":"default"}} onClick={i===0?()=>setView("salary"):undefined}><div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".6px",fontWeight:600}}>{k.l}</span><span style={{fontSize:18}}>{k.i}</span></div><div className="mono" title={k.v} style={{fontSize:isMobile?16:20,fontWeight:500,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div><div style={{fontSize:11,color:T.muted,marginTop:4}}>{k.sub}</div></div>))}</div>
+  {perGoal.length>0&&(<div className="card up d2" style={{marginBottom:14,borderColor:"rgba(200,255,87,.18)"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}><div style={{fontSize:13,fontWeight:700}}>💡 Plan de ahorro para metas</div><div style={{fontSize:11,color:T.muted}}>Disponible: <span className="mono" style={{color:disponible>0?T.lime:T.red}}>{fmt(disponible)}</span></div></div><div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{perGoal.map(g=>(<div key={g.id} style={{flex:1,minWidth:160,background:T.raised,borderRadius:10,padding:"10px 14px",border:`1px solid ${g.feasible?T.border:"rgba(255,184,48,.25)"}`}}><div style={{fontSize:12,marginBottom:4}}>{g.icon} {g.name}</div><div className="mono" style={{fontSize:16,fontWeight:600,color:g.feasible?T.lime:T.amber}}>{fmt(g.needed)}<span style={{fontSize:11,fontWeight:400,color:T.muted}}>/mes</span></div><div style={{fontSize:10,color:T.muted,marginTop:2}}>{g.months} mes{g.months>1?"es":""} · Falta {fmt(g.rem)}</div>{!g.feasible&&<div style={{fontSize:10,color:T.amber,marginTop:3}}>⚠ Ajustá el plazo</div>}{g.couldUsePortfolio&&<div style={{fontSize:10,color:T.blue,marginTop:3}}>📊 Portfolio cubre {g.portfolioCover}% de esta meta</div>}</div>))}</div></div>)}
+  <div className="card up d2" style={{marginBottom:14,borderColor:weeklyInsight?"rgba(200,255,87,.15)":T.border}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}><div style={{display:"flex",alignItems:"center",gap:10}}><div style={{width:30,height:30,background:"rgba(167,139,250,.1)",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center"}}><ic.Bolt/></div><div><div style={{fontSize:12,fontWeight:700}}>Resumen semanal IA</div>{weeklyInsightDate&&<div style={{fontSize:10,color:T.muted}}>{weeklyInsightDate}</div>}</div></div><button className="btn bg bsm" onClick={refreshInsight} disabled={loadingIns}>{loadingIns?<Dots/>:<><ic.Refresh/>{weeklyInsight?"Actualizar":"Generar"}</>}</button></div>{weeklyInsight&&<div style={{marginTop:12,padding:"12px 14px",background:T.raised,borderRadius:10}}><div style={{fontSize:14,fontWeight:700,marginBottom:4}}>{weeklyInsight.headline}</div><div style={{fontSize:12,color:T.mid,lineHeight:1.6,marginBottom:8}}>{weeklyInsight.detail}</div><div style={{background:"rgba(200,255,87,.08)",border:`1px solid rgba(200,255,87,.2)`,borderRadius:7,padding:"6px 12px",fontSize:11,color:T.lime,fontWeight:600,display:"inline-block"}}>💡 {weeklyInsight.action}</div></div>}{!weeklyInsight&&<div style={{marginTop:10,fontSize:12,color:T.muted,textAlign:"center",padding:"6px 0"}}>Generá tu resumen semanal inteligente</div>}</div>
+  <div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1.8fr .8fr",gap:14,marginBottom:14}}><div className="card up d2"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Últimos 6 meses</div><div style={{width:"100%",minWidth:0,overflow:"hidden"}}><ResponsiveContainer width="100%" height={175}><AreaChart data={trend}><defs><linearGradient id="gi" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={T.teal} stopOpacity={.25}/><stop offset="95%" stopColor={T.teal} stopOpacity={0}/></linearGradient><linearGradient id="ge" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={T.red} stopOpacity={.25}/><stop offset="95%" stopColor={T.red} stopOpacity={0}/></linearGradient></defs><CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" tick={{fill:T.muted,fontSize:10}} axisLine={false} tickLine={false}/><YAxis tick={{fill:T.muted,fontSize:9}} axisLine={false} tickLine={false} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:v}/><Tooltip content={<CTip dc={state.displayCurrency}/>}/><Area type="monotone" dataKey="Ingresos" stroke={T.teal} fill="url(#gi)" strokeWidth={2}/><Area type="monotone" dataKey="Gastos" stroke={T.red} fill="url(#ge)" strokeWidth={2}/></AreaChart></ResponsiveContainer></div></div><div className="card up d3" style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12}}><div style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".8px",fontWeight:600}}>Score financiero</div><svg width={100} height={100} viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke={T.raised} strokeWidth="7"/><circle cx="50" cy="50" r="40" fill="none" stroke={sc} strokeWidth="7" strokeDasharray={`${(score/100)*251} 251`} strokeDashoffset="63" strokeLinecap="round" style={{transition:"stroke-dasharray .8s",filter:`drop-shadow(0 0 8px ${sc}66)`}}/><text x="50" y="46" textAnchor="middle" fill={sc} fontSize="26" fontWeight="700" fontFamily="'DM Mono',monospace">{score}</text><text x="50" y="60" textAnchor="middle" fill={T.muted} fontSize="9" fontFamily="Sora">/100</text></svg>{items.map((it,i)=>(<div key={i} style={{width:"100%"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:T.muted,marginBottom:3}}><span>{it.l}</span><span className="mono">{it.v.toFixed(0)}/{it.m}</span></div><div className="prog"><div className="progf" style={{width:`${(it.v/it.m)*100}%`,background:sc}}/></div></div>))}</div></div>
+  <div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}><div className="card up d3"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Últimos movimientos</div>{recent.length===0?<div style={{color:T.muted,fontSize:13,textAlign:"center",padding:"20px 0"}}>Sin movimientos aún</div>:recent.map(t=>(<div key={t.id} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.ink}`}}><div style={{width:32,height:32,borderRadius:9,background:T.raised,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>{t.category?.split(" ")[0]||"💳"}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</div><div style={{fontSize:10,color:T.muted,marginTop:1}}>{t.date}</div></div><div className="mono" style={{fontSize:12,fontWeight:500,color:t.type==="income"?T.teal:T.red,flexShrink:0}}>{t.type==="income"?"+":"-"}{fmt(t.amount)}</div></div>))}</div><div style={{display:"flex",flexDirection:"column",gap:12}}><div className="card csm up d4"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><div style={{fontSize:12,fontWeight:600,color:T.mid}}>Metas activas</div><button className="btn bg bsm" style={{fontSize:10,padding:"4px 10px"}} onClick={()=>setView("goals")}>Ver →</button></div>{goals.filter(g=>g.saved<g.target).length===0?<div style={{color:T.muted,fontSize:12,textAlign:"center",padding:"10px 0"}}>Sin metas — <button onClick={()=>setView("goals")} style={{color:T.lime,background:"none",border:"none",cursor:"pointer",fontSize:12}}>Crear →</button></div>:goals.filter(g=>g.saved<g.target).slice(0,4).map(g=>{const pct=clamp((g.saved/g.target)*100,0,100);return<div key={g.id} style={{marginBottom:9}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:12}}>{g.icon} {g.name}</span><span className="mono" style={{fontSize:10,color:T.muted}}>{pct.toFixed(0)}%</span></div><div className="prog"><div className="progf" style={{width:`${pct}%`,background:pct>=100?T.lime:pct>=60?T.blue:T.amber}}/></div></div>;})}</div>{catData.length>0&&<div className="card csm up"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:8}}>Gastos este mes</div><div style={{display:"flex",gap:10,alignItems:"center"}}><div style={{width:80,minWidth:0,overflow:"hidden"}}><ResponsiveContainer width={80} height={80}><PieChart><Pie data={catData} cx="50%" cy="50%" innerRadius={22} outerRadius={36} dataKey="value" stroke="none">{catData.map((c,i)=><Cell key={i} fill={c.color}/>)}</Pie></PieChart></ResponsiveContainer></div><div style={{flex:1,minWidth:0}}>{catData.slice(0,4).map((c,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:6,fontSize:10,color:T.muted,marginBottom:4}}><div style={{width:7,height:7,borderRadius:2,background:c.color,flexShrink:0}}/><span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name}</span></div>)}</div></div></div>}</div></div></div>);
 }
+
 function SalaryModule({state,update,notify}){
   const {salaries=[],transactions}=state;
   const {fmt}=useDsp(state);
@@ -641,156 +582,49 @@ function Investments({state,update,notify}){
   </div>);
 }
 
-// 2. ANALYTICS: Refactor para integrar Inversiones y Sueldo
+// ==========================================
+// 2. FUNCIÓN ANALYTICS COMPLETA Y LIMPIA
+// ==========================================
 function Analytics({state}){
-  // ORDEN CORRECTO: Extraer del estado al principio
-  const {transactions=[], holdings=[], marketPrices={}, usdRate=1, displayCurrency, goals=[], salaries=[]}=state;
+  const {transactions,displayCurrency}=state;
   const {fmt,toDsp}=useDsp(state);
   const NOW=getNow();
   const [range,setRange]=useState(6);
-
-  // 1. Patrimonio Consolidado
-  const pValArs = holdings.reduce((s, h) => s + calcHoldingValueArs(h, marketPrices, usdRate).curArs, 0);
-  const savingsArs = transactions.filter(t => t.category === "💰 Ahorro").reduce((s, t) => s + t.amount, 0);
-  const patrimonioTotalArs = pValArs + savingsArs;
-
-  // 2. Flujo Mensual (Integrando Sueldos)
-  const months = useMemo(() => Array.from({length:range}, (_,i) => {
-    const d = new Date(NOW.getFullYear(), NOW.getMonth() - range + 1 + i, 1);
-    const m = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-    const txs = transactions.filter(t => gMonth(t.date) === m);
-    
-    // Sueldo real registrado para el mes
-    const monthlySalary = getSalaryTotal(salaries, m);
-    const otherIncomes = txs.filter(t => t.type === "income" && t.source !== "salary").reduce((s,t) => s + t.amount, 0);
-    const totalIn = monthlySalary + otherIncomes;
-    
-    const e = txs.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
-    return {
-      name: MOS[d.getMonth()],
-      Gastos: toDsp(e),
-      Ingresos: toDsp(totalIn),
-      Ahorro: toDsp(txs.filter(t => t.category === "💰 Ahorro").reduce((s,t) => s + t.amount, 0)),
-      balance: toDsp(totalIn - e)
-    };
-  }), [transactions, salaries, range, toDsp]);
-
-  // 3. Gastos por Categoría
-  const cm={}; transactions.filter(t=>t.type==="expense").forEach(t=>{cm[t.category]=(cm[t.category]||0)+t.amount;});
+  const months=useMemo(()=>Array.from({length:range},(_,i)=>{const d=new Date(NOW.getFullYear(),NOW.getMonth()-range+1+i,1);const m=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;const txs=transactions.filter(t=>gMonth(t.date)===m);const e=txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);const inc=txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);return{name:MOS[d.getMonth()],Gastos:toDsp(e),Ingresos:toDsp(inc),Ahorro:toDsp(txs.filter(t=>t.category==="💰 Ahorro").reduce((s,t)=>s+t.amount,0)),balance:toDsp(inc-e)};}),[transactions,range,toDsp]);
+  const cm={};transactions.filter(t=>t.type==="expense").forEach(t=>{cm[t.category]=(cm[t.category]||0)+t.amount;});
   const ctot=Object.values(cm).reduce((s,v)=>s+v,0);
   const cats=Object.entries(cm).sort((a,b)=>b[1]-a[1]).map(([c,v],i)=>({c,v:toDsp(v),pct:ctot>0?(v/ctot*100).toFixed(1):0,col:CPAL[i%CPAL.length]}));
-
-  return (
-    <div className="up">
-      <PH title="Analíticas" sub="Patrimonio · Sueldos · Metas" right={<select className="inp" style={{width:"auto"}} value={range} onChange={e=>setRange(+e.target.value)}><option value={3}>3 meses</option><option value={6}>6 meses</option><option value={12}>12 meses</option></select>}/>
-      
-      {/* KPIs DE RIQUEZA REAL */}
-      <div className="kpi-grid" style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:16}}>
-        <div className="card csm">
-          <div style={{fontSize:10, color:T.muted, textTransform:"uppercase"}}>Portfolio Invertido</div>
-          <div className="mono" style={{fontSize:18, fontWeight:600, color:T.blue, marginTop:4}}>{fmt(pValArs)}</div>
-        </div>
-        <div className="card csm">
-          <div style={{fontSize:10, color:T.muted, textTransform:"uppercase"}}>Ahorros Efectivo</div>
-          <div className="mono" style={{fontSize:18, fontWeight:600, color:T.teal, marginTop:4}}>{fmt(savingsArs)}</div>
-        </div>
-        <div className="card csm" style={{border:`1px solid ${T.lime}44`, background:`linear-gradient(135deg, ${T.surface}, ${T.bg})`}}>
-          <div style={{fontSize:10, color:T.lime, fontWeight:700, textTransform:"uppercase"}}>Patrimonio Total</div>
-          <div className="mono" style={{fontSize:20, fontWeight:700, color:T.lime, marginTop:4}}>{fmt(patrimonioTotalArs)}</div>
-        </div>
-      </div>
-
-      <div className="card" style={{marginBottom:16}}>
-        <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:12}}>Evolución Flujo de Caja ({displayCurrency})</div>
-        <ResponsiveContainer width="100%" height={220}>
-          <BarChart data={months}>
-            <CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/>
-            <XAxis dataKey="name" tick={{fill:T.muted, fontSize:10}} axisLine={false}/>
-            <YAxis tick={{fill:T.muted, fontSize:9}} axisLine={false} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}/>
-            <Tooltip content={<CTip dc={displayCurrency}/>}/>
-            <Legend wrapperStyle={{fontSize:11, paddingTop:10}}/>
-            <Bar dataKey="Ingresos" fill={T.teal} radius={[4,4,0,0]}/>
-            <Bar dataKey="Gastos" fill={T.red} radius={[4,4,0,0]}/>
-            <Bar dataKey="Ahorro" fill={T.blue} radius={[4,4,0,0]}/>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div className="trend-grid" style={{display:"grid", gridTemplateColumns:isMobile?"1fr":"1fr 1fr", gap:14}}>
-        <div className="card">
-          <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:15}}>Gastos por Categoría</div>
-          {cats.slice(0,6).map((c,i)=>(
-            <div key={i} style={{marginBottom:12}}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:12}}>{c.c}</span><span className="mono" style={{fontSize:11,color:T.muted}}>{c.pct}%</span></div>
-              <div className="prog" style={{height:4}}><div style={{height:"100%",background:c.col,width:`${c.pct}%`}}/></div>
-            </div>
-          ))}
-        </div>
-        <div className="card">
-          <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:15}}>Metas (+Inversiones)</div>
-          {goals.slice(0,4).map(g=>{
-            const linked = holdings.filter(h=>h.goalId===g.id);
-            const invVal = linked.reduce((s,h)=>s+calcHoldingValueArs(h,marketPrices,usdRate).curArs,0);
-            const total = g.saved + invVal;
-            const pct = clamp((total/g.target)*100,0,100);
-            return (
-              <div key={g.id} style={{marginBottom:12}}>
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{fontSize:12}}>{g.icon} {g.name}</span><span className="mono" style={{fontSize:11}}>{pct.toFixed(0)}%</span></div>
-                <div className="prog" style={{height:5}}><div className="progf" style={{width:`${pct}%`,background:T.blue}}/></div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-    </div>
-  );
+  const totInc=transactions.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
+  const totExp=transactions.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
+  const savR=totInc>0?clamp(((totInc-totExp)/totInc)*100,-100,100).toFixed(1):"0";
+  const savN=parseFloat(savR);
+  
+  const holdings=state.holdings||[];
+  const marketPrices=state.marketPrices||{};
+  const portfolioValArs=holdings.reduce((s,h)=>s+calcHoldingValueArs(h, marketPrices, state.usdRate).curArs,0);
+  const totalSavingsArs=transactions.filter(t=>t.category==="💰 Ahorro").reduce((s,t)=>s+t.amount,0);
+  
+  // Convertimos al DisplayCurrency final de la app
+  const portfolioFinal = displayCurrency === "USD" ? portfolioValArs / state.usdRate : portfolioValArs;
+  const savingsFinal = displayCurrency === "USD" ? totalSavingsArs / state.usdRate : totalSavingsArs;
+  const patrimonioFinal = portfolioFinal + savingsFinal;
+  
+  return(<div className="up"><PH title="Analíticas" sub="Histórico · Proyecciones · Patrimonio" right={<select className="inp" style={{width:"auto"}} value={range} onChange={e=>setRange(+e.target.value)}><option value={3}>3 meses</option><option value={6}>6 meses</option><option value={12}>12 meses</option></select>}/>
+  {(portfolioValArs>0||totalSavingsArs>0)&&<div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>{[{l:"Portfolio Real",v:fmt(portfolioValArs),c:T.blue,i:"📊"},{l:"Ahorros",v:fmt(totalSavingsArs),c:T.teal,i:"💰"},{l:"Patrimonio total",v:fmt(patrimonioFinal * (displayCurrency === "USD" ? state.usdRate : 1)),c:T.lime,i:"🏛️"}].map((k,i)=><div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".5px"}}>{k.l}</span><span>{k.i}</span></div><div className="mono" title={k.v} style={{fontSize:16,fontWeight:600,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div></div>)}</div>}
+  <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>{[{l:"Total ingresos",v:fmt(displayCurrency==="USD"?totInc*state.usdRate:totInc),c:T.teal},{l:"Total gastos",v:fmt(displayCurrency==="USD"?totExp*state.usdRate:totExp),c:T.red},{l:"Tasa de ahorro",v:`${savR}%`,c:savN>=20?T.lime:savN>=10?T.amber:T.red,sub:savN>=20?"✓ Excelente":savN>=10?"Regular":savN<0?"⚠ Gastás más de lo que ingresás":"⚠ Mejorar"}].map((k,i)=>(<div key={i} className="card csm"><div style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".6px",marginBottom:8}}>{k.l}</div><div className="mono" title={k.v} style={{fontSize:22,fontWeight:500,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div>{k.sub&&<div style={{fontSize:11,color:T.muted,marginTop:3}}>{k.sub}</div>}</div>))}</div>
+  <div className="card" style={{marginBottom:14}}><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Comparativa mensual ({displayCurrency})</div><div style={{width:"100%",minWidth:0,overflow:"hidden"}}><ResponsiveContainer width="100%" height={210}><BarChart data={months} barGap={3}><CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" tick={{fill:T.muted,fontSize:10}} axisLine={false} tickLine={false}/><YAxis tick={{fill:T.muted,fontSize:9}} axisLine={false} tickLine={false} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:v}/><Tooltip content={<CTip dc={displayCurrency}/>}/><Legend wrapperStyle={{fontSize:11,color:T.muted}}/><Bar dataKey="Ingresos" fill={T.teal} radius={[4,4,0,0]} opacity={.9}/><Bar dataKey="Gastos" fill={T.red} radius={[4,4,0,0]} opacity={.9}/><Bar dataKey="Ahorro" fill={T.blue} radius={[4,4,0,0]} opacity={.9}/></BarChart></ResponsiveContainer></div></div>
+  <div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}><div className="card"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Gastos por categoría</div>{cats.length===0?<div style={{color:T.muted,textAlign:"center",padding:20,fontSize:13}}>Sin datos</div>:cats.slice(0,8).map((c,i)=>(<div key={i} style={{marginBottom:9}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:12,color:T.mid}}>{c.c}</span><span className="mono" style={{fontSize:11,color:T.muted}}>{c.pct}%</span></div><div className="prog" style={{height:4}}><div style={{height:"100%",borderRadius:2,background:c.col,width:`${clamp(c.pct,0,100)}%`,transition:"width .6s"}}/></div></div>))}</div><div className="card"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Balance mensual</div><div style={{width:"100%",minWidth:0,overflow:"hidden"}}><ResponsiveContainer width="100%" height={185}><LineChart data={months}><CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" tick={{fill:T.muted,fontSize:10}} axisLine={false} tickLine={false}/><YAxis tick={{fill:T.muted,fontSize:9}} axisLine={false} tickLine={false} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:v}/><Tooltip content={<CTip dc={displayCurrency}/>}/><Line type="monotone" dataKey="balance" stroke={T.lime} strokeWidth={2.5} dot={{fill:T.lime,r:3}} activeDot={{r:5,fill:T.lime,stroke:T.bg}}/></LineChart></ResponsiveContainer></div></div></div>
+  </div>);
 }
-// ==========================================
-// 2. COMPONENTE DE APOYO (Mantener para consistencia)
-// ==========================================
-function AnalysisDetail({a, onClose}){
-  if(!a) return null;
-  const isMobile = window.innerWidth <= 768;
-  return (
-    <div className="card up" style={{border:`1px solid ${T.hi}`, marginTop:14}}>
-      <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:18}}>
-        <div>
-          <div style={{display:"flex", gap:10, alignItems:"center", marginBottom:4}}>
-            <span className="mono" style={{fontSize:22, fontWeight:700}}>{a.ticker}</span>
-            <span className={`tag ${sigCls(a.signal)}`}>{a.signal}</span>
-          </div>
-          <div style={{fontSize:13, color:T.mid}}>{a.company} {a.sector?`· ${a.sector}`:""}</div>
-        </div>
-        <button className="btn bg bsm" onClick={onClose}><ic.X/></button>
-      </div>
 
-      <div className="kpi-grid" style={{display:"grid", gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(5,1fr)", gap:10, marginBottom:18}}>
-        {[{l:"Precio est.", v:`$${(a.currentEstimate||0).toFixed(0)}`},
-          {l:"Target 12m", v:`$${(a.priceTarget12m||0).toFixed(0)}`, c:T.lime},
-          {l:"Upside", v:`${a.upside>0?"+":""}${(a.upside||0).toFixed(1)}%`, c:a.upside>0?T.lime:T.red},
-          {l:"P/E", v:a.peRatio?a.peRatio.toFixed(1):"—"},
-          {l:"Rev. Growth", v:a.revenueGrowth?`${a.revenueGrowth.toFixed(1)}%`:"—", c:T.teal}]
-          .map((s,i) => (
-            <div key={i} style={{background:T.raised, borderRadius:10, padding:"12px 14px"}}>
-              <div style={{fontSize:10, color:T.muted, marginBottom:5}}>{s.l}</div>
-              <div className="mono" style={{fontSize:16, fontWeight:500, color:s.c||T.white}}>{s.v}</div>
-            </div>
-        ))}
-      </div>
-
-      <div className="trend-grid" style={{display:"grid", gridTemplateColumns:isMobile?"1fr":"1fr 1fr", gap:14}}>
-        <div style={{background:T.raised, borderRadius:12, padding:14}}>
-          <div style={{fontSize:11, color:T.lime, fontWeight:600, marginBottom:8}}>🐂 Bull Case</div>
-          <div style={{fontSize:12, color:T.mid, lineHeight:1.6}}>{a.bullCase}</div>
-        </div>
-        <div style={{background:T.raised, borderRadius:12, padding:14}}>
-          <div style={{fontSize:11, color:T.red, fontWeight:600, marginBottom:8}}>🐻 Bear Case</div>
-          <div style={{fontSize:12, color:T.mid, lineHeight:1.6}}>{a.bearCase}</div>
-        </div>
-      </div>
-    </div>
-  );
+// ==========================================
+// 3. COMPONENTE DE APOYO (Para Análisis Manual)
+// ==========================================
+function AnalysisDetail({a,onClose}){
+  if(!a)return null;
+  return(<div className="card up" style={{border:`1px solid ${T.hi}`,marginTop:14}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:18,flexWrap:"wrap",gap:8}}><div><div style={{display:"flex",gap:10,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}><span className="mono" style={{fontSize:22,fontWeight:700}}>{a.ticker}</span><span className={`tag ${sigCls(a.signal)}`}>{a.signal}</span><span className={`tag ${a.timeframe==="SHORT"?"te":a.timeframe==="LONG"?"ti":"ts"}`}>{a.timeframe}</span></div><div style={{fontSize:13,color:T.mid}}>{a.company}{a.sector?` · ${a.sector}`:""}</div></div><button className="btn bg bsm" onClick={onClose}><ic.X/></button></div><div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:18}}>{[{l:"Precio est.",v:`$${(a.currentEstimate||0).toFixed(0)}`},{l:"Target 12m",v:`$${(a.priceTarget12m||0).toFixed(0)}`,c:T.lime},{l:"Upside",v:`${a.upside>0?"+":""}${(a.upside||0).toFixed(1)}%`,c:a.upside>0?T.lime:T.red},{l:"P/E",v:a.peRatio?(a.peRatio.toFixed(1)):"—"},{l:"Rev. Growth",v:a.revenueGrowth?`${(a.revenueGrowth).toFixed(1)}%`:"—",c:a.revenueGrowth>0?T.teal:T.red}].map((s,i)=>(<div key={i} style={{background:T.raised,borderRadius:10,padding:"12px 14px"}}><div style={{fontSize:10,color:T.muted,marginBottom:5}}>{s.l}</div><div className="mono" style={{fontSize:16,fontWeight:500,color:s.c||T.white}}>{s.v}</div></div>))}</div><div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>{[{title:"🐂 Bull case",color:T.lime,body:a.bullCase,sub:"Catalizadores",items:a.catalysts},{title:"🐻 Bear case",color:T.red,body:a.bearCase,sub:"Riesgos",items:a.risks}].map((p,i)=>(<div key={i} style={{background:T.raised,borderRadius:12,padding:"14px 16px"}}><div style={{fontSize:11,color:p.color,fontWeight:600,marginBottom:7}}>{p.title}</div><div style={{fontSize:12,color:T.mid,lineHeight:1.6,marginBottom:8}}>{p.body}</div><div style={{fontSize:10,color:T.muted,marginBottom:5}}>{p.sub}</div>{p.items?.map((it,j)=><div key={j} style={{fontSize:11,color:T.mid,padding:"3px 0",borderBottom:`1px solid ${T.border}`}}>▸ {it}</div>)}</div>))}</div>{a.moat&&<div style={{background:"rgba(77,158,255,.06)",border:`1px solid rgba(77,158,255,.15)`,borderRadius:10,padding:"12px 16px",marginBottom:8}}><div style={{fontSize:11,color:T.blue,fontWeight:600,marginBottom:4}}>🏰 Moat</div><div style={{fontSize:12,color:T.mid}}>{a.moat}</div></div>}<div style={{fontSize:10,color:T.muted,textAlign:"center",marginTop:4}}>⚠️ Análisis educativo. No constituye asesoramiento financiero.</div></div>);
 }
+
 function Import({state,update,notify}){
   const [tab,setTab]=useState("image");
   const [imgSrc,setImgSrc]=useState(null);
