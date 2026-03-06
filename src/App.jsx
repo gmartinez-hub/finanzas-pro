@@ -45,8 +45,26 @@ async function compareInstruments(monthly,months,usdRate){const raw=await ai(`Co
 
 async function autoCat(desc){const raw=await ai(`Transaction: "${desc}". Return ONLY: {"category":"<one of: ${CATS.join(", ")}>","type":"income|expense"} Rules: sueldo/salary/acreditacion→income type; netflix/spotify→🧛 Suscripciones; rappi/pedidosya→🍔 Comida y delivery; gym→💪 Deporte; coto/carrefour/dia→🛒 Supermercado; cuota/credito→💳 Cuotas. IMPORTANT: category MUST include the emoji prefix exactly as listed.`);if(!raw)return{category:"❓ Otros",type:"expense"};try{const p=JSON.parse(cleanJSON(raw));return{category:matchCat(p.category),type:p.type||"expense"};}catch{return{category:"❓ Otros",type:"expense"};}}
 
-async function genWeeklyInsight(transactions,usdRate,holdings=[]){const now=Date.now();const w1=transactions.filter(t=>(now-new Date(t.date))<=7*864e5);if(!w1.length)return null;const e1=w1.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);const w2=transactions.filter(t=>{const d=now-new Date(t.date);return d>7*864e5&&d<=14*864e5;});const e2=w2.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);const cm={};w1.filter(t=>t.type==="expense").forEach(t=>{cm[t.category]=(cm[t.category]||0)+t.amount;});const top=Object.entries(cm).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([c,v])=>`${c}:${fARS(v)}`).join(", ");const pVal=holdings.reduce((s,h)=>s+(h.currentValue||h.totalInvested||0),0);const pInv=holdings.reduce((s,h)=>s+(h.totalInvested||0),0);const pInfo=holdings.length>0?` Portfolio: ${holdings.length} inversiones, valor ${fARS(pVal)}, invertido ${fARS(pInv)}, P&L ${fARS(pVal-pInv)}.`:"";const raw=await ai(`Argentina personal finance. Last 7d expenses: ${fARS(e1)}. Prior week: ${fARS(e2)}. Top: ${top}. USD:${usdRate}.${pInfo} Return ONLY valid JSON: {"headline":"<Spanish 12 words max>","detail":"<2 Spanish sentences with numbers>","action":"<1 Spanish concrete action 15 words max>","trend":"up|down|stable","savingOpportunity":0}`,"Friendly financial coach. Spanish. Valid JSON only.");if(!raw)return null;try{return JSON.parse(cleanJSON(raw));}catch{return null;}}
-
+async function genWeeklyInsight(transactions, usdRate, portfolioValueArs = 0, portfolioInvestedArs = 0){
+  const now = Date.now();
+  const w1 = transactions.filter(t => (now - new Date(t.date)) <= 7 * 864e5);
+  if (!w1.length) return null;
+  const e1 = w1.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
+  const w2 = transactions.filter(t => { const d = now - new Date(t.date); return d > 7 * 864e5 && d <= 14 * 864e5; });
+  const e2 = w2.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
+  const cm = {}; 
+  w1.filter(t => t.type === "expense").forEach(t => { cm[t.category] = (cm[t.category] || 0) + t.amount; });
+  const top = Object.entries(cm).sort((a,b) => b[1] - a[1]).slice(0,3).map(([c,v]) => `${c}:${fARS(v)}`).join(", ");
+  
+  // Usamos los totales perfectos que pasaron por el Motor Maestro
+  const pInfo = portfolioValueArs > 0 ? ` Portfolio: valor ${fARS(portfolioValueArs)}, invertido ${fARS(portfolioInvestedArs)}.` : "";
+  
+  // Le pedimos un array de 3 recomendaciones accionables
+  const raw = await ai(`Argentina personal finance. Last 7d expenses: ${fARS(e1)}. Prior week: ${fARS(e2)}. Top: ${top}. USD:${usdRate}.${pInfo} Return ONLY valid JSON: {"headline":"<Spanish 10 words max>","detail":"<2 Spanish sentences analyzing the data>","recommendations":["<action 1>","<action 2>","<action 3>"],"trend":"up|down|stable"}`, "Friendly financial coach. Spanish. Valid JSON only.");
+  
+  if(!raw) return null;
+  try { return JSON.parse(cleanJSON(raw)); } catch { return null; }
+}
 function parseCSV(txt){const lines=txt.trim().split("\n").filter(l=>l.trim());if(lines.length<2)return[];const sep=lines[0].includes(";")?";":lines[0].includes("\t")?"\t":",";const hdrs=lines[0].split(sep).map(h=>h.trim().replace(/"/g,"").toLowerCase());const out=[];for(let i=1;i<lines.length;i++){const cols=lines[i].split(sep).map(c=>c.trim().replace(/^"|"$/g,""));const obj={};hdrs.forEach((h,idx)=>obj[h]=cols[idx]||"");const dK=hdrs.find(h=>/^(fecha|date|dia)$/i.test(h)||/fecha|date/.test(h));const dscK=hdrs.find(h=>/desc|concepto|detalle|comer|estab|ref/.test(h));const debK=hdrs.find(h=>/debito|debe|debit|cargo|egreso/.test(h));const creK=hdrs.find(h=>/credito|haber|credit|abono/.test(h));const aK=hdrs.find(h=>/import|monto|amount|total/.test(h));let amount=0,type="expense";if(debK&&creK){const deb=px(obj[debK]),cre=px(obj[creK]);if(cre>0){amount=cre;type="income";}else if(deb>0){amount=deb;type="expense";}else continue;}else if(aK){const raw2=String(obj[aK]).trim();amount=Math.abs(px(obj[aK]));type=raw2.startsWith("-")||px(obj[aK])<0?"expense":"income";}else{const numVal=Object.values(obj).map(v=>px(v)).find(v=>v>0);if(!numVal)continue;amount=numVal;type="expense";}if(amount<=0)continue;out.push({id:`csv_${uid()}_${i}`,currency:"ARS",date:obj[dK]||getCUR()+"-01",description:obj[dscK]||`TX ${i}`,amount,type,category:"❓ Otros"});}return out;}
 
 const getSalaryTotal=(salaries,month)=>{const m=month||getCUR();const s=salaries?.find(s=>s.month===m);return s?(s.base+(s.extras||[]).reduce((a,e)=>a+e.amt,0)):0;};
@@ -189,7 +207,19 @@ function Dashboard({state,update,notify,setView}){
   const portfolioPnL=portfolioValue-portfolioInvested;
   
   const kpis=[{l:"Sueldo del mes",v:salary>0?fmt(salary):"-",c:T.lime,i:"💵",sub:salary>0?"Registrado":"Registrá tu sueldo"},{l:"Ingresos",v:fmt(inc),c:T.teal,i:"📥",sub:"Total mensual"},{l:"Gastos",v:fmt(exp),c:T.red,i:"💸",sub:delta?`${delta>0?"+":""}${delta}% vs mes ant.`:"-"},{l:"Balance libre",v:fmt(inc-exp),c:(inc-exp)>=0?T.lime:T.red,i:"⚖️",sub:(inc-exp)>=0?"✓ Superávit":"⚠ Déficit"},{l:"Portfolio Real",v:fmt(portfolioValue),c:portfolioPnL>=0?T.blue:T.amber,i:"📊",sub:portfolioValue>0?`P&L: ${portfolioPnL>=0?"+":""}${fmt(portfolioPnL)}`:"Sin inversiones"}];
-  const refreshInsight=async()=>{if(transactions.length<3)return notify("Necesitás más transacciones","info");setLI(true);const ins=await genWeeklyInsight(transactions,usdRate,holdings);if(ins){update({weeklyInsight:ins,weeklyInsightDate:todayISO()});notify("Resumen actualizado ✓");}else notify("Error — reintentá","err");setLI(false);};
+  const refreshInsight=async()=>{
+    if(transactions.length<3)return notify("Necesitás más transacciones","info");
+    setLI(true);
+    // Acá le pasamos a la IA los números que el Motor Maestro acaba de calcular en ARS puros
+    const ins=await genWeeklyInsight(transactions, usdRate, portfolioValue, portfolioInvested);
+    if(ins){
+      update({weeklyInsight:ins,weeklyInsightDate:todayISO()});
+      notify("Resumen actualizado ✓");
+    } else {
+      notify("Error — reintentá","err");
+    }
+    setLI(false);
+  };
   return(<div className="up"><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:22,flexWrap:"wrap",gap:8}}><div><div style={{fontSize:11,color:T.muted,textTransform:"uppercase",letterSpacing:".8px",marginBottom:5}}>{NOW.toLocaleDateString("es-AR",{weekday:"long",day:"numeric",month:"long"})}</div><h1 style={{fontSize:isMobile?22:28,fontWeight:800,letterSpacing:"-1px"}}>Dashboard</h1></div>{alerts.length>0&&<div style={{background:"rgba(255,184,48,.08)",border:`1px solid rgba(255,184,48,.25)`,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:8,fontSize:12,color:T.amber,cursor:"pointer"}} onClick={()=>setView("transactions")}><ic.Bell/>{alerts.length} alerta{alerts.length>1?"s":""}</div>}</div>
   <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:14}}>{kpis.map((k,i)=>(<div key={i} className={`card csm up d${i+1}`} style={{cursor:i===0?"pointer":"default"}} onClick={i===0?()=>setView("salary"):undefined}><div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".6px",fontWeight:600}}>{k.l}</span><span style={{fontSize:18}}>{k.i}</span></div><div className="mono" title={k.v} style={{fontSize:isMobile?16:20,fontWeight:500,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div><div style={{fontSize:11,color:T.muted,marginTop:4}}>{k.sub}</div></div>))}</div>
   {perGoal.length>0&&(<div className="card up d2" style={{marginBottom:14,borderColor:"rgba(200,255,87,.18)"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}><div style={{fontSize:13,fontWeight:700}}>💡 Plan de ahorro para metas</div><div style={{fontSize:11,color:T.muted}}>Disponible: <span className="mono" style={{color:disponible>0?T.lime:T.red}}>{fmt(disponible)}</span></div></div><div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{perGoal.map(g=>(<div key={g.id} style={{flex:1,minWidth:160,background:T.raised,borderRadius:10,padding:"10px 14px",border:`1px solid ${g.feasible?T.border:"rgba(255,184,48,.25)"}`}}><div style={{fontSize:12,marginBottom:4}}>{g.icon} {g.name}</div><div className="mono" style={{fontSize:16,fontWeight:600,color:g.feasible?T.lime:T.amber}}>{fmt(g.needed)}<span style={{fontSize:11,fontWeight:400,color:T.muted}}>/mes</span></div><div style={{fontSize:10,color:T.muted,marginTop:2}}>{g.months} mes{g.months>1?"es":""} · Falta {fmt(g.rem)}</div>{!g.feasible&&<div style={{fontSize:10,color:T.amber,marginTop:3}}>⚠ Ajustá el plazo</div>}{g.couldUsePortfolio&&<div style={{fontSize:10,color:T.blue,marginTop:3}}>📊 Portfolio cubre {g.portfolioCover}% de esta meta</div>}</div>))}</div></div>)}
