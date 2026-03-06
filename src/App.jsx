@@ -659,48 +659,46 @@ function Investments({state,update,notify}){
 }
 
 // ==========================================
-// 1. COMPONENTE ANALYTICS (Refactor Total)
+// 1. COMPONENTE ANALYTICS (Refactor de Integración Total)
 // ==========================================
 function Analytics({state}){
-  // Extraemos todo del estado al principio para evitar errores de renderizado
+  // Extraemos todo el estado al inicio para que las variables estén disponibles para los cálculos
   const {transactions=[], holdings=[], marketPrices={}, usdRate=1, displayCurrency, goals=[], salaries=[]} = state;
   const {fmt, toDsp} = useDsp(state);
   const NOW = getNow();
   const [range, setRange] = useState(6);
 
-  // 1. CÁLCULOS DE PATRIMONIO REAL (Inversiones + Ahorros)
-  // Usamos la misma lógica del Dashboard para ser consistentes
-  let pValArs = 0;
-  holdings.forEach(h => { 
-    if (h) {
-      const {curArs} = calcHoldingValueArs(h, marketPrices, usdRate);
-      pValArs += curArs;
-    }
-  });
-  
+  // 1. CÁLCULO DE PATRIMONIO CONSOLIDADO (Inversiones + Ahorros)
+  const pValArs = holdings.reduce((s, h) => s + calcHoldingValueArs(h, marketPrices, usdRate).curArs, 0);
   const totalSavingsArs = transactions
     .filter(t => t.category === "💰 Ahorro")
     .reduce((s, t) => s + t.amount, 0);
-    
   const patrimonioTotalArs = pValArs + totalSavingsArs;
 
-  // 2. TENDENCIA MENSUAL (Ingresos, Gastos, Ahorro)
+  // 2. PREPARACIÓN DE DATOS MENSUALES (Flujo de Caja: Sueldo vs Gastos)
   const months = useMemo(() => Array.from({length:range}, (_,i) => {
     const d = new Date(NOW.getFullYear(), NOW.getMonth() - range + 1 + i, 1);
     const m = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
     const txs = transactions.filter(t => gMonth(t.date) === m);
-    const e = txs.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
-    const inc = txs.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0);
+    
+    // Obtenemos el sueldo registrado para ese mes específico
+    const monthlySalary = getSalaryTotal(salaries, m);
+    const otherIncomes = txs.filter(t => t.type === "income" && t.source !== "salary").reduce((s,t) => s + t.amount, 0);
+    const totalIn = monthlySalary + otherIncomes;
+    
+    const expenses = txs.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
+    const savings = txs.filter(t => t.category === "💰 Ahorro").reduce((s,t) => s + t.amount, 0);
+
     return {
       name: MOS[d.getMonth()],
-      Gastos: toDsp(e),
-      Ingresos: toDsp(inc),
-      Ahorro: toDsp(txs.filter(t => t.category === "💰 Ahorro").reduce((s,t) => s + t.amount, 0)),
-      balance: toDsp(inc - e)
+      Ingresos: toDsp(totalIn),
+      Gastos: toDsp(expenses),
+      Ahorro: toDsp(savings),
+      balance: toDsp(totalIn - expenses)
     };
-  }), [transactions, range, toDsp]);
+  }), [transactions, salaries, range, toDsp]);
 
-  // 3. ANÁLISIS POR CATEGORÍA
+  // 3. DISTRIBUCIÓN DE GASTOS
   const cm = {};
   transactions.filter(t => t.type === "expense").forEach(t => {
     cm[t.category] = (cm[t.category] || 0) + t.amount;
@@ -709,21 +707,14 @@ function Analytics({state}){
   const cats = Object.entries(cm)
     .sort((a,b) => b[1] - a[1])
     .map(([c,v], i) => ({
-      c, 
-      v: toDsp(v), 
+      c, v: toDsp(v), 
       pct: ctot > 0 ? (v / ctot * 100).toFixed(1) : 0, 
       col: CPAL[i % CPAL.length]
     }));
 
-  // 4. RATIOS DE EFICIENCIA
-  const totInc = transactions.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0);
-  const totExp = transactions.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
-  const savR = totInc > 0 ? clamp(((totInc - totExp) / totInc) * 100, -100, 100).toFixed(1) : "0";
-  const savN = parseFloat(savR);
-
   return (
     <div className="up">
-      <PH title="Analíticas" sub="Patrimonio y Rendimiento" right={
+      <PH title="Analíticas" sub="Patrimonio · Flujo de Caja · Metas" right={
         <select className="inp" style={{width:"auto"}} value={range} onChange={e => setRange(+e.target.value)}>
           <option value={3}>3 meses</option>
           <option value={6}>6 meses</option>
@@ -731,64 +722,48 @@ function Analytics({state}){
         </select>
       }/>
 
-      {/* BLOQUE DE PATRIMONIO TOTAL (Consolidado) */}
+      {/* KPIs DE PATRIMONIO REAL */}
       <div className="kpi-grid" style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:16}}>
         <div className="card csm">
-          <div style={{fontSize:10, color:T.muted, textTransform:"uppercase"}}>Portfolio Real</div>
+          <div style={{fontSize:10, color:T.muted, textTransform:"uppercase", letterSpacing:".5px"}}>Portfolio Invertido</div>
           <div className="mono" style={{fontSize:18, fontWeight:600, color:T.blue, marginTop:4}}>{fmt(pValArs)}</div>
         </div>
         <div className="card csm">
-          <div style={{fontSize:10, color:T.muted, textTransform:"uppercase"}}>Ahorros Efectivo</div>
+          <div style={{fontSize:10, color:T.muted, textTransform:"uppercase", letterSpacing:".5px"}}>Ahorros en Efectivo</div>
           <div className="mono" style={{fontSize:18, fontWeight:600, color:T.teal, marginTop:4}}>{fmt(totalSavingsArs)}</div>
         </div>
         <div className="card csm" style={{border:`1px solid ${T.lime}44`, background:`linear-gradient(135deg, ${T.surface}, ${T.bg})`}}>
-          <div style={{fontSize:10, color:T.lime, fontWeight:700, textTransform:"uppercase"}}>Patrimonio Total</div>
+          <div style={{fontSize:10, color:T.lime, fontWeight:700, textTransform:"uppercase", letterSpacing:".5px"}}>Patrimonio Total</div>
           <div className="mono" style={{fontSize:20, fontWeight:700, color:T.lime, marginTop:4}}>{fmt(patrimonioTotalArs)}</div>
         </div>
       </div>
 
-      {/* RATIOS DE FLUJO */}
-      <div className="kpi-grid" style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, marginBottom:16}}>
-        <div className="card csm">
-          <div style={{fontSize:10, color:T.muted}}>INGRESOS</div>
-          <div className="mono" style={{fontSize:16, color:T.teal, marginTop:4}}>{fmt(totInc)}</div>
-        </div>
-        <div className="card csm">
-          <div style={{fontSize:10, color:T.muted}}>GASTOS</div>
-          <div className="mono" style={{fontSize:16, color:T.red, marginTop:4}}>{fmt(totExp)}</div>
-        </div>
-        <div className="card csm">
-          <div style={{fontSize:10, color:T.muted}}>TASA AHORRO</div>
-          <div className="mono" style={{fontSize:16, color:savN>=20?T.lime:T.amber, marginTop:4}}>{savR}%</div>
-        </div>
-      </div>
-
-      {/* GRÁFICO DE BARRAS */}
+      {/* GRÁFICO DE FLUJO MENSUAL (Integrando Sueldos) */}
       <div className="card" style={{marginBottom:16}}>
-        <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:16}}>Evolución Mensual ({displayCurrency})</div>
-        <ResponsiveContainer width="100%" height={220}>
+        <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:16}}>Evolución de Ingresos vs Gastos ({displayCurrency})</div>
+        <ResponsiveContainer width="100%" height={240}>
           <BarChart data={months}>
             <CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/>
             <XAxis dataKey="name" tick={{fill:T.muted, fontSize:10}} axisLine={false}/>
-            <YAxis tick={{fill:T.muted, fontSize:9}} axisLine={false} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}/>
+            <YAxis tick={{fill:T.muted, fontSize:9}} axisLine={false} tickFormatter={v => v>=1000 ? `${(v/1000).toFixed(0)}k` : v}/>
             <Tooltip content={<CTip dc={displayCurrency}/>}/>
             <Legend wrapperStyle={{fontSize:11, paddingTop:10}}/>
-            <Bar dataKey="Ingresos" fill={T.teal} radius={[4,4,0,0]}/>
-            <Bar dataKey="Gastos" fill={T.red} radius={[4,4,0,0]}/>
-            <Bar dataKey="Ahorro" fill={T.blue} radius={[4,4,0,0]}/>
+            <Bar dataKey="Ingresos" fill={T.teal} radius={[4,4,0,0]} name="Ingresos (Sueldo + Otros)"/>
+            <Bar dataKey="Gastos" fill={T.red} radius={[4,4,0,0]} name="Gastos Totales"/>
+            <Bar dataKey="Ahorro" fill={T.blue} radius={[4,4,0,0]} name="Ahorro Registrado"/>
           </BarChart>
         </ResponsiveContainer>
       </div>
 
       <div className="trend-grid" style={{display:"grid", gridTemplateColumns:isMobile?"1fr":"1fr 1fr", gap:14}}>
-        {/* GASTOS POR CATEGORÍA */}
+        {/* DISTRIBUCIÓN POR CATEGORÍA */}
         <div className="card">
-          <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:15}}>Distribución de Gastos</div>
+          <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:15}}>Distribución Histórica de Gastos</div>
           {cats.length === 0 ? <div style={{color:T.muted, textAlign:"center", padding:20}}>Sin datos registrados</div> : 
             cats.slice(0,6).map((c,i) => (
               <div key={i} style={{marginBottom:12}}>
                 <div style={{display:"flex", justifyContent:"space-between", marginBottom:5}}>
-                  <span style={{fontSize:12}}>{c.c}</span>
+                  <span style={{fontSize:12, color:T.mid}}>{c.c}</span>
                   <span className="mono" style={{fontSize:11, color:T.muted}}>{c.pct}%</span>
                 </div>
                 <div className="prog" style={{height:5}}>
@@ -798,24 +773,25 @@ function Analytics({state}){
           ))}
         </div>
 
-        {/* ESTADO DE METAS */}
+        {/* PROGRESO DE METAS INTEGRADO */}
         <div className="card">
-          <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:15}}>Progreso de Metas</div>
-          {goals.length === 0 ? <div style={{color:T.muted, textAlign:"center", padding:20}}>Sin metas activas</div> :
-            goals.slice(0,4).map(g => {
+          <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:15}}>Estado Real de Metas (+Inversiones)</div>
+          {goals.length === 0 ? <div style={{color:T.muted, textAlign:"center", padding:20}}>No hay metas activas</div> :
+            goals.map(g => {
               const linked = holdings.filter(h => h.goalId === g.id);
               const invVal = linked.reduce((s, h) => s + calcHoldingValueArs(h, marketPrices, usdRate).curArs, 0);
               const total = g.saved + invVal;
               const pct = clamp((total / g.target) * 100, 0, 100);
               return (
-                <div key={g.id} style={{marginBottom:12}}>
-                  <div style={{display:"flex", justifyContent:"space-between", marginBottom:5}}>
-                    <span style={{fontSize:12}}>{g.icon} {g.name}</span>
-                    <span style={{fontSize:11, color:T.lime}}>{pct.toFixed(0)}%</span>
+                <div key={g.id} style={{marginBottom:15}}>
+                  <div style={{display:"flex", justifyContent:"space-between", marginBottom:6}}>
+                    <span style={{fontSize:13}}>{g.icon} {g.name}</span>
+                    <span className="mono" style={{fontSize:11, color:pct >= 100 ? T.lime : T.blue}}>{pct.toFixed(0)}%</span>
                   </div>
-                  <div className="prog" style={{height:5}}>
-                    <div className="progf" style={{width:`${pct}%`, background:T.lime}}/>
+                  <div className="prog" style={{height:8}}>
+                    <div className="progf" style={{width:`${pct}%`, background: pct >= 100 ? T.lime : T.blue}}/>
                   </div>
+                  <div style={{fontSize:9, color:T.muted, marginTop:4}}>Faltan {fmt(Math.max(0, g.target - total))}</div>
                 </div>
               );
             })
@@ -827,10 +803,11 @@ function Analytics({state}){
 }
 
 // ==========================================
-// 2. COMPONENTE DE APOYO (AnalysisDetail)
+// 2. COMPONENTE DE APOYO (Mantener para consistencia)
 // ==========================================
 function AnalysisDetail({a, onClose}){
   if(!a) return null;
+  const isMobile = window.innerWidth <= 768;
   return (
     <div className="card up" style={{border:`1px solid ${T.hi}`, marginTop:14}}>
       <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:18}}>
@@ -844,7 +821,7 @@ function AnalysisDetail({a, onClose}){
         <button className="btn bg bsm" onClick={onClose}><ic.X/></button>
       </div>
 
-      <div className="kpi-grid" style={{display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:10, marginBottom:18}}>
+      <div className="kpi-grid" style={{display:"grid", gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(5,1fr)", gap:10, marginBottom:18}}>
         {[{l:"Precio est.", v:`$${(a.currentEstimate||0).toFixed(0)}`},
           {l:"Target 12m", v:`$${(a.priceTarget12m||0).toFixed(0)}`, c:T.lime},
           {l:"Upside", v:`${a.upside>0?"+":""}${(a.upside||0).toFixed(1)}%`, c:a.upside>0?T.lime:T.red},
