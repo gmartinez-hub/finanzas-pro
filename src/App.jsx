@@ -51,26 +51,28 @@ async function genWeeklyInsight(transactions, usdRate, portfolioValueArs = 0, po
   const expenses = w1.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
   const pPnL = portfolioValueArs - portfolioInvestedArs;
   
-  // Resumen de metas para la IA
-  const goalSummary = goals.map(g => `${g.name} (Falta: ${fARS(g.target - g.saved)})`).join(", ");
+  // Resumen de metas para que la IA entienda el contexto
+  const goalSummary = goals.map(g => {
+      const rem = g.target - g.saved;
+      return `${g.name} (Faltan: ${fARS(rem)})`;
+  }).join(", ");
 
   const raw = await ai(`
-    Analizá estos datos financieros de la semana en Argentina:
-    - Gastos totales: ${fARS(expenses)}
-    - Valor Portfolio: ${fARS(portfolioValueArs)}
-    - Ganancia/Pérdida Inversiones: ${fARS(pPnL)}
-    - Metas activas: ${goalSummary}
-    - Dólar: ${usdRate}
+    Contexto Financiero Argentina:
+    - Gastos de la semana: ${fARS(expenses)}
+    - Valor actual Portfolio: ${fARS(portfolioValueArs)}
+    - Ganancia neta inversiones: ${fARS(pPnL)}
+    - Metas del usuario: ${goalSummary}
+    - Tipo de cambio (USD): ${usdRate}
     
-    Generá un reporte motivador en formato JSON con 4 cards. 
-    Cruza la performance de las inversiones con las metas (ej: si hubo ganancia, cuánto ayudó a las metas).
-    Devolvé ÚNICAMENTE este formato JSON:
-    {"cards": [{"type":"METAS|GASTOS|INVERSIONES|CONSEJO", "icon":"emoji", "title":"título corto", "text":"descripción motivadora", "highlight":"dato numérico", "color":"código hex de color brillante"}]}
+    Generá un reporte MOTIVADOR en JSON con 4 tarjetas. 
+    REGLA: Si las inversiones subieron, vinculalo con las metas (ej: "Tu ganancia en BTC cubrió el 10% de tu meta Mudanza").
+    Devolvé ÚNICAMENTE este JSON:
+    {"cards": [{"type":"METAS|GASTOS|INVERSIONES|CONSEJO", "icon":"emoji", "title":"string", "text":"string", "highlight":"string", "color":"hex"}]}
   `, "Coach Financiero Pro. Español. Solo JSON.");
   
   try { 
-    const clean = JSON.parse(cleanJSON(raw));
-    return clean;
+    return JSON.parse(cleanJSON(raw)); 
   } catch { 
     return null; 
   }
@@ -221,12 +223,12 @@ function Dashboard({state,update,notify,setView}){
     if(transactions.length<3)return notify("Necesitás más transacciones","info");
     setLI(true);
     // Acá le pasamos a la IA los números que el Motor Maestro acaba de calcular en ARS puros
-{/* SECCIÓN DE ANÁLISIS INTELIGENTE POR CARDS */}
-  <div style={{ marginBottom: 24 }}>
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-      <h3 style={{ fontSize: 14, fontWeight: 700, color: T.white }}>Análisis Semanal IA</h3>
+{/* SECCIÓN DE RESUMEN INTELIGENTE POR TARJETAS */}
+  <div style={{ marginBottom: 26 }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+      <h3 style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-0.3px" }}>Análisis Semanal con IA</h3>
       <button className="btn bg bsm" onClick={refreshInsight} disabled={loadingIns}>
-        {loadingIns ? <Dots /> : <><ic.Bolt /> {weeklyInsight ? "Refrescar" : "Generar"}</>}
+        {loadingIns ? <Dots /> : <><ic.Bolt /> {weeklyInsight ? "Refrescar" : "Generar Reporte"}</>}
       </button>
     </div>
 
@@ -238,34 +240,34 @@ function Dashboard({state,update,notify,setView}){
       }}>
         {weeklyInsight.cards.map((card, i) => (
           <div key={i} className="card up" style={{ 
-            padding: "16px", 
-            borderLeft: `4px solid ${card.color || T.lime}`,
-            background: `linear-gradient(145deg, ${T.surface}, ${T.bg})`,
+            padding: "18px", 
+            borderLeft: `5px solid ${card.color}`,
+            background: `linear-gradient(135deg, ${T.surface}, ${T.bg} 80%)`,
             display: "flex",
             flexDirection: "column",
-            gap: 6,
-            transition: "transform 0.2s"
+            gap: 8,
+            boxShadow: "0 4px 20px rgba(0,0,0,0.15)"
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 20 }}>{card.icon}</span>
-              <span style={{ fontSize: 10, fontWeight: 800, color: T.muted, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              <span style={{ fontSize: 22 }}>{card.icon}</span>
+              <span style={{ fontSize: 10, fontWeight: 900, color: T.muted, textTransform: "uppercase", letterSpacing: "1px" }}>
                 {card.type}
               </span>
             </div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: T.white }}>{card.title}</div>
-            <div style={{ fontSize: 12, color: T.mid, lineHeight: 1.5 }}>{card.text}</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: T.white }}>{card.title}</div>
+            <div style={{ fontSize: 12, color: T.mid, lineHeight: 1.6 }}>{card.text}</div>
             
             {card.highlight && (
               <div style={{ 
-                marginTop: 8, 
-                padding: "4px 10px", 
+                marginTop: 10, 
+                padding: "5px 12px", 
                 background: `${card.color}15`, 
-                borderRadius: "6px",
+                borderRadius: "8px",
                 fontSize: 11, 
-                fontWeight: 700, 
+                fontWeight: 800, 
                 color: card.color,
                 alignSelf: "flex-start",
-                border: `1px solid ${card.color}30`
+                border: `1px solid ${card.color}25`
               }}>
                 {card.highlight}
               </div>
@@ -274,15 +276,14 @@ function Dashboard({state,update,notify,setView}){
         ))}
       </div>
     ) : (
-      <div className="card" style={{ textAlign: "center", padding: "40px 20px", borderStyle: "dashed", borderColor: T.border }}>
-        <div style={{ fontSize: 30, marginBottom: 10 }}>🧠</div>
-        <div style={{ fontSize: 13, color: T.muted, maxWidth: "300px", margin: "0 auto" }}>
-          Analizaremos cómo tus inversiones de esta semana impactaron en tus metas de ahorro.
+      <div className="card" style={{ textAlign: "center", padding: "45px 20px", borderStyle: "dashed", borderColor: T.border, borderRadius: 16 }}>
+        <div style={{ fontSize: 32, marginBottom: 12 }}>🧘‍♂️</div>
+        <div style={{ fontSize: 14, color: T.muted, maxWidth: "280px", margin: "0 auto", lineHeight: 1.5 }}>
+          Generá tu reporte para que la IA analice tus inversiones y el progreso de tus metas.
         </div>
       </div>
     )}
   </div>
-
 function SalaryModule({state,update,notify}){
   const {salaries=[],transactions}=state;
   const {fmt}=useDsp(state);
