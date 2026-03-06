@@ -191,95 +191,85 @@ function Dashboard({state,update,notify,setView}){
   });
   const pPnL = pValue - pInv;
 
-  const refreshInsight=async()=>{
+const refreshInsight = async () => {
+    if (transactions.length < 3) return notify("Necesitás más transacciones", "info");
     setLI(true);
-    const ins = await genWeeklyInsight(transactions, usdRate, pValue, pInv, goals);
-    if(ins) update({weeklyInsight:ins, weeklyInsightDate:todayISO()});
-    else notify("Error al generar reporte", "err");
+    const ins = await genWeeklyInsight(transactions, usdRate, portfolioValue, portfolioInvested, goals);
+    if (ins) update({ weeklyInsight: ins, weeklyInsightDate: todayISO() });
     setLI(false);
-  };
+  }; // <--- ACÁ CERRAMOS LA FUNCIÓN (Línea 222 corregida)
 
-  return(<div className="up">
-    <PH title="Dashboard" sub="Análisis de patrimonio" />
-    
-    {/* KPIs PRINCIPALES */}
-    <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}>
-      {[{l:"Portfolio",v:fmt(pValue),c:pPnL>=0?T.lime:T.red,i:"📊"},
-        {l:"Ganancia",v:fmt(pPnL),c:pPnL>=0?T.teal:T.red,i:"📈"},
-        {l:"Balance Mes",v:fmt(getSalaryTotal(salaries) - transactions.filter(t=>gMonth(t.date)===getCUR()&&t.type==="expense").reduce((s,t)=>s+t.amount,0)),c:T.lime,i:"⚖️"},
-        {l:"Dólar MEP",v:`$${usdRate}`,c:T.blue,i:"🇺🇸"}].map((k,i)=>(
-        <div key={i} className="card csm">
-          <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:T.muted}}>{k.l} <span>{k.i}</span></div>
-          <div className="mono" style={{fontSize:18,fontWeight:600,color:k.c,marginTop:5}}>{k.v}</div>
-        </div>
-      ))}
-    </div>
+  return (
+    <div className="up">
+      <PH title="Dashboard" sub={NOW.toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" })} />
 
-    {/* SECCIÓN DE RESUMEN INTELIGENTE (Cards filtradas por IA) */}
-    <div style={{ marginBottom: 26 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-        <h3 style={{ fontSize: 15, fontWeight: 800 }}>Análisis Semanal con IA</h3>
-        <button className="btn bg bsm" onClick={refreshInsight} disabled={loadingIns}>
-          {loadingIns ? <Dots /> : <><ic.Bolt /> {weeklyInsight ? "Refrescar" : "Generar Reporte"}</>}
-        </button>
+      {/* KPIs SUPERIORES */}
+      <div className="kpi-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 20 }}>
+        {kpis.map((k, i) => (
+          <div key={i} className="card csm">
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: T.muted }}>{k.l} <span>{k.i}</span></div>
+            <div className="mono" style={{ fontSize: 18, fontWeight: 600, color: k.c, marginTop: 5 }}>{k.v}</div>
+          </div>
+        ))}
       </div>
 
-      {weeklyInsight?.cards ? (
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
-          {weeklyInsight.cards.map((card, i) => (
-            <div key={i} className="card up" style={{ 
-              padding: "18px", borderLeft: `5px solid ${card.color}`, 
-              background: `linear-gradient(135deg, ${T.surface}, ${T.bg} 80%)`,
-              display: "flex", flexDirection: "column", gap: 8 
-            }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ fontSize: 22 }}>{card.icon}</span>
-                <span style={{ fontSize: 10, fontWeight: 900, color: T.muted, textTransform: "uppercase" }}>{card.type}</span>
+      {/* ANÁLISIS IA (CARDS) */}
+      <div style={{ marginBottom: 26 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 800 }}>Análisis Semanal con IA</h3>
+          <button className="btn bg bsm" onClick={refreshInsight} disabled={loadingIns}>
+            {loadingIns ? <Dots /> : <><ic.Bolt /> {weeklyInsight ? "Refrescar" : "Generar Reporte"}</>}
+          </button>
+        </div>
+
+        {weeklyInsight?.cards ? (
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
+            {weeklyInsight.cards.map((card, i) => (
+              <div key={i} className="card up" style={{ padding: "18px", borderLeft: `5px solid ${card.color}`, background: `linear-gradient(135deg, ${T.surface}, ${T.bg} 80%)`, display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span>{card.icon}</span><span style={{ fontSize: 10, fontWeight: 900, color: T.muted, textTransform: "uppercase" }}>{card.type}</span></div>
+                <div style={{ fontSize: 15, fontWeight: 700 }}>{card.title}</div>
+                <div style={{ fontSize: 12, color: T.mid, lineHeight: 1.6 }}>{card.text}</div>
+                {card.highlight && <div style={{ marginTop: 10, padding: "5px 12px", background: `${card.color}15`, borderRadius: "8px", fontSize: 11, fontWeight: 800, color: card.color, alignSelf: "flex-start", border: `1px solid ${card.color}25` }}>{card.highlight}</div>}
               </div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: T.white }}>{card.title}</div>
-              <div style={{ fontSize: 12, color: T.mid, lineHeight: 1.6 }}>{card.text}</div>
-              {card.highlight && <div style={{ marginTop: 10, padding: "5px 12px", background: `${card.color}15`, borderRadius: "8px", fontSize: 11, fontWeight: 800, color: card.color, alignSelf: "flex-start", border: `1px solid ${card.color}25` }}>{card.highlight}</div>}
-            </div>
-          ))}
+            ))}
+          </div>
+        ) : (
+          <div className="card" style={{ textAlign: "center", padding: "45px 20px", borderStyle: "dashed", borderColor: T.border, borderRadius: 16 }}>
+            <div style={{ fontSize: 14, color: T.muted }}>Generá tu reporte para ver cómo tus inversiones impulsan tus metas.</div>
+          </div>
+        )}
+      </div>
+
+      {/* GRÁFICOS Y SALUD FINANCIERA */}
+      <div className="trend-grid" style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.8fr 0.8fr", gap: 14, marginTop: 20 }}>
+        <div className="card">
+          <div style={{ fontSize: 12, fontWeight: 600, color: T.mid, marginBottom: 12 }}>Tendencia ({state.displayCurrency})</div>
+          <ResponsiveContainer width="100%" height={180}>
+            <AreaChart data={trend}>
+              <CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="name" tick={{ fill: T.muted, fontSize: 10 }} axisLine={false} />
+              <YAxis tick={{ fill: T.muted, fontSize: 9 }} axisLine={false} tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} />
+              <Tooltip content={<CTip dc={state.displayCurrency} />} />
+              <Area type="monotone" dataKey="Ingresos" stroke={T.teal} fill={`${T.teal}15`} strokeWidth={2} />
+              <Area type="monotone" dataKey="Gastos" stroke={T.red} fill={`${T.red}15`} strokeWidth={2} />
+            </AreaChart>
+          </ResponsiveContainer>
         </div>
-      ) : (
-        <div className="card" style={{ textAlign: "center", padding: "45px 20px", borderStyle: "dashed", borderColor: T.border }}>
-          <div style={{ fontSize: 14, color: T.muted }}>Generá tu reporte para ver cómo tus inversiones impulsan tus metas.</div>
+
+        <div className="card" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ fontSize: 10, color: T.muted, textTransform: "uppercase", fontWeight: 600, marginBottom: 10 }}>Salud Financiera</div>
+          <svg width={85} height={85} viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="40" fill="none" stroke={T.raised} strokeWidth="8" />
+            <circle cx="50" cy="50" r="40" fill="none" stroke={sc} strokeWidth="8" strokeDasharray={`${(score / 100) * 251} 251`} strokeDashoffset="63" strokeLinecap="round" style={{ transition: "stroke-dasharray 1s" }} />
+            <text x="50" y="48" textAnchor="middle" fill={sc} fontSize="24" fontWeight="700">{score}</text>
+            <text x="50" y="62" textAnchor="middle" fill={T.muted} fontSize="8">SCORE</text>
+          </svg>
         </div>
-      )}
-      <div className="trend-grid" style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1.8fr 0.8fr",gap:14,marginTop:20}}>
-      <div className="card">
-        <div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Tendencia ({state.displayCurrency})</div>
-        <ResponsiveContainer width="100%" height={180}><AreaChart data={trend}><CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" tick={{fill:T.muted,fontSize:10}} axisLine={false}/><YAxis tick={{fill:T.muted,fontSize:9}} axisLine={false} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:v}/><Tooltip content={<CTip dc={state.displayCurrency}/>}/><Area type="monotone" dataKey="Ingresos" stroke={T.teal} fill={`${T.teal}15`} strokeWidth={2}/><Area type="monotone" dataKey="Gastos" stroke={T.red} fill={`${T.red}15`} strokeWidth={2}/></AreaChart></ResponsiveContainer>
-      </div>
-      <div className="card" style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-        <div style={{fontSize:10,color:T.muted,textTransform:"uppercase",fontWeight:600,marginBottom:10}}>Salud Financiera</div>
-        <svg width={85} height={85} viewBox="0 0 100 100">
-          <circle cx="50" cy="50" r="40" fill="none" stroke={T.raised} strokeWidth="8"/>
-          <circle cx="50" cy="50" r="40" fill="none" stroke={scColor} strokeWidth="8" strokeDasharray={`${(score/100)*251} 251`} strokeDashoffset="63" strokeLinecap="round" style={{transition:"stroke-dasharray 1s"}}/>
-          <text x="50" y="48" textAnchor="middle" fill={scColor} fontSize="24" fontWeight="700">{score}</text>
-          <text x="50" y="62" textAnchor="middle" fill={T.muted} fontSize="8">SCORE</text>
-        </svg>
-<div className="trend-grid" style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1.8fr 0.8fr",gap:14,marginTop:20}}>
-      <div className="card">
-        <div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Tendencia ({state.displayCurrency})</div>
-        <ResponsiveContainer width="100%" height={180}><AreaChart data={trend}><CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" tick={{fill:T.muted,fontSize:10}} axisLine={false}/><YAxis tick={{fill:T.muted,fontSize:9}} axisLine={false} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:v}/><Tooltip content={<CTip dc={state.displayCurrency}/>}/><Area type="monotone" dataKey="Ingresos" stroke={T.teal} fill={`${T.teal}15`} strokeWidth={2}/><Area type="monotone" dataKey="Gastos" stroke={T.red} fill={`${T.red}15`} strokeWidth={2}/></AreaChart></ResponsiveContainer>
-      </div>
-      <div className="card" style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-        <div style={{fontSize:10,color:T.muted,textTransform:"uppercase",fontWeight:600,marginBottom:10}}>Salud Financiera</div>
-        <svg width={85} height={85} viewBox="0 0 100 100">
-          <circle cx="50" cy="50" r="40" fill="none" stroke={T.raised} strokeWidth="8"/>
-          <circle cx="50" cy="50" r="40" fill="none" stroke={scColor} strokeWidth="8" strokeDasharray={`${(score/100)*251} 251`} strokeDashoffset="63" strokeLinecap="round" style={{transition:"stroke-dasharray 1s"}}/>
-          <text x="50" y="48" textAnchor="middle" fill={scColor} fontSize="24" fontWeight="700">{score}</text>
-          <text x="50" y="62" textAnchor="middle" fill={T.muted} fontSize="8">SCORE</text>
-        </svg>
       </div>
     </div>
-      </div>
-    </div>
-    </div>
-  </div>);
-}
+  );
+} // <--- ACÁ CERRAMOS EL COMPONENTE DASHBOARD
+      
 function SalaryModule({state,update,notify}){
   const {salaries=[],transactions}=state;
   const {fmt}=useDsp(state);
