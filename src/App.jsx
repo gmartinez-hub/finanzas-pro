@@ -658,18 +658,33 @@ function Investments({state,update,notify}){
   </div>);
 }
 
+// ==========================================
+// 1. COMPONENTE ANALYTICS (Refactor Total)
+// ==========================================
 function Analytics({state}){
-  const {transactions, holdings=[], marketPrices={}, usdRate, displayCurrency, goals=[], salaries=[]}=state;
-  const {fmt, toDsp}=useDsp(state);
+  // Extraemos todo del estado al principio para evitar errores de renderizado
+  const {transactions=[], holdings=[], marketPrices={}, usdRate=1, displayCurrency, goals=[], salaries=[]} = state;
+  const {fmt, toDsp} = useDsp(state);
   const NOW = getNow();
   const [range, setRange] = useState(6);
 
-  // 1. CÁLCULO DE PATRIMONIO (Motor Maestro)
-  const pValArs = holdings.reduce((s, h) => s + calcHoldingValueArs(h, marketPrices, usdRate).curArs, 0);
-  const savingsArs = transactions.filter(t => t.category === "💰 Ahorro").reduce((s, t) => s + t.amount, 0);
-  const patrimonioTotalArs = pValArs + savingsArs;
+  // 1. CÁLCULOS DE PATRIMONIO REAL (Inversiones + Ahorros)
+  // Usamos la misma lógica del Dashboard para ser consistentes
+  let pValArs = 0;
+  holdings.forEach(h => { 
+    if (h) {
+      const {curArs} = calcHoldingValueArs(h, marketPrices, usdRate);
+      pValArs += curArs;
+    }
+  });
+  
+  const totalSavingsArs = transactions
+    .filter(t => t.category === "💰 Ahorro")
+    .reduce((s, t) => s + t.amount, 0);
+    
+  const patrimonioTotalArs = pValArs + totalSavingsArs;
 
-  // 2. FLUJO DE CAJA HISTÓRICO (Bar Chart)
+  // 2. TENDENCIA MENSUAL (Ingresos, Gastos, Ahorro)
   const months = useMemo(() => Array.from({length:range}, (_,i) => {
     const d = new Date(NOW.getFullYear(), NOW.getMonth() - range + 1 + i, 1);
     const m = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
@@ -685,7 +700,7 @@ function Analytics({state}){
     };
   }), [transactions, range, toDsp]);
 
-  // 3. ANÁLISIS DE GASTOS POR CATEGORÍA
+  // 3. ANÁLISIS POR CATEGORÍA
   const cm = {};
   transactions.filter(t => t.type === "expense").forEach(t => {
     cm[t.category] = (cm[t.category] || 0) + t.amount;
@@ -716,46 +731,46 @@ function Analytics({state}){
         </select>
       }/>
 
-      {/* BLOQUE 1: PATRIMONIO TOTAL */}
+      {/* BLOQUE DE PATRIMONIO TOTAL (Consolidado) */}
       <div className="kpi-grid" style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:16}}>
         <div className="card csm">
-          <div style={{fontSize:10, color:T.muted, textTransform:"uppercase", letterSpacing:".5px"}}>Portfolio Real</div>
+          <div style={{fontSize:10, color:T.muted, textTransform:"uppercase"}}>Portfolio Real</div>
           <div className="mono" style={{fontSize:18, fontWeight:600, color:T.blue, marginTop:4}}>{fmt(pValArs)}</div>
         </div>
         <div className="card csm">
-          <div style={{fontSize:10, color:T.muted, textTransform:"uppercase", letterSpacing:".5px"}}>Ahorros Efectivo</div>
-          <div className="mono" style={{fontSize:18, fontWeight:600, color:T.teal, marginTop:4}}>{fmt(savingsArs)}</div>
+          <div style={{fontSize:10, color:T.muted, textTransform:"uppercase"}}>Ahorros Efectivo</div>
+          <div className="mono" style={{fontSize:18, fontWeight:600, color:T.teal, marginTop:4}}>{fmt(totalSavingsArs)}</div>
         </div>
         <div className="card csm" style={{border:`1px solid ${T.lime}44`, background:`linear-gradient(135deg, ${T.surface}, ${T.bg})`}}>
-          <div style={{fontSize:10, color:T.lime, fontWeight:700, textTransform:"uppercase", letterSpacing:".5px"}}>Patrimonio Total</div>
+          <div style={{fontSize:10, color:T.lime, fontWeight:700, textTransform:"uppercase"}}>Patrimonio Total</div>
           <div className="mono" style={{fontSize:20, fontWeight:700, color:T.lime, marginTop:4}}>{fmt(patrimonioTotalArs)}</div>
         </div>
       </div>
 
-      {/* BLOQUE 2: EFICIENCIA Y TASA DE AHORRO */}
+      {/* RATIOS DE FLUJO */}
       <div className="kpi-grid" style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, marginBottom:16}}>
         <div className="card csm">
-          <div style={{fontSize:10, color:T.muted}}>INGRESOS TOTALES</div>
+          <div style={{fontSize:10, color:T.muted}}>INGRESOS</div>
           <div className="mono" style={{fontSize:16, color:T.teal, marginTop:4}}>{fmt(totInc)}</div>
         </div>
         <div className="card csm">
-          <div style={{fontSize:10, color:T.muted}}>GASTOS TOTALES</div>
+          <div style={{fontSize:10, color:T.muted}}>GASTOS</div>
           <div className="mono" style={{fontSize:16, color:T.red, marginTop:4}}>{fmt(totExp)}</div>
         </div>
         <div className="card csm">
-          <div style={{fontSize:10, color:T.muted}}>TASA DE AHORRO</div>
+          <div style={{fontSize:10, color:T.muted}}>TASA AHORRO</div>
           <div className="mono" style={{fontSize:16, color:savN>=20?T.lime:T.amber, marginTop:4}}>{savR}%</div>
         </div>
       </div>
 
-      {/* BLOQUE 3: GRÁFICO DE BARRAS EVOLUCIÓN */}
+      {/* GRÁFICO DE BARRAS */}
       <div className="card" style={{marginBottom:16}}>
-        <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:16}}>Flujo de Caja Mensual ({displayCurrency})</div>
+        <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:16}}>Evolución Mensual ({displayCurrency})</div>
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={months}>
             <CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/>
             <XAxis dataKey="name" tick={{fill:T.muted, fontSize:10}} axisLine={false}/>
-            <YAxis tick={{fill:T.muted, fontSize:9}} axisLine={false} tickFormatter={v => v>=1000 ? `${(v/1000).toFixed(0)}k` : v}/>
+            <YAxis tick={{fill:T.muted, fontSize:9}} axisLine={false} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}/>
             <Tooltip content={<CTip dc={displayCurrency}/>}/>
             <Legend wrapperStyle={{fontSize:11, paddingTop:10}}/>
             <Bar dataKey="Ingresos" fill={T.teal} radius={[4,4,0,0]}/>
@@ -765,15 +780,15 @@ function Analytics({state}){
         </ResponsiveContainer>
       </div>
 
-      {/* BLOQUE 4: CATEGORÍAS Y METAS */}
-      <div className="trend-grid" style={{display:"grid", gridTemplateColumns:isMobile?"1fr":"1fr 1fr", gap:14, marginBottom:16}}>
+      <div className="trend-grid" style={{display:"grid", gridTemplateColumns:isMobile?"1fr":"1fr 1fr", gap:14}}>
+        {/* GASTOS POR CATEGORÍA */}
         <div className="card">
-          <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:15}}>Gastos por Categoría</div>
-          {cats.length === 0 ? <div style={{color:T.muted, textAlign:"center", padding:20}}>Sin datos</div> : 
+          <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:15}}>Distribución de Gastos</div>
+          {cats.length === 0 ? <div style={{color:T.muted, textAlign:"center", padding:20}}>Sin datos registrados</div> : 
             cats.slice(0,6).map((c,i) => (
               <div key={i} style={{marginBottom:12}}>
                 <div style={{display:"flex", justifyContent:"space-between", marginBottom:5}}>
-                  <span style={{fontSize:12, color:T.mid}}>{c.c}</span>
+                  <span style={{fontSize:12}}>{c.c}</span>
                   <span className="mono" style={{fontSize:11, color:T.muted}}>{c.pct}%</span>
                 </div>
                 <div className="prog" style={{height:5}}>
@@ -783,8 +798,9 @@ function Analytics({state}){
           ))}
         </div>
 
+        {/* ESTADO DE METAS */}
         <div className="card">
-          <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:15}}>Estado de Metas</div>
+          <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:15}}>Progreso de Metas</div>
           {goals.length === 0 ? <div style={{color:T.muted, textAlign:"center", padding:20}}>Sin metas activas</div> :
             goals.slice(0,4).map(g => {
               const linked = holdings.filter(h => h.goalId === g.id);
@@ -804,6 +820,52 @@ function Analytics({state}){
               );
             })
           }
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// 2. COMPONENTE DE APOYO (AnalysisDetail)
+// ==========================================
+function AnalysisDetail({a, onClose}){
+  if(!a) return null;
+  return (
+    <div className="card up" style={{border:`1px solid ${T.hi}`, marginTop:14}}>
+      <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:18}}>
+        <div>
+          <div style={{display:"flex", gap:10, alignItems:"center", marginBottom:4}}>
+            <span className="mono" style={{fontSize:22, fontWeight:700}}>{a.ticker}</span>
+            <span className={`tag ${sigCls(a.signal)}`}>{a.signal}</span>
+          </div>
+          <div style={{fontSize:13, color:T.mid}}>{a.company} {a.sector?`· ${a.sector}`:""}</div>
+        </div>
+        <button className="btn bg bsm" onClick={onClose}><ic.X/></button>
+      </div>
+
+      <div className="kpi-grid" style={{display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:10, marginBottom:18}}>
+        {[{l:"Precio est.", v:`$${(a.currentEstimate||0).toFixed(0)}`},
+          {l:"Target 12m", v:`$${(a.priceTarget12m||0).toFixed(0)}`, c:T.lime},
+          {l:"Upside", v:`${a.upside>0?"+":""}${(a.upside||0).toFixed(1)}%`, c:a.upside>0?T.lime:T.red},
+          {l:"P/E", v:a.peRatio?a.peRatio.toFixed(1):"—"},
+          {l:"Rev. Growth", v:a.revenueGrowth?`${a.revenueGrowth.toFixed(1)}%`:"—", c:T.teal}]
+          .map((s,i) => (
+            <div key={i} style={{background:T.raised, borderRadius:10, padding:"12px 14px"}}>
+              <div style={{fontSize:10, color:T.muted, marginBottom:5}}>{s.l}</div>
+              <div className="mono" style={{fontSize:16, fontWeight:500, color:s.c||T.white}}>{s.v}</div>
+            </div>
+        ))}
+      </div>
+
+      <div className="trend-grid" style={{display:"grid", gridTemplateColumns:isMobile?"1fr":"1fr 1fr", gap:14}}>
+        <div style={{background:T.raised, borderRadius:12, padding:14}}>
+          <div style={{fontSize:11, color:T.lime, fontWeight:600, marginBottom:8}}>🐂 Bull Case</div>
+          <div style={{fontSize:12, color:T.mid, lineHeight:1.6}}>{a.bullCase}</div>
+        </div>
+        <div style={{background:T.raised, borderRadius:12, padding:14}}>
+          <div style={{fontSize:11, color:T.red, fontWeight:600, marginBottom:8}}>🐻 Bear Case</div>
+          <div style={{fontSize:12, color:T.mid, lineHeight:1.6}}>{a.bearCase}</div>
         </div>
       </div>
     </div>
