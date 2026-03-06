@@ -658,32 +658,26 @@ function Investments({state,update,notify}){
   </div>);
 }
 
-// ==========================================
-// 2. FUNCIÓN ANALYTICS COMPLETA Y LIMPIA
-// ==========================================
-// ==========================================
-// 2. FUNCIÓN ANALYTICS (CORREGIDA)
-// ==========================================
 function Analytics({state}){
-  // 1. Primero extraemos todo del estado
   const {transactions, holdings=[], marketPrices={}, usdRate, displayCurrency}=state;
   const {fmt, toDsp}=useDsp(state);
   const NOW = getNow();
   const [range, setRange] = useState(6);
 
-  // 2. Cálculos de Patrimonio Real (Usando el Motor Maestro)
-  let portfolioValArs = 0;
+  // 1. Cálculo de Patrimonio Real (Inversiones + Ahorros)
+  let pValArs = 0;
   holdings.forEach(h => { 
-    portfolioValArs += calcHoldingValueArs(h, marketPrices, usdRate).curArs; 
+    // Usamos el motor maestro para tener el valor actualizado
+    pValArs += calcHoldingValueArs(h, marketPrices, usdRate).curArs; 
   });
   
-  const totalSavingsArs = transactions
+  const savingsArs = transactions
     .filter(t => t.category === "💰 Ahorro")
     .reduce((s, t) => s + t.amount, 0);
     
-  const patrimonioTotalArs = portfolioValArs + totalSavingsArs;
+  const patrimonioTotalArs = pValArs + savingsArs;
 
-  // 3. Lógica de Gráficos Mensuales
+  // 2. Preparación de datos para el gráfico de barras
   const months = useMemo(() => Array.from({length:range}, (_,i) => {
     const d = new Date(NOW.getFullYear(), NOW.getMonth() - range + 1 + i, 1);
     const m = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
@@ -699,28 +693,13 @@ function Analytics({state}){
     };
   }), [transactions, range, toDsp]);
 
-  // 4. Gastos por Categoría
-  const cm = {};
-  transactions.filter(t => t.type === "expense").forEach(t => {
-    cm[t.category] = (cm[t.category] || 0) + t.amount;
-  });
-  const ctot = Object.values(cm).reduce((s,v) => s + v, 0);
-  const cats = Object.entries(cm)
-    .sort((a,b) => b[1] - a[1])
-    .map(([c,v], i) => ({
-      c, 
-      v: toDsp(v), 
-      pct: ctot > 0 ? (v / ctot * 100).toFixed(1) : 0, 
-      col: CPAL[i % CPAL.length]
-    }));
-
   const totInc = transactions.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0);
   const totExp = transactions.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
-  const savR = totInc > 0 ? clamp(((totInc - totExp) / totInc) * 100, -100, 100).toFixed(1) : "0";
+  const savR = totInc > 0 ? (((totInc - totExp) / totInc) * 100).toFixed(1) : "0";
 
   return (
     <div className="up">
-      <PH title="Analíticas" sub="Histórico · Proyecciones · Patrimonio" right={
+      <PH title="Analíticas" sub="Patrimonio y Rendimiento" right={
         <select className="inp" style={{width:"auto"}} value={range} onChange={e => setRange(+e.target.value)}>
           <option value={3}>3 meses</option>
           <option value={6}>6 meses</option>
@@ -728,47 +707,31 @@ function Analytics({state}){
         </select>
       }/>
 
-      {/* KPIs de Patrimonio */}
-      {(portfolioValArs > 0 || totalSavingsArs > 0) && (
-        <div className="kpi-grid" style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:14}}>
-          {[{l:"Portfolio Real", v:fmt(portfolioValArs), c:T.blue, i:"📊"},
-            {l:"Ahorros", v:fmt(totalSavingsArs), c:T.teal, i:"💰"},
-            {l:"Patrimonio total", v:fmt(patrimonioTotalArs), c:T.lime, i:"🏛️"}]
-            .map((k,i) => (
-              <div key={i} className="card csm">
-                <div style={{display:"flex", justifyContent:"space-between", marginBottom:6}}>
-                  <span style={{fontSize:10, color:T.muted, textTransform:"uppercase"}}>{k.l}</span>
-                  <span>{k.i}</span>
-                </div>
-                <div className="mono" style={{fontSize:16, fontWeight:600, color:k.c}}>{k.v}</div>
-              </div>
-          ))}
+      {/* BLOQUE DE PATRIMONIO REAL */}
+      <div className="kpi-grid" style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:14}}>
+        <div className="card csm">
+          <div style={{fontSize:10, color:T.muted, textTransform:"uppercase"}}>Portfolio Real</div>
+          <div className="mono" style={{fontSize:16, fontWeight:600, color:T.blue, marginTop:4}}>{fmt(pValArs)}</div>
         </div>
-      )}
-
-      {/* KPIs de Flujo de Caja */}
-      <div className="kpi-grid" style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, marginBottom:16}}>
-        {[{l:"Total ingresos", v:fmt(totInc), c:T.teal},
-          {l:"Total gastos", v:fmt(totExp), c:T.red},
-          {l:"Tasa de ahorro", v:`${savR}%`, c:parseFloat(savR) >= 20 ? T.lime : T.amber}]
-          .map((k,i) => (
-            <div key={i} className="card csm">
-              <div style={{fontSize:10, color:T.muted, textTransform:"uppercase", marginBottom:8}}>{k.l}</div>
-              <div className="mono" style={{fontSize:22, fontWeight:500, color:k.c}}>{k.v}</div>
-            </div>
-        ))}
+        <div className="card csm">
+          <div style={{fontSize:10, color:T.muted, textTransform:"uppercase"}}>Ahorros Liquidos</div>
+          <div className="mono" style={{fontSize:16, fontWeight:600, color:T.teal, marginTop:4}}>{fmt(totalSavingsArs)}</div>
+        </div>
+        <div className="card csm" style={{background:`linear-gradient(135deg, ${T.surface}, ${T.bg})`, border:`1px solid ${T.lime}33`}}>
+          <div style={{fontSize:10, color:T.lime, fontWeight:700, textTransform:"uppercase"}}>Patrimonio Total</div>
+          <div className="mono" style={{fontSize:18, fontWeight:700, color:T.lime, marginTop:4}}>{fmt(patrimonioTotalArs)}</div>
+        </div>
       </div>
 
-      {/* Gráfico Comparativo */}
+      {/* GRÁFICO COMPARATIVO */}
       <div className="card" style={{marginBottom:14}}>
-        <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:12}}>Comparativa mensual ({displayCurrency})</div>
+        <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:12}}>Evolución Mensual ({displayCurrency})</div>
         <ResponsiveContainer width="100%" height={210}>
-          <BarChart data={months} barGap={3}>
+          <BarChart data={months}>
             <CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/>
-            <XAxis dataKey="name" tick={{fill:T.muted, fontSize:10}} axisLine={false} tickLine={false}/>
-            <YAxis tick={{fill:T.muted, fontSize:9}} axisLine={false} tickLine={false} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}/>
+            <XAxis dataKey="name" tick={{fill:T.muted, fontSize:10}} axisLine={false}/>
+            <YAxis tick={{fill:T.muted, fontSize:9}} axisLine={false} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}/>
             <Tooltip content={<CTip dc={displayCurrency}/>}/>
-            <Legend wrapperStyle={{fontSize:11}}/>
             <Bar dataKey="Ingresos" fill={T.teal} radius={[4,4,0,0]}/>
             <Bar dataKey="Gastos" fill={T.red} radius={[4,4,0,0]}/>
             <Bar dataKey="Ahorro" fill={T.blue} radius={[4,4,0,0]}/>
@@ -776,33 +739,16 @@ function Analytics({state}){
         </ResponsiveContainer>
       </div>
 
-      <div className="trend-grid" style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:14}}>
-        <div className="card">
-          <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:12}}>Gastos por categoría</div>
-          {cats.length === 0 ? <div style={{color:T.muted, textAlign:"center", padding:20}}>Sin datos</div> : 
-            cats.slice(0,8).map((c,i) => (
-              <div key={i} style={{marginBottom:9}}>
-                <div style={{display:"flex", justifyContent:"space-between", marginBottom:4}}>
-                  <span style={{fontSize:12}}>{c.c}</span>
-                  <span className="mono" style={{fontSize:11, color:T.muted}}>{c.pct}%</span>
-                </div>
-                <div className="prog" style={{height:4}}>
-                  <div style={{height:"100%", borderRadius:2, background:c.col, width:`${c.pct}%`}}/>
-                </div>
-              </div>
-          ))}
-        </div>
-        <div className="card">
-          <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:12}}>Balance mensual</div>
-          <ResponsiveContainer width="100%" height={185}>
-            <LineChart data={months}>
-              <CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/>
-              <XAxis dataKey="name" tick={{fill:T.muted, fontSize:10}} axisLine={false}/>
-              <YAxis tick={{fill:T.muted, fontSize:9}} axisLine={false}/>
-              <Tooltip content={<CTip dc={displayCurrency}/>}/>
-              <Line type="monotone" dataKey="balance" stroke={T.lime} strokeWidth={2} dot={{fill:T.lime, r:3}}/>
-            </LineChart>
-          </ResponsiveContainer>
+      <div className="card">
+        <div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+          <div>
+            <div style={{fontSize:11, color:T.muted}}>Tasa de ahorro histórica</div>
+            <div className="mono" style={{fontSize:20, color:T.lime}}>{savR}%</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:11, color:T.muted}}>Estado</div>
+            <div style={{fontSize:12, fontWeight:600, color:T.teal}}>✓ {parseFloat(savR) > 20 ? "Excelente" : "Saludable"}</div>
+          </div>
         </div>
       </div>
     </div>
