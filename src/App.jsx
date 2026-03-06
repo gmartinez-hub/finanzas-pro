@@ -333,39 +333,42 @@ function Investments({state,update,notify}){
   const [loadingTNA,setLoadingTNA]=useState(false); 
   
   const holdings=state.holdings||[];
-  const marketPrices=state.marketPrices||{}; // Nuestra "Caché" del backend
+  const marketPrices=state.marketPrices||{}; // Nuestra caché de precios reales
   const filteredHoldings=hFilter==="all"?holdings:holdings.filter(h=>h.type===hFilter);
   const holdingTypes=[...new Set(holdings.map(h=>h.type))];
   
   // ==========================================
-  // MICROSERVICIO DE CÁLCULO (El "Backend")
+  // MOTOR MATEMÁTICO (Unificado en ARS)
   // ==========================================
   const portfolioData = useMemo(() => {
     let gInv = 0, gCur = 0;
     
     const items = holdings.map(h => {
-      // 1. Normalizar inversión inicial a PESOS (ARS) absolutos para la DB
-      // Compatibilidad con datos viejos
+      // 1. Inversión inicial en ARS absolutos
       let invArs = h.totalInvestedArs;
       if(!invArs) invArs = h.originalCurrency === "USD" ? (h.totalInvested||0) * usdRate : (h.totalInvested||0);
       
-      let currentArs = invArs; // Por defecto vale lo mismo que cuando se compró
+      let currentArs = invArs; 
       
-      // 2. Buscar precio de mercado actual
+      // 2. Precio Actualizado de Mercado
       if (["accion", "cedear", "etf", "crypto"].includes(h.type)) {
         const mp = marketPrices[h.ticker];
         if (mp) {
-            // Unificamos el precio de mercado a ARS sin importar de dónde vino
+            // Aseguramos que el precio de mercado se convierta a pesos para calcular
             const priceArs = mp.currency === "USD" ? mp.price * usdRate : mp.price;
             currentArs = (h.quantity || 0) * priceArs;
+        } else {
+            // Si no sincronizó, usamos el precio de compra como fallback
+            const fallbackPriceArs = h.originalCurrency === "USD" ? (h.originalBuyPrice || h.buyPrice) * usdRate : (h.originalBuyPrice || h.buyPrice);
+            currentArs = (h.quantity || 0) * fallbackPriceArs;
         }
       } else {
-        // Renta fija: Cálculo matemático local
+        // Plazos Fijos
         const days = Math.max(0, Math.floor((Date.now() - new Date(h.buyDate)) / 864e5));
         currentArs = invArs * (1 + ((h.rate||0) / 100) * (days / 365));
       }
       
-      // 3. Traducir al Display Currency (Lo que el usuario eligió ver)
+      // 3. Conversión al Display Currency (Lo que elegiste ver en la barra lateral)
       const targetInv = displayCurrency === "USD" ? invArs / usdRate : invArs;
       const targetCur = displayCurrency === "USD" ? currentArs / usdRate : currentArs;
       const pnl = targetCur - targetInv;
@@ -382,11 +385,11 @@ function Investments({state,update,notify}){
 
 
   // ==========================================
-  // ORQUESTADOR DE APIs (Llamadas a mercado)
+  // SINCRONIZADOR GLOBAL DE APIs (Binance + Yahoo)
   // ==========================================
   const refreshPortfolio = async () => {
     setRI("all");
-    notify("Sincronizando con el mercado...", "info");
+    notify("Sincronizando con APIs globales...", "info");
     let newPrices = { ...marketPrices };
     let updated = 0;
 
@@ -395,33 +398,46 @@ function Investments({state,update,notify}){
     for (const h of varAssets) {
         if (h.type === "crypto") {
             try {
-                // API Oficial de Binance (Tiempo real real)
-                const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${h.ticker.toUpperCase()}USDT`);
+                // Binance API
+                let sym = h.ticker.toUpperCase().replace("USDT", "").replace("USD", "") + "USDT";
+                const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${sym}`);
                 if(r.ok) {
                     const d = await r.json();
                     newPrices[h.ticker] = { price: parseFloat(d.price), currency: "USD" };
                     updated++;
                 }
-            } catch(e) {}
+            } catch(e) { console.warn("Binance err", e); }
         } else {
             try {
-                // AI como API Mockeada estricta
-                const raw = await ai(`Act as a financial API. Return the current market price of ticker ${h.ticker}. Use US market (USD) for international stocks/CEDEARs, or Argentine market (ARS) for local stocks. Return ONLY JSON: {"price": <number>, "currency": "USD" | "ARS"}`);
-                if (raw) {
-                    const d = JSON.parse(cleanJSON(raw));
-                    if(d.price && d.currency) {
-                        newPrices[h.ticker] = d;
+                // Yahoo Finance API (vía proxy público)
+                let fetchTicker = h.ticker.toUpperCase();
+                // MAGIA: Si compraste un CEDEAR/Acción en Pesos, buscamos en la Bolsa de Bs As (.BA)
+                if (h.originalCurrency === "ARS" && !fetchTicker.includes(".")) {
+                    fetchTicker += ".BA"; 
+                }
+                
+                const yfUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${fetchTicker}?interval=1d`;
+                const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yfUrl)}`;
+                
+                const r = await fetch(proxyUrl);
+                if(r.ok) {
+                    const proxyData = await r.json();
+                    const d = JSON.parse(proxyData.contents);
+                    const price = d.chart?.result?.[0]?.meta?.regularMarketPrice;
+                    const currency = d.chart?.result?.[0]?.meta?.currency; // Trae "ARS" o "USD" oficial
+                    
+                    if (price) {
+                        newPrices[h.ticker] = { price: price, currency: currency || h.originalCurrency };
                         updated++;
                     }
                 }
-            } catch(e) {}
+            } catch(e) { console.warn("YF err", e); }
         }
     }
     
-    // Renta fija no requiere API, se actualiza sola en el useMemo
     update({ marketPrices: newPrices });
     setRI(null);
-    notify(`Portfolio actualizado (${updated} cotizaciones nuevas) ✓`);
+    notify(`Mercado sincronizado: ${updated}/${varAssets.length} activos ✓`);
   };
 
   const handleAutoTNA = async () => {
@@ -446,7 +462,6 @@ function Investments({state,update,notify}){
     let qty = px(hForm.quantity);
     let rawInv = px(hForm.totalInvested);
 
-    // Guardar TODO en ARS absolutos para la base de datos
     const rateToUse = hForm.currency === "USD" ? usdRate : 1;
     let invArs = rawInv * rateToUse;
     if(isVar && !invArs) invArs = qty * (rawBuyPrice * rateToUse);
@@ -457,9 +472,9 @@ function Investments({state,update,notify}){
         ticker: hForm.ticker.toUpperCase(),
         name: hForm.name,
         quantity: qty, 
-        originalBuyPrice: rawBuyPrice, // Guardamos cómo lo escribió para mostrarlo lindo
+        originalBuyPrice: rawBuyPrice,
         originalCurrency: hForm.currency,
-        totalInvestedArs: invArs, // La verdad absoluta matemática
+        totalInvestedArs: invArs, 
         rate: px(hForm.rate), 
         buyDate: hForm.buyDate,
         maturityDate: hForm.maturityDate,
