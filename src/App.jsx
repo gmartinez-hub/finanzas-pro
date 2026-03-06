@@ -45,38 +45,6 @@ async function compareInstruments(monthly,months,usdRate){const raw=await ai(`Co
 
 async function autoCat(desc){const raw=await ai(`Transaction: "${desc}". Return ONLY: {"category":"<one of: ${CATS.join(", ")}>","type":"income|expense"} Rules: sueldo/salary/acreditacion→income type; netflix/spotify→🧛 Suscripciones; rappi/pedidosya→🍔 Comida y delivery; gym→💪 Deporte; coto/carrefour/dia→🛒 Supermercado; cuota/credito→💳 Cuotas. IMPORTANT: category MUST include the emoji prefix exactly as listed.`);if(!raw)return{category:"❓ Otros",type:"expense"};try{const p=JSON.parse(cleanJSON(raw));return{category:matchCat(p.category),type:p.type||"expense"};}catch{return{category:"❓ Otros",type:"expense"};}}
 
-async function genWeeklyInsight(transactions, usdRate, portfolioValueArs = 0, portfolioInvestedArs = 0, goals = []) {
-  const now = Date.now();
-  const w1 = transactions.filter(t => (now - new Date(t.date)) <= 7 * 864e5);
-  const expenses = w1.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
-  const pPnL = portfolioValueArs - portfolioInvestedArs;
-  
-  // Resumen de metas para que la IA entienda el contexto
-  const goalSummary = goals.map(g => {
-      const rem = g.target - g.saved;
-      return `${g.name} (Faltan: ${fARS(rem)})`;
-  }).join(", ");
-
-  const raw = await ai(`
-    Contexto Financiero Argentina:
-    - Gastos de la semana: ${fARS(expenses)}
-    - Valor actual Portfolio: ${fARS(portfolioValueArs)}
-    - Ganancia neta inversiones: ${fARS(pPnL)}
-    - Metas del usuario: ${goalSummary}
-    - Tipo de cambio (USD): ${usdRate}
-    
-    Generá un reporte MOTIVADOR en JSON con 4 tarjetas. 
-    REGLA: Si las inversiones subieron, vinculalo con las metas (ej: "Tu ganancia en BTC cubrió el 10% de tu meta Mudanza").
-    Devolvé ÚNICAMENTE este JSON:
-    {"cards": [{"type":"METAS|GASTOS|INVERSIONES|CONSEJO", "icon":"emoji", "title":"string", "text":"string", "highlight":"string", "color":"hex"}]}
-  `, "Coach Financiero Pro. Español. Solo JSON.");
-  
-  try { 
-    return JSON.parse(cleanJSON(raw)); 
-  } catch { 
-    return null; 
-  }
-}
 function parseCSV(txt){const lines=txt.trim().split("\n").filter(l=>l.trim());if(lines.length<2)return[];const sep=lines[0].includes(";")?";":lines[0].includes("\t")?"\t":",";const hdrs=lines[0].split(sep).map(h=>h.trim().replace(/"/g,"").toLowerCase());const out=[];for(let i=1;i<lines.length;i++){const cols=lines[i].split(sep).map(c=>c.trim().replace(/^"|"$/g,""));const obj={};hdrs.forEach((h,idx)=>obj[h]=cols[idx]||"");const dK=hdrs.find(h=>/^(fecha|date|dia)$/i.test(h)||/fecha|date/.test(h));const dscK=hdrs.find(h=>/desc|concepto|detalle|comer|estab|ref/.test(h));const debK=hdrs.find(h=>/debito|debe|debit|cargo|egreso/.test(h));const creK=hdrs.find(h=>/credito|haber|credit|abono/.test(h));const aK=hdrs.find(h=>/import|monto|amount|total/.test(h));let amount=0,type="expense";if(debK&&creK){const deb=px(obj[debK]),cre=px(obj[creK]);if(cre>0){amount=cre;type="income";}else if(deb>0){amount=deb;type="expense";}else continue;}else if(aK){const raw2=String(obj[aK]).trim();amount=Math.abs(px(obj[aK]));type=raw2.startsWith("-")||px(obj[aK])<0?"expense":"income";}else{const numVal=Object.values(obj).map(v=>px(v)).find(v=>v>0);if(!numVal)continue;amount=numVal;type="expense";}if(amount<=0)continue;out.push({id:`csv_${uid()}_${i}`,currency:"ARS",date:obj[dK]||getCUR()+"-01",description:obj[dscK]||`TX ${i}`,amount,type,category:"❓ Otros"});}return out;}
 
 const getSalaryTotal=(salaries,month)=>{const m=month||getCUR();const s=salaries?.find(s=>s.month===m);return s?(s.base+(s.extras||[]).reduce((a,e)=>a+e.amt,0)):0;};
@@ -191,99 +159,97 @@ function Onboarding({update,notify}){
   <div style={{display:"flex",gap:10,marginTop:28}}>{step>0&&<button className="btn bg" style={{flex:.4,justifyContent:"center"}} onClick={()=>setStep(s=>s-1)}>← Atrás</button>}<button className="btn bl" style={{flex:1,justifyContent:"center"}} disabled={!canNext} onClick={step<5?()=>setStep(s=>s+1):finish}>{step===5?"Empezar →":"Continuar →"}</button></div>{step===5&&<button onClick={finish} style={{display:"block",margin:"12px auto 0",background:"none",border:"none",color:T.muted,fontSize:12,cursor:"pointer",textDecoration:"underline"}}>Saltear meta</button>}</div></div>);
 }
 
+// 1. EL CEREBRO: Generador de Cards Inteligentes
+async function genWeeklyInsight(transactions, usdRate, portfolioValueArs = 0, portfolioInvestedArs = 0, goals = []) {
+  const now = Date.now();
+  const w1 = transactions.filter(t => (now - new Date(t.date)) <= 7 * 864e5);
+  const expenses = w1.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+  const pPnL = portfolioValueArs - portfolioInvestedArs;
+  const goalSummary = goals.map(g => `${g.name} (Faltan: ${fARS(g.target - g.saved)})`).join(", ");
+
+  const raw = await ai(`
+    Analizá estos datos financieros: Gastos: ${fARS(expenses)}, Portfolio: ${fARS(portfolioValueArs)} (P&L: ${fARS(pPnL)}), Metas: ${goalSummary}.
+    Generá un reporte motivador en JSON con 4 cards. Cruza inversiones con metas.
+    Devolvé ÚNICAMENTE JSON: {"cards": [{"type":"METAS|GASTOS|INVERSIONES|CONSEJO", "icon":"emoji", "title":"título", "text":"descripción", "highlight":"dato", "color":"hex"}]}
+  `, "Coach Financiero. Solo JSON.");
+  
+  try { return JSON.parse(cleanJSON(raw)); } catch { return null; }
+}
+
+// 2. EL DASHBOARD: La interfaz con las Cards
 function Dashboard({state,update,notify,setView}){
-  const {transactions,goals,budgets,weeklyInsight,weeklyInsightDate,salaries,marketPrices={},holdings=[],usdRate}=state;
-  const {fmt,toDsp}=useDsp(state);
+  const {transactions,goals,salaries,marketPrices={},holdings=[],usdRate,weeklyInsight}=state;
+  const {fmt}=useDsp(state);
   const [loadingIns,setLI]=useState(false);
   const isMobile=useIsMobile();
-  const NOW=getNow();const CUR=getCUR();
-  const cur=transactions.filter(t=>gMonth(t.date)===CUR);
-  const prevM=(()=>{const d=new Date(NOW.getFullYear(),NOW.getMonth()-1,1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;})();
-  const prev=transactions.filter(t=>gMonth(t.date)===prevM);
-  const inc=cur.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
-  const exp=cur.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
-  const pExp=prev.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
-  const delta=pExp>0?((exp-pExp)/pExp*100).toFixed(1):null;
-  const salary=getSalaryTotal(salaries);
-  const {score,items}=healthScore(transactions,goals,holdings);
-  const sc=score>=70?T.lime:score>=45?T.amber:T.red;
-  const {disponible,perGoal}=goalPlan(goals,salaries,transactions,holdings,marketPrices,usdRate);
-  const alerts=Object.entries(budgets||{}).filter(([cat,lim])=>cur.filter(t=>t.category===cat&&t.type==="expense").reduce((s,t)=>s+t.amount,0)>lim*0.8);
-  const trend=Array.from({length:6},(_,i)=>{const d=new Date(NOW.getFullYear(),NOW.getMonth()-5+i,1);const m=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;const txs=transactions.filter(t=>gMonth(t.date)===m);return{name:MOS[d.getMonth()],Gastos:toDsp(txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0)),Ingresos:toDsp(txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0))};});
-  const cm={};cur.filter(t=>t.type==="expense").forEach(t=>{cm[t.category]=(cm[t.category]||0)+t.amount;});
-  const catData=Object.entries(cm).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([k,v],i)=>({name:k.split(" ").slice(1).join(" "),value:toDsp(v),color:CPAL[i]}));
-  const recent=[...transactions].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,6);
   
-  let portfolioValue=0; let portfolioInvested=0;
-  holdings.forEach(h=>{ const {invArs,curArs}=calcHoldingValueArs(h,marketPrices,usdRate); portfolioInvested+=invArs; portfolioValue+=curArs; });
-  const portfolioPnL=portfolioValue-portfolioInvested;
-  
-  const kpis=[{l:"Sueldo del mes",v:salary>0?fmt(salary):"-",c:T.lime,i:"💵",sub:salary>0?"Registrado":"Registrá tu sueldo"},{l:"Ingresos",v:fmt(inc),c:T.teal,i:"📥",sub:"Total mensual"},{l:"Gastos",v:fmt(exp),c:T.red,i:"💸",sub:delta?`${delta>0?"+":""}${delta}% vs mes ant.`:"-"},{l:"Balance libre",v:fmt(inc-exp),c:(inc-exp)>=0?T.lime:T.red,i:"⚖️",sub:(inc-exp)>=0?"✓ Superávit":"⚠ Déficit"},{l:"Portfolio Real",v:fmt(portfolioValue),c:portfolioPnL>=0?T.blue:T.amber,i:"📊",sub:portfolioValue>0?`P&L: ${portfolioPnL>=0?"+":""}${fmt(portfolioPnL)}`:"Sin inversiones"}];
+  // Cálculo de totales reales usando el motor maestro
+  let pValue=0; let pInv=0;
+  holdings.forEach(h=>{ 
+    const {invArs,curArs}=calcHoldingValueArs(h,marketPrices,usdRate); 
+    pInv+=invArs; pValue+=curArs; 
+  });
+  const pPnL = pValue - pInv;
+
   const refreshInsight=async()=>{
-    if(transactions.length<3)return notify("Necesitás más transacciones","info");
     setLI(true);
-    // Acá le pasamos a la IA los números que el Motor Maestro acaba de calcular en ARS puros
-{/* SECCIÓN DE RESUMEN INTELIGENTE POR TARJETAS */}
-  <div style={{ marginBottom: 26 }}>
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-      <h3 style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-0.3px" }}>Análisis Semanal con IA</h3>
-      <button className="btn bg bsm" onClick={refreshInsight} disabled={loadingIns}>
-        {loadingIns ? <Dots /> : <><ic.Bolt /> {weeklyInsight ? "Refrescar" : "Generar Reporte"}</>}
-      </button>
+    const ins = await genWeeklyInsight(transactions, usdRate, pValue, pInv, goals);
+    if(ins) update({weeklyInsight:ins, weeklyInsightDate:todayISO()});
+    else notify("Error al generar reporte", "err");
+    setLI(false);
+  };
+
+  return(<div className="up">
+    <PH title="Dashboard" sub="Análisis de patrimonio" />
+    
+    {/* KPIs PRINCIPALES */}
+    <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}>
+      {[{l:"Portfolio",v:fmt(pValue),c:pPnL>=0?T.lime:T.red,i:"📊"},
+        {l:"Ganancia",v:fmt(pPnL),c:pPnL>=0?T.teal:T.red,i:"📈"},
+        {l:"Balance Mes",v:fmt(getSalaryTotal(salaries) - transactions.filter(t=>gMonth(t.date)===getCUR()&&t.type==="expense").reduce((s,t)=>s+t.amount,0)),c:T.lime,i:"⚖️"},
+        {l:"Dólar MEP",v:`$${usdRate}`,c:T.blue,i:"🇺🇸"}].map((k,i)=>(
+        <div key={i} className="card csm">
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:T.muted}}>{k.l} <span>{k.i}</span></div>
+          <div className="mono" style={{fontSize:18,fontWeight:600,color:k.c,marginTop:5}}>{k.v}</div>
+        </div>
+      ))}
     </div>
 
-    {weeklyInsight?.cards ? (
-      <div style={{ 
-        display: "grid", 
-        gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", 
-        gap: 12 
-      }}>
-        {weeklyInsight.cards.map((card, i) => (
-          <div key={i} className="card up" style={{ 
-            padding: "18px", 
-            borderLeft: `5px solid ${card.color}`,
-            background: `linear-gradient(135deg, ${T.surface}, ${T.bg} 80%)`,
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            boxShadow: "0 4px 20px rgba(0,0,0,0.15)"
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 22 }}>{card.icon}</span>
-              <span style={{ fontSize: 10, fontWeight: 900, color: T.muted, textTransform: "uppercase", letterSpacing: "1px" }}>
-                {card.type}
-              </span>
-            </div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: T.white }}>{card.title}</div>
-            <div style={{ fontSize: 12, color: T.mid, lineHeight: 1.6 }}>{card.text}</div>
-            
-            {card.highlight && (
-              <div style={{ 
-                marginTop: 10, 
-                padding: "5px 12px", 
-                background: `${card.color}15`, 
-                borderRadius: "8px",
-                fontSize: 11, 
-                fontWeight: 800, 
-                color: card.color,
-                alignSelf: "flex-start",
-                border: `1px solid ${card.color}25`
-              }}>
-                {card.highlight}
+    {/* SECCIÓN DE RESUMEN INTELIGENTE (Cards filtradas por IA) */}
+    <div style={{ marginBottom: 26 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+        <h3 style={{ fontSize: 15, fontWeight: 800 }}>Análisis Semanal con IA</h3>
+        <button className="btn bg bsm" onClick={refreshInsight} disabled={loadingIns}>
+          {loadingIns ? <Dots /> : <><ic.Bolt /> {weeklyInsight ? "Refrescar" : "Generar Reporte"}</>}
+        </button>
+      </div>
+
+      {weeklyInsight?.cards ? (
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
+          {weeklyInsight.cards.map((card, i) => (
+            <div key={i} className="card up" style={{ 
+              padding: "18px", borderLeft: `5px solid ${card.color}`, 
+              background: `linear-gradient(135deg, ${T.surface}, ${T.bg} 80%)`,
+              display: "flex", flexDirection: "column", gap: 8 
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 22 }}>{card.icon}</span>
+                <span style={{ fontSize: 10, fontWeight: 900, color: T.muted, textTransform: "uppercase" }}>{card.type}</span>
               </div>
-            )}
-          </div>
-        ))}
-      </div>
-    ) : (
-      <div className="card" style={{ textAlign: "center", padding: "45px 20px", borderStyle: "dashed", borderColor: T.border, borderRadius: 16 }}>
-        <div style={{ fontSize: 32, marginBottom: 12 }}>🧘‍♂️</div>
-        <div style={{ fontSize: 14, color: T.muted, maxWidth: "280px", margin: "0 auto", lineHeight: 1.5 }}>
-          Generá tu reporte para que la IA analice tus inversiones y el progreso de tus metas.
+              <div style={{ fontSize: 15, fontWeight: 700, color: T.white }}>{card.title}</div>
+              <div style={{ fontSize: 12, color: T.mid, lineHeight: 1.6 }}>{card.text}</div>
+              {card.highlight && <div style={{ marginTop: 10, padding: "5px 12px", background: `${card.color}15`, borderRadius: "8px", fontSize: 11, fontWeight: 800, color: card.color, alignSelf: "flex-start", border: `1px solid ${card.color}25` }}>{card.highlight}</div>}
+            </div>
+          ))}
         </div>
-      </div>
-    )}
-  </div>
+      ) : (
+        <div className="card" style={{ textAlign: "center", padding: "45px 20px", borderStyle: "dashed", borderColor: T.border }}>
+          <div style={{ fontSize: 14, color: T.muted }}>Generá tu reporte para ver cómo tus inversiones impulsan tus metas.</div>
+        </div>
+      )}
+    </div>
+  </div>);
+}
 function SalaryModule({state,update,notify}){
   const {salaries=[],transactions}=state;
   const {fmt}=useDsp(state);
