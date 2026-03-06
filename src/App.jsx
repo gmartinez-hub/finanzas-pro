@@ -328,25 +328,24 @@ function Investments({state,update,notify}){
     { id: "OTRO", name: "Otro / Personalizado", tna: "" }
   ];
   
-  // ==========================================
-  // MOTOR MATEMÁTICO EN INVESTMENTS
+// ==========================================
+  // MOTOR MATEMÁTICO EN INVESTMENTS (100% Pesos)
   // ==========================================
   const portfolioData = useMemo(() => {
-    let gInv = 0, gCur = 0;
+    let gInvArs = 0, gCurArs = 0;
     const items = holdings.map(h => {
       const { invArs, curArs } = calcHoldingValueArs(h, marketPrices, usdRate);
-      const targetInv = displayCurrency === "USD" ? invArs / usdRate : invArs;
-      const targetCur = displayCurrency === "USD" ? curArs / usdRate : curArs;
       
-      gInv += targetInv;
-      gCur += targetCur;
+      gInvArs += invArs;
+      gCurArs += curArs;
       
-      const pnl = targetCur - targetInv;
-      const pnlPct = targetInv ? (pnl / targetInv) * 100 : 0;
-      return { ...h, targetInv, targetCur, pnl, pnlPct };
+      const pnlArs = curArs - invArs;
+      const pnlPct = invArs ? (pnlArs / invArs) * 100 : 0;
+      
+      return { ...h, invArs, curArs, pnlArs, pnlPct };
     });
-    return { items, gInv, gCur, gPnl: gCur - gInv };
-  }, [holdings, marketPrices, displayCurrency, usdRate]);
+    return { items, gInvArs, gCurArs, gPnlArs: gCurArs - gInvArs };
+  }, [holdings, marketPrices, usdRate]);
 
   // ==========================================
   // ACTUALIZACIÓN GLOBAL (Solo Cryptos automáticas)
@@ -454,8 +453,7 @@ function Investments({state,update,notify}){
   <div className="tabbar" style={{marginBottom:18}}>{[{id:"portfolio",l:`📊 Portfolio (${holdings.length})`},{id:"scanner",l:"🤖 Scanner IA"},{id:"manual",l:"🔎 Buscar Activo"},{id:"comparador",l:"⚖️ Comparador"},{id:"saved",l:`📁 Guardados`}].map(t=>(<button key={t.id} className={`tab${tab===t.id?" on":""}`} onClick={()=>setTab(t.id)}>{t.l}</button>))}</div>
   
   {/* TAB PORTFOLIO */}
-  {tab==="portfolio"&&<div>
-    <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>{[{l:"Invertido",v:fmt(portfolioData.gInv),c:T.blue,i:"💰"},{l:"Valor Actual",v:fmt(portfolioData.gCur),c:T.lime,i:"📈"},{l:"P&L Total",v:`${portfolioData.gPnl>=0?"+":""}${fmt(portfolioData.gPnl)}`,c:portfolioData.gPnl>=0?T.teal:T.red,i:"✅"}].map((k,i)=><div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase"}}>{k.l}</span><span>{k.i}</span></div><div className="mono" style={{fontSize:16,fontWeight:600,color:k.c}}>{k.v}</div></div>)}</div>
+  {tab==="portfolio"&&<div><div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>{[{l:"Invertido",v:fmt(portfolioData.gInvArs),c:T.blue,i:"💰"},{l:"Valor Actual",v:fmt(portfolioData.gCurArs),c:T.lime,i:"📈"},{l:"P&L Total",v:`${portfolioData.gPnlArs>=0?"+":""}${fmt(portfolioData.gPnlArs)}`,c:portfolioData.gPnlArs>=0?T.teal:T.red,i:"✅"}].map((k,i)=><div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase"}}>{k.l}</span><span>{k.i}</span></div><div className="mono" style={{fontSize:16,fontWeight:600,color:k.c}}>{k.v}</div></div>)}</div>
     <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
         <button className="btn bl" onClick={()=>setSHF(true)}><ic.Plus/> Agregar inversión</button>
         <button className="btn bg" onClick={refreshPortfolio} disabled={refreshingId==="all"}>{refreshingId==="all"?<><Dots/> Sincronizando mercado...</>:<><ic.Refresh/> Sincronizar Activos</>}</button>
@@ -506,10 +504,10 @@ function Investments({state,update,notify}){
         <div style={{display:"flex",gap:6}}><button className="btn bg bsm" style={{color:T.lime}} onClick={()=>refreshSingle(h)} disabled={refreshingId===h.id}>{refreshingId===h.id?<Dots/>:"✎ Precio"}</button><button className="btn bd bsm" onClick={()=>delHolding(h.id)}><ic.Trash/></button></div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,background:T.raised,padding:"10px",borderRadius:8,marginTop:8}}>
-        <div><div style={{fontSize:9,color:T.muted}}>Inicial</div><div className="mono" style={{fontSize:11}}>{fmt(h.targetInv)}</div></div>
-        <div><div style={{fontSize:9,color:T.muted}}>Actual</div><div className="mono" style={{fontSize:11,color:T.white}}>{fmt(h.targetCur)}</div></div>
-        <div><div style={{fontSize:9,color:T.muted}}>Ganancia</div><div className="mono" style={{fontSize:11,color:h.pnl>=0?T.teal:T.red}}>{h.pnl>=0?"+":""}{fmt(h.pnl)}</div></div>
-        <div><div style={{fontSize:9,color:T.muted}}>Rend %</div><div className="mono" style={{fontSize:11,color:h.pnl>=0?T.teal:T.red}}>{h.pnl>=0?"+":""}{h.pnlPct.toFixed(1)}%</div></div>
+        <div><div style={{fontSize:9,color:T.muted}}>Inicial</div><div className="mono" style={{fontSize:11}}>{fmt(h.invArs)}</div></div>
+        <div><div style={{fontSize:9,color:T.muted}}>Actual</div><div className="mono" style={{fontSize:11,color:T.white}}>{fmt(h.curArs)}</div></div>
+        <div><div style={{fontSize:9,color:T.muted}}>Ganancia</div><div className="mono" style={{fontSize:11,color:h.pnlArs>=0?T.teal:T.red}}>{h.pnlArs>=0?"+":""}{fmt(h.pnlArs)}</div></div>
+        <div><div style={{fontSize:9,color:T.muted}}>Rend %</div><div className="mono" style={{fontSize:11,color:h.pnlArs>=0?T.teal:T.red}}>{h.pnlArs>=0?"+":""}{h.pnlPct.toFixed(1)}%</div></div>
       </div>
       <div style={{marginTop: 10, paddingTop: 10, borderTop: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 6}}>
          <span style={{fontSize:10, color:T.muted}}>Vincular a meta:</span>
