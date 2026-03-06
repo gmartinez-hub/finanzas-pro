@@ -279,9 +279,6 @@ function Analytics({state}){
   const {fmt,toDsp}=useDsp(state);
   const NOW=getNow();
   const [range,setRange]=useState(6);
-  const [comparing,setComp]=useState(false);
-  const [result,setResult]=useState(null);
-  const [cf,setCF]=useState({monthly:"200000",months:"12"});
   const months=useMemo(()=>Array.from({length:range},(_,i)=>{const d=new Date(NOW.getFullYear(),NOW.getMonth()-range+1+i,1);const m=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;const txs=transactions.filter(t=>gMonth(t.date)===m);const e=txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);const inc=txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);return{name:MOS[d.getMonth()],Gastos:toDsp(e),Ingresos:toDsp(inc),Ahorro:toDsp(txs.filter(t=>t.category==="💰 Ahorro").reduce((s,t)=>s+t.amount,0)),balance:toDsp(inc-e)};}),[transactions,range,toDsp]);
   const cm={};transactions.filter(t=>t.type==="expense").forEach(t=>{cm[t.category]=(cm[t.category]||0)+t.amount;});
   const ctot=Object.values(cm).reduce((s,v)=>s+v,0);
@@ -290,17 +287,24 @@ function Analytics({state}){
   const totExp=transactions.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
   const savR=totInc>0?clamp(((totInc-totExp)/totInc)*100,-100,100).toFixed(1):"0";
   const savN=parseFloat(savR);
-  const rc={none:T.teal,low:T.lime,very_low:T.teal,medium:T.amber,medium_high:T.amber,high:T.red};
+  
   const holdings=state.holdings||[];
-  const portfolioVal=holdings.reduce((s,h)=>s+(h.currentValue||h.totalInvested||0),0);
+  const portfolioVal=holdings.reduce((s,h)=>{
+      let cv = h.currentValue||h.totalInvested||0;
+      if(h.currency==="USD" && displayCurrency==="ARS") cv*=state.usdRate;
+      if(h.currency==="ARS" && displayCurrency==="USD") cv/=state.usdRate;
+      return s+cv;
+  },0);
+  
   const totalSavings=transactions.filter(t=>t.category==="💰 Ahorro").reduce((s,t)=>s+t.amount,0);
-  const patrimonio=portfolioVal+totalSavings;
+  const patrimonio=portfolioVal+(displayCurrency==="USD"?totalSavings/state.usdRate:totalSavings);
+  
   return(<div className="up"><PH title="Analíticas" sub="Histórico · Proyecciones · Patrimonio" right={<select className="inp" style={{width:"auto"}} value={range} onChange={e=>setRange(+e.target.value)}><option value={3}>3 meses</option><option value={6}>6 meses</option><option value={12}>12 meses</option></select>}/>
-  {(portfolioVal>0||totalSavings>0)&&<div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>{[{l:"Portfolio",v:fmt(portfolioVal),c:T.blue,i:"📊"},{l:"Ahorros",v:fmt(totalSavings),c:T.teal,i:"💰"},{l:"Patrimonio total",v:fmt(patrimonio),c:T.lime,i:"🏛️"}].map((k,i)=><div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".5px"}}>{k.l}</span><span>{k.i}</span></div><div className="mono" title={k.v} style={{fontSize:16,fontWeight:600,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div></div>)}</div>}
-  <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>{[{l:"Total ingresos",v:fmt(totInc),c:T.teal},{l:"Total gastos",v:fmt(totExp),c:T.red},{l:"Tasa de ahorro",v:`${savR}%`,c:savN>=20?T.lime:savN>=10?T.amber:T.red,sub:savN>=20?"✓ Excelente":savN>=10?"Regular":savN<0?"⚠ Gastás más de lo que ingresás":"⚠ Mejorar"}].map((k,i)=>(<div key={i} className="card csm"><div style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".6px",marginBottom:8}}>{k.l}</div><div className="mono" title={k.v} style={{fontSize:22,fontWeight:500,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div>{k.sub&&<div style={{fontSize:11,color:T.muted,marginTop:3}}>{k.sub}</div>}</div>))}</div>
+  {(portfolioVal>0||totalSavings>0)&&<div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>{[{l:"Portfolio",v:fmt(displayCurrency==="USD"?portfolioVal*state.usdRate:portfolioVal),c:T.blue,i:"📊"},{l:"Ahorros",v:fmt(displayCurrency==="USD"?totalSavings*state.usdRate:totalSavings),c:T.teal,i:"💰"},{l:"Patrimonio total",v:fmt(displayCurrency==="USD"?patrimonio*state.usdRate:patrimonio),c:T.lime,i:"🏛️"}].map((k,i)=><div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".5px"}}>{k.l}</span><span>{k.i}</span></div><div className="mono" title={k.v} style={{fontSize:16,fontWeight:600,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div></div>)}</div>}
+  <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>{[{l:"Total ingresos",v:fmt(displayCurrency==="USD"?totInc*state.usdRate:totInc),c:T.teal},{l:"Total gastos",v:fmt(displayCurrency==="USD"?totExp*state.usdRate:totExp),c:T.red},{l:"Tasa de ahorro",v:`${savR}%`,c:savN>=20?T.lime:savN>=10?T.amber:T.red,sub:savN>=20?"✓ Excelente":savN>=10?"Regular":savN<0?"⚠ Gastás más de lo que ingresás":"⚠ Mejorar"}].map((k,i)=>(<div key={i} className="card csm"><div style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".6px",marginBottom:8}}>{k.l}</div><div className="mono" title={k.v} style={{fontSize:22,fontWeight:500,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div>{k.sub&&<div style={{fontSize:11,color:T.muted,marginTop:3}}>{k.sub}</div>}</div>))}</div>
   <div className="card" style={{marginBottom:14}}><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Comparativa mensual ({displayCurrency})</div><div style={{width:"100%",minWidth:0,overflow:"hidden"}}><ResponsiveContainer width="100%" height={210}><BarChart data={months} barGap={3}><CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" tick={{fill:T.muted,fontSize:10}} axisLine={false} tickLine={false}/><YAxis tick={{fill:T.muted,fontSize:9}} axisLine={false} tickLine={false} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:v}/><Tooltip content={<CTip dc={displayCurrency}/>}/><Legend wrapperStyle={{fontSize:11,color:T.muted}}/><Bar dataKey="Ingresos" fill={T.teal} radius={[4,4,0,0]} opacity={.9}/><Bar dataKey="Gastos" fill={T.red} radius={[4,4,0,0]} opacity={.9}/><Bar dataKey="Ahorro" fill={T.blue} radius={[4,4,0,0]} opacity={.9}/></BarChart></ResponsiveContainer></div></div>
   <div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}><div className="card"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Gastos por categoría</div>{cats.length===0?<div style={{color:T.muted,textAlign:"center",padding:20,fontSize:13}}>Sin datos</div>:cats.slice(0,8).map((c,i)=>(<div key={i} style={{marginBottom:9}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:12,color:T.mid}}>{c.c}</span><span className="mono" style={{fontSize:11,color:T.muted}}>{c.pct}%</span></div><div className="prog" style={{height:4}}><div style={{height:"100%",borderRadius:2,background:c.col,width:`${clamp(c.pct,0,100)}%`,transition:"width .6s"}}/></div></div>))}</div><div className="card"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Balance mensual</div><div style={{width:"100%",minWidth:0,overflow:"hidden"}}><ResponsiveContainer width="100%" height={185}><LineChart data={months}><CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" tick={{fill:T.muted,fontSize:10}} axisLine={false} tickLine={false}/><YAxis tick={{fill:T.muted,fontSize:9}} axisLine={false} tickLine={false} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:v}/><Tooltip content={<CTip dc={displayCurrency}/>}/><Line type="monotone" dataKey="balance" stroke={T.lime} strokeWidth={2.5} dot={{fill:T.lime,r:3}} activeDot={{r:5,fill:T.lime,stroke:T.bg}}/></LineChart></ResponsiveContainer></div></div></div>
-  <div className="card"><div style={{marginBottom:14}}><div style={{fontSize:14,fontWeight:700}}>🏦 Comparador de instrumentos</div><div style={{fontSize:11,color:T.muted,marginTop:2}}>FCI, plazo fijo, bonos CER, CEDEARs — contexto argentino 2025</div></div><div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}><div style={{flex:1,minWidth:130}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Ahorro mensual (ARS)</label><input className="inp" value={cf.monthly} onChange={e=>setCF(f=>({...f,monthly:e.target.value}))}/></div><div style={{flex:1,minWidth:90}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Plazo (meses)</label><input className="inp" value={cf.months} onChange={e=>setCF(f=>({...f,months:e.target.value}))}/></div><div style={{display:"flex",alignItems:"flex-end"}}><button className="btn bl" onClick={async()=>{setComp(true);const r=await compareInstruments(px(cf.monthly),px(cf.months),state.usdRate);setResult(r);setComp(false);}} disabled={comparing}>{comparing?<Dots/>:<><ic.Refresh/> Analizar</>}</button></div></div>{result?<div><div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:12}}>{result.instruments?.map((inst,i)=>(<div key={i} style={{background:T.raised,borderRadius:12,padding:"12px 16px",border:`1px solid ${T.border}`,display:"flex",flexWrap:"wrap",gap:10,alignItems:"center"}}><div style={{flex:"2 1 140px"}}><div style={{fontSize:12,fontWeight:600}}>{inst.name}</div><div style={{fontSize:10,color:T.muted,marginTop:2}}>{inst.pros}</div></div><div style={{flex:"1 1 60px"}}><div style={{fontSize:10,color:T.muted,marginBottom:2}}>Ret. anual</div><div className="mono" style={{fontSize:13,color:T.lime}}>{inst.annualReturn?.toFixed(1)}%</div></div><div style={{flex:"1 1 60px"}}><div style={{fontSize:10,color:T.muted,marginBottom:2}}>Final USD</div><div className="mono" style={{fontSize:13,color:T.teal}}>{fUSD(inst.finalUSD||0)}</div></div><div style={{flex:"1 1 60px"}}><div style={{fontSize:10,color:T.muted,marginBottom:2}}>Riesgo</div><span style={{fontSize:11,padding:"2px 8px",borderRadius:99,background:`${rc[inst.risk]||T.mid}1A`,color:rc[inst.risk]||T.mid}}>{(inst.risk||"").replace(/_/g," ")}</span></div><div style={{flex:"1.5 1 100px",fontSize:10,color:T.muted}}>{inst.cons}</div></div>))}</div>{result.recommendation&&<div style={{background:"rgba(200,255,87,.06)",border:`1px solid rgba(200,255,87,.2)`,borderRadius:10,padding:"12px 16px"}}><div style={{fontSize:11,color:T.lime,fontWeight:600,marginBottom:4}}>💡 Recomendación</div><div style={{fontSize:12,color:T.mid}}>{result.recommendation}</div><div style={{fontSize:10,color:T.muted,marginTop:6}}>{result.disclaimer}</div></div>}</div>:<div style={{textAlign:"center",padding:"20px 0",color:T.muted,fontSize:13}}>Ingresá monto y plazo para comparar instrumentos</div>}</div></div>);
+  </div>);
 }
 
 function Investments({state,update,notify}){
@@ -320,6 +324,12 @@ function Investments({state,update,notify}){
   const [showHForm,setSHF]=useState(false);
   const [hForm,setHF]=useState({type:"accion",ticker:"",name:"",quantity:"",buyPrice:"",totalInvested:"",currency:"ARS",buyDate:todayISO(),maturityDate:"",rate:"", goalId:""});
   
+  // Estados del Comparador (Migrados desde Analytics)
+  const [comparing,setComp]=useState(false);
+  const [compResult,setCompResult]=useState(null);
+  const [cf,setCF]=useState({monthly:"200000",months:"12"});
+  const rc={none:T.teal,low:T.lime,very_low:T.teal,medium:T.amber,medium_high:T.amber,high:T.red};
+
   const [refreshingId,setRI]=useState(null);
   const [loadingTNA,setLoadingTNA]=useState(false); 
   
@@ -327,14 +337,14 @@ function Investments({state,update,notify}){
   const filteredHoldings=hFilter==="all"?holdings:holdings.filter(h=>h.type===hFilter);
   const holdingTypes=[...new Set(holdings.map(h=>h.type))];
   
-  // Cálculo de totales adaptado a la moneda global elegida (ARS o USD)
+  // Cálculo de totales adaptado a la moneda global elegida
   let globalInvested=0;
   let globalCurrent=0;
   holdings.forEach(h=>{
       let inv = h.totalInvested||0;
       let cur = h.currentValue||h.totalInvested||0;
-      // Compatibilidad si tenías guardados viejos con bug de USD
-      if(h.currency==="USD" && !h.originalCurrency){ inv*=usdRate; cur*=usdRate; }
+      if(h.currency==="USD" && displayCurrency==="ARS"){ inv*=usdRate; cur*=usdRate; }
+      else if(h.currency==="ARS" && displayCurrency==="USD"){ inv/=usdRate; cur/=usdRate; }
       globalInvested+=inv;
       globalCurrent+=cur;
   });
@@ -358,32 +368,11 @@ function Investments({state,update,notify}){
     if(isVar && (!hForm.ticker || !hForm.quantity || !hForm.buyPrice)) return notify("Ticker, cantidad y precio son obligatorios", "err");
     if(isFix && (!hForm.name || !hForm.totalInvested || !hForm.rate || !hForm.buyDate)) return notify("Nombre, monto invertido, TNA y fecha son obligatorios", "err");
     
-    let rawBuyPrice = px(hForm.buyPrice);
-    let rawInv = px(hForm.totalInvested);
-    let qty = px(hForm.quantity);
+    let inv = px(hForm.totalInvested);
+    if(isVar && !inv) inv = px(hForm.quantity) * px(hForm.buyPrice);
 
-    // NORMALIZACIÓN ESTRICTA A PESOS PARA EVITAR BUGS DE DISPLAY
-    const isUSD = hForm.currency === "USD";
-    const rateToUse = isUSD ? usdRate : 1;
-    
-    let buyPriceArs = rawBuyPrice * rateToUse;
-    let invArs = rawInv * rateToUse;
-    if(isVar && !invArs) invArs = qty * buyPriceArs;
-
-    const h={
-        ...hForm, 
-        id:`h_${uid()}`, 
-        quantity:qty, 
-        buyPrice:buyPriceArs, 
-        totalInvested:invArs, 
-        rate:px(hForm.rate), 
-        currentValue:invArs, 
-        currentPrice:buyPriceArs, 
-        lastUpdated:todayISO(), 
-        goalId: hForm.goalId || null,
-        currency: "ARS", // Se fuerza a pesos para que el core funcione perfecto
-        originalCurrency: hForm.currency // Guardamos el original por si queremos mostrarlo
-    };
+    const h={...hForm, id:`h_${uid()}`, quantity:px(hForm.quantity), buyPrice:px(hForm.buyPrice), totalInvested:inv, rate:px(hForm.rate), currentValue:inv, currentPrice:px(hForm.buyPrice), lastUpdated:todayISO(), goalId: hForm.goalId || null};
+    if(isFix) h.currency = "ARS";
     
     update({holdings:[...holdings,h]});
     setSHF(false);
@@ -400,19 +389,15 @@ function Investments({state,update,notify}){
     if (isVar) {
       notify(`Consultando ${h.ticker||h.name}...`, "info");
       const query = h.type === "crypto" ? `${h.ticker} crypto` : h.ticker;
-      // IA devuelve el precio Y la moneda real del mercado
-      const raw = await ai(`Market price for: ${query}. Date: ${todayISO()}. Return ONLY valid JSON: {"price": number, "currency": "USD" | "ARS"}. Return USD for US stocks/crypto.`);
+      // PROMPT BLINDADO: Obliga a la IA a respetar la moneda en la que el usuario compró
+      const raw = await ai(`Current market price for: ${query}. Date: ${todayISO()}. IMPORTANT: Return the price strictly in ${h.currency}. If ARS, use the local Argentine market price (CEDEAR/BCBA). If USD, use the US market price. Return ONLY valid JSON: {"price": number}`);
       if (raw) {
         try {
           const d = JSON.parse(cleanJSON(raw));
           let cp = d.price || null;
-          let apiCur = d.currency || "USD";
           if (cp) {
-            let cpArs = cp;
-            if (apiCur === "USD") cpArs = cp * usdRate; // Convertimos de USD a ARS seguro
-            
-            const cvArs = h.quantity ? h.quantity * cpArs : h.totalInvested * (cpArs / (h.buyPrice || cpArs));
-            updatedHolding = { ...updatedHolding, currentPrice: cpArs, currentValue: Math.round(cvArs), lastUpdated: todayISO() };
+            const cv = h.quantity ? h.quantity * cp : h.totalInvested * (cp / (h.buyPrice || cp));
+            updatedHolding = { ...updatedHolding, currentPrice: cp, currentValue: Math.round(cv), lastUpdated: todayISO() };
             notify(`Cotización actualizada ✓`);
           }
         } catch { notify(`Error de red en ${h.ticker}`, "err"); }
@@ -433,9 +418,10 @@ function Investments({state,update,notify}){
   const analyze=async(t,n)=>{const ex=savedAnalyses.find(a=>a.ticker===t);if(ex){setSel(ex);return;}setLoad(true);setLE(null);const r=await analyzeStock(t,n||t);if(r){update({savedAnalyses:[r,...savedAnalyses.filter(a=>a.ticker!==r.ticker)]});setSel(r);}else{setLE(`Error al analizar ${t}`);}setLoad(false);};
   const saveFromScan=opp=>{const a={ticker:opp.ticker,company:opp.name,sector:"",signal:opp.signal,timeframe:opp.timeframe,upside:opp.upside,currentEstimate:opp.currentEstimate,peRatio:opp.peRatio,revenueGrowth:opp.revenueGrowth,moat:opp.moat,bullCase:opp.thesis,bearCase:opp.bearRisk,catalysts:opp.catalysts||[],risks:[opp.bearRisk],summary:opp.thesis,confidenceScore:opp.confidenceScore};update({savedAnalyses:[a,...savedAnalyses.filter(s=>s.ticker!==a.ticker)]});setJS(opp.ticker);setTimeout(()=>setJS(null),2500);notify(`${opp.ticker} guardado ✓`);};
 
-  return(<div className="up"><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:8}}><div><h1 style={{fontSize:24,fontWeight:800,letterSpacing:"-1px"}}>Inversiones</h1><div style={{fontSize:12,color:T.muted,marginTop:4}}>Perfil: <span style={{color:T.lime,fontWeight:600}}>{riskProfile?.risk||"no configurado"}</span></div></div></div>
-  <div className="tabbar" style={{marginBottom:18}}>{[{id:"portfolio",l:`📊 Portfolio (${holdings.length})`},{id:"scanner",l:"🔍 Scanner"},{id:"manual",l:"🔎 Analizar Activo"},{id:"saved",l:`📁 (${savedAnalyses.length})`}].map(t=>(<button key={t.id} className={`tab${tab===t.id?" on":""}`} onClick={()=>setTab(t.id)}>{t.l}</button>))}</div>
+  return(<div className="up"><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:8}}><div><h1 style={{fontSize:24,fontWeight:800,letterSpacing:"-1px"}}>Inteligencia de Inversiones</h1><div style={{fontSize:12,color:T.muted,marginTop:4}}>Perfil: <span style={{color:T.lime,fontWeight:600}}>{riskProfile?.risk||"no configurado"}</span></div></div></div>
+  <div className="tabbar" style={{marginBottom:18}}>{[{id:"portfolio",l:`📊 Portfolio (${holdings.length})`},{id:"scanner",l:"🔍 Scanner IA"},{id:"manual",l:"🔎 Analizar Activo"},{id:"comparador",l:"⚖️ Comparador"},{id:"saved",l:`📁 Guardados`}].map(t=>(<button key={t.id} className={`tab${tab===t.id?" on":""}`} onClick={()=>setTab(t.id)}>{t.l}</button>))}</div>
   
+  {/* TAB PORTFOLIO */}
   {tab==="portfolio"&&<div>
     <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>{[{l:"Invertido",v:fmt(globalInvested),c:T.blue,i:"💰"},{l:"Valor Actual",v:fmt(globalCurrent),c:T.lime,i:"📈"},{l:"P&L Total",v:`${totalPnL>=0?"+":""}${fmt(totalPnL)}`,c:totalPnL>=0?T.teal:T.red,i:"✅"}].map((k,i)=><div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase"}}>{k.l}</span><span>{k.i}</span></div><div className="mono" style={{fontSize:16,fontWeight:600,color:k.c}}>{k.v}</div></div>)}</div>
     <div style={{display:"flex",gap:8,marginBottom:14}}><button className="btn bl" onClick={()=>setSHF(true)}><ic.Plus/> Agregar inversión</button></div>
@@ -444,7 +430,7 @@ function Investments({state,update,notify}){
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         <div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tipo</label><select className="inp" value={hForm.type} onChange={e=>setHF(f=>({...f,type:e.target.value}))}><option value="accion">📈 Acción</option><option value="cedear">🇺🇸 CEDEAR</option><option value="etf">📊 ETF</option><option value="crypto">₿ Crypto</option><option value="plazo_fijo">🏦 Plazo fijo</option><option value="fci">💼 FCI</option></select></div>
         <div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Ticker/Banco</label><input className="inp" value={hForm.ticker} onChange={e=>setHF(f=>({...f,ticker:e.target.value.toUpperCase()}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Nombre</label><input className="inp" value={hForm.name} onChange={e=>setHF(f=>({...f,name:e.target.value}))}/></div></div>
-        {["accion","cedear","etf","crypto"].includes(hForm.type) ? <div className="g3"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Cant.</label><input className="inp" value={hForm.quantity} onChange={e=>setHF(f=>({...f,quantity:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Precio unit.</label><input className="inp" value={hForm.buyPrice} onChange={e=>setHF(f=>({...f,buyPrice:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda compra</label><select className="inp" value={hForm.currency} onChange={e=>setHF(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select></div></div> 
+        {["accion","cedear","etf","crypto"].includes(hForm.type) ? <div className="g3"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Cant.</label><input className="inp" value={hForm.quantity} onChange={e=>setHF(f=>({...f,quantity:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Precio unit.</label><input className="inp" value={hForm.buyPrice} onChange={e=>setHF(f=>({...f,buyPrice:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda</label><select className="inp" value={hForm.currency} onChange={e=>setHF(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select></div></div> 
         : <div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Capital (ARS)</label><input className="inp" value={hForm.totalInvested} onChange={e=>setHF(f=>({...f,totalInvested:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>TNA %</label><div style={{display:"flex",gap:4}}><input className="inp" value={hForm.rate} onChange={e=>setHF(f=>({...f,rate:e.target.value}))}/><button className="btn bg bsm" onClick={handleAutoTNA}>✨</button></div></div></div>}
         <div className="g2">
           <div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha *</label><input type="date" className="inp" value={hForm.buyDate} onChange={e=>setHF(f=>({...f,buyDate:e.target.value}))}/></div>
@@ -454,41 +440,27 @@ function Investments({state,update,notify}){
       </div></div>}
 
     <div style={{display:"flex",flexDirection:"column",gap:8}}>{filteredHoldings.map(h=>{
-      let inv = h.totalInvested||0;
-      let cur = h.currentValue||h.totalInvested||0;
-      let bp = h.buyPrice||0;
-      
-      // Fix retroactivo para datos mal guardados previos a este commit
-      if(h.currency==="USD" && !h.originalCurrency){ inv*=usdRate; cur*=usdRate; bp*=usdRate; }
-      
-      const pnl=cur-inv;
-      const pnlPct=inv?((pnl/inv)*100).toFixed(1):0;
-      
-      // Mostrar el precio original en el que el usuario compró para la vista
-      const isOriginalUSD = h.originalCurrency === "USD" || (h.currency === "USD" && !h.originalCurrency);
-      const displayPrice = isOriginalUSD ? (bp / usdRate) : bp;
-      const priceFmt = isOriginalUSD ? `U$D ${displayPrice.toLocaleString("en-US",{minimumFractionDigits:0,maximumFractionDigits:2})}` : `$ ${displayPrice.toLocaleString("es-AR",{minimumFractionDigits:0,maximumFractionDigits:2})}`;
+      // Normalizamos el display de esta card puntual a la moneda en la que se compró
+      const displaySym = h.currency === "USD" ? "U$D" : "$";
+      const pnl=(h.currentValue||h.totalInvested)-(h.totalInvested||0);
+      const pnlPct=h.totalInvested?((pnl/h.totalInvested)*100).toFixed(1):0;
       
       return <div key={h.id} className="card" style={{padding:"14px"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div><div style={{fontSize:14,fontWeight:700}}>{h.ticker||h.name} <span style={{fontSize:10,color:T.muted,fontWeight:400}}>{h.type}</span></div><div style={{fontSize:11,color:T.muted}}>{h.quantity?`${h.quantity} un. a ${priceFmt}`:`TNA ${h.rate}%`}</div></div>
+        <div><div style={{fontSize:14,fontWeight:700}}>{h.ticker||h.name} <span style={{fontSize:10,color:T.muted,fontWeight:400}}>{h.type}</span></div><div style={{fontSize:11,color:T.muted}}>{h.quantity?`${h.quantity} un. a ${displaySym}${h.buyPrice}`:`TNA ${h.rate}%`}</div></div>
         <div style={{display:"flex",gap:6}}><button className="btn bg bsm" onClick={()=>refreshSingle(h)} disabled={refreshingId===h.id}>{refreshingId===h.id?<Dots/>:<ic.Refresh/>}</button><button className="btn bd bsm" onClick={()=>delHolding(h.id)}><ic.Trash/></button></div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,background:T.raised,padding:"8px",borderRadius:8,marginTop:8}}>
-        <div><div style={{fontSize:9,color:T.muted}}>Inicial</div><div className="mono" style={{fontSize:11}}>{fmt(inv)}</div></div>
-        <div><div style={{fontSize:9,color:T.muted}}>Actual</div><div className="mono" style={{fontSize:11,color:T.white}}>{fmt(cur)}</div></div>
-        <div><div style={{fontSize:9,color:T.muted}}>Ganancia</div><div className="mono" style={{fontSize:11,color:pnl>=0?T.teal:T.red}}>{pnl>=0?"+":""}{fmt(pnl)}</div></div>
+        <div><div style={{fontSize:9,color:T.muted}}>Inicial</div><div className="mono" style={{fontSize:11}}>{displaySym} {h.totalInvested?.toLocaleString("es-AR")}</div></div>
+        <div><div style={{fontSize:9,color:T.muted}}>Actual</div><div className="mono" style={{fontSize:11,color:T.white}}>{displaySym} {h.currentValue?.toLocaleString("es-AR")}</div></div>
+        <div><div style={{fontSize:9,color:T.muted}}>Ganancia</div><div className="mono" style={{fontSize:11,color:pnl>=0?T.teal:T.red}}>{pnl>=0?"+":""}{displaySym} {pnl.toLocaleString("es-AR")}</div></div>
         <div><div style={{fontSize:9,color:T.muted}}>Rend %</div><div className="mono" style={{fontSize:11,color:pnl>=0?T.teal:T.red}}>{pnl>=0?"+":""}{pnlPct}%</div></div>
       </div>
-      {/* Botonera rápida de vinculación a Meta por tarjeta */}
       <div style={{marginTop: 10, paddingTop: 10, borderTop: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 6}}>
          <span style={{fontSize:10, color:T.muted}}>Vincular a meta:</span>
          <select className="inp" style={{fontSize:10, padding:"4px 8px", width:"auto"}} value={h.goalId || ""} onChange={e => {
             update({holdings: holdings.map(x => x.id === h.id ? {...x, goalId: e.target.value} : x)});
             notify("Meta vinculada ✓");
-         }}>
-           <option value="">Ninguna</option>
-           {goals.map(g => <option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}
-         </select>
+         }}><option value="">Ninguna</option>{goals.map(g => <option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}</select>
       </div>
       </div>})}
     </div>
@@ -499,6 +471,9 @@ function Investments({state,update,notify}){
 
   {/* TAB MANUAL */}
   {tab==="manual"&&<div><div className="card" style={{marginBottom:14}}><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:10}}>Buscar por ticker o moneda</div><div style={{display:"flex",gap:10,flexWrap:"wrap"}}><input className="inp" style={{flex:.6,minWidth:80}} placeholder="ej: BTC" value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&analyze(ticker,tname)}/><input className="inp" style={{flex:1.2,minWidth:120}} placeholder="Nombre (opcional)" value={tname} onChange={e=>setTname(e.target.value)} onKeyDown={e=>e.key==="Enter"&&analyze(ticker,tname)}/><button className="btn bl" onClick={()=>analyze(ticker,tname)} disabled={loading||!ticker}>{loading?<Dots/>:<><ic.Stock/> Analizar IA</>}</button></div>{loadErr&&<div style={{marginTop:10,background:"rgba(255,77,106,.08)",border:`1px solid rgba(255,77,106,.25)`,borderRadius:8,padding:"8px 12px",fontSize:12,color:T.red}}>{loadErr}</div>}<div style={{marginTop:12}}><div style={{fontSize:10,color:T.muted,marginBottom:7,textTransform:"uppercase",letterSpacing:".6px"}}>Acceso rápido</div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{PRESETS.map(p=><button key={p.t} onClick={()=>analyze(p.t,p.n)} disabled={loading} style={{padding:"5px 11px",borderRadius:7,fontSize:11,fontWeight:500,border:`1px solid ${savedAnalyses.find(a=>a.ticker===p.t)?T.lime:T.border}`,background:savedAnalyses.find(a=>a.ticker===p.t)?"rgba(200,255,87,.08)":T.raised,color:savedAnalyses.find(a=>a.ticker===p.t)?T.lime:T.mid,cursor:"pointer",transition:"all .15s"}}>{p.t}</button>)}</div></div></div>{sel&&<AnalysisDetail a={sel} onClose={()=>setSel(null)}/>}</div>}
+
+  {/* TAB COMPARADOR (Nuevo) */}
+  {tab==="comparador"&&<div className="card"><div style={{marginBottom:14}}><div style={{fontSize:14,fontWeight:700}}>🏦 Comparador de instrumentos</div><div style={{fontSize:11,color:T.muted,marginTop:2}}>FCI, plazo fijo, bonos CER, CEDEARs — contexto argentino 2025</div></div><div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}><div style={{flex:1,minWidth:130}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Ahorro mensual (ARS)</label><input className="inp" value={cf.monthly} onChange={e=>setCF(f=>({...f,monthly:e.target.value}))}/></div><div style={{flex:1,minWidth:90}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Plazo (meses)</label><input className="inp" value={cf.months} onChange={e=>setCF(f=>({...f,months:e.target.value}))}/></div><div style={{display:"flex",alignItems:"flex-end"}}><button className="btn bl" onClick={async()=>{setComp(true);const r=await compareInstruments(px(cf.monthly),px(cf.months),usdRate);setCompResult(r);setComp(false);}} disabled={comparing}>{comparing?<Dots/>:<><ic.Refresh/> Analizar</>}</button></div></div>{compResult?<div><div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:12}}>{compResult.instruments?.map((inst,i)=>(<div key={i} style={{background:T.raised,borderRadius:12,padding:"12px 16px",border:`1px solid ${T.border}`,display:"flex",flexWrap:"wrap",gap:10,alignItems:"center"}}><div style={{flex:"2 1 140px"}}><div style={{fontSize:12,fontWeight:600}}>{inst.name}</div><div style={{fontSize:10,color:T.muted,marginTop:2}}>{inst.pros}</div></div><div style={{flex:"1 1 60px"}}><div style={{fontSize:10,color:T.muted,marginBottom:2}}>Ret. anual</div><div className="mono" style={{fontSize:13,color:T.lime}}>{inst.annualReturn?.toFixed(1)}%</div></div><div style={{flex:"1 1 60px"}}><div style={{fontSize:10,color:T.muted,marginBottom:2}}>Final USD</div><div className="mono" style={{fontSize:13,color:T.teal}}>{fUSD(inst.finalUSD||0)}</div></div><div style={{flex:"1 1 60px"}}><div style={{fontSize:10,color:T.muted,marginBottom:2}}>Riesgo</div><span style={{fontSize:11,padding:"2px 8px",borderRadius:99,background:`${rc[inst.risk]||T.mid}1A`,color:rc[inst.risk]||T.mid}}>{(inst.risk||"").replace(/_/g," ")}</span></div><div style={{flex:"1.5 1 100px",fontSize:10,color:T.muted}}>{inst.cons}</div></div>))}</div>{compResult.recommendation&&<div style={{background:"rgba(200,255,87,.06)",border:`1px solid rgba(200,255,87,.2)`,borderRadius:10,padding:"12px 16px"}}><div style={{fontSize:11,color:T.lime,fontWeight:600,marginBottom:4}}>💡 Recomendación</div><div style={{fontSize:12,color:T.mid}}>{compResult.recommendation}</div><div style={{fontSize:10,color:T.muted,marginTop:6}}>{compResult.disclaimer}</div></div>}</div>:<div style={{textAlign:"center",padding:"20px 0",color:T.muted,fontSize:13}}>Ingresá monto y plazo para comparar instrumentos</div>}</div>}
 
   {/* TAB SAVED */}
   {tab==="saved" && <div>
