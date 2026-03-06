@@ -659,43 +659,37 @@ function Investments({state,update,notify}){
 }
 
 function Analytics({state}){
+  // 1. Extraer todo del estado PRIMERO
   const {transactions, holdings=[], marketPrices={}, usdRate, displayCurrency}=state;
   const {fmt, toDsp}=useDsp(state);
   const NOW = getNow();
   const [range, setRange] = useState(6);
 
-  // 1. Cálculo de Patrimonio Real (Inversiones + Ahorros)
+  // 2. Cálculos de Patrimonio (Inversiones + Ahorros)
   let pValArs = 0;
   holdings.forEach(h => { 
-    // Usamos el motor maestro para tener el valor actualizado
     pValArs += calcHoldingValueArs(h, marketPrices, usdRate).curArs; 
   });
   
-  const savingsArs = transactions
+  const totalSavingsArs = transactions
     .filter(t => t.category === "💰 Ahorro")
     .reduce((s, t) => s + t.amount, 0);
     
-  const patrimonioTotalArs = pValArs + savingsArs;
+  const patrimonioTotalArs = pValArs + totalSavingsArs;
 
-  // 2. Preparación de datos para el gráfico de barras
+  // 3. Gráficos y Ratios
   const months = useMemo(() => Array.from({length:range}, (_,i) => {
     const d = new Date(NOW.getFullYear(), NOW.getMonth() - range + 1 + i, 1);
     const m = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
     const txs = transactions.filter(t => gMonth(t.date) === m);
-    const e = txs.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
-    const inc = txs.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0);
     return {
       name: MOS[d.getMonth()],
-      Gastos: toDsp(e),
-      Ingresos: toDsp(inc),
+      Gastos: toDsp(txs.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0)),
+      Ingresos: toDsp(txs.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0)),
       Ahorro: toDsp(txs.filter(t => t.category === "💰 Ahorro").reduce((s,t) => s + t.amount, 0)),
-      balance: toDsp(inc - e)
+      balance: toDsp(txs.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0) - txs.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0))
     };
   }), [transactions, range, toDsp]);
-
-  const totInc = transactions.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0);
-  const totExp = transactions.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
-  const savR = totInc > 0 ? (((totInc - totExp) / totInc) * 100).toFixed(1) : "0";
 
   return (
     <div className="up">
@@ -707,25 +701,23 @@ function Analytics({state}){
         </select>
       }/>
 
-      {/* BLOQUE DE PATRIMONIO REAL */}
       <div className="kpi-grid" style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:14}}>
         <div className="card csm">
-          <div style={{fontSize:10, color:T.muted, textTransform:"uppercase"}}>Portfolio Real</div>
+          <div style={{fontSize:10, color:T.muted, textTransform:"uppercase"}}>Portfolio</div>
           <div className="mono" style={{fontSize:16, fontWeight:600, color:T.blue, marginTop:4}}>{fmt(pValArs)}</div>
         </div>
         <div className="card csm">
-          <div style={{fontSize:10, color:T.muted, textTransform:"uppercase"}}>Ahorros Liquidos</div>
+          <div style={{fontSize:10, color:T.muted, textTransform:"uppercase"}}>Ahorros</div>
           <div className="mono" style={{fontSize:16, fontWeight:600, color:T.teal, marginTop:4}}>{fmt(totalSavingsArs)}</div>
         </div>
-        <div className="card csm" style={{background:`linear-gradient(135deg, ${T.surface}, ${T.bg})`, border:`1px solid ${T.lime}33`}}>
+        <div className="card csm" style={{border:`1px solid ${T.lime}44`}}>
           <div style={{fontSize:10, color:T.lime, fontWeight:700, textTransform:"uppercase"}}>Patrimonio Total</div>
           <div className="mono" style={{fontSize:18, fontWeight:700, color:T.lime, marginTop:4}}>{fmt(patrimonioTotalArs)}</div>
         </div>
       </div>
 
-      {/* GRÁFICO COMPARATIVO */}
       <div className="card" style={{marginBottom:14}}>
-        <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:12}}>Evolución Mensual ({displayCurrency})</div>
+        <div style={{fontSize:12, fontWeight:600, color:T.mid, marginBottom:12}}>Evolución ({displayCurrency})</div>
         <ResponsiveContainer width="100%" height={210}>
           <BarChart data={months}>
             <CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/>
@@ -738,23 +730,9 @@ function Analytics({state}){
           </BarChart>
         </ResponsiveContainer>
       </div>
-
-      <div className="card">
-        <div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}>
-          <div>
-            <div style={{fontSize:11, color:T.muted}}>Tasa de ahorro histórica</div>
-            <div className="mono" style={{fontSize:20, color:T.lime}}>{savR}%</div>
-          </div>
-          <div style={{textAlign:"right"}}>
-            <div style={{fontSize:11, color:T.muted}}>Estado</div>
-            <div style={{fontSize:12, fontWeight:600, color:T.teal}}>✓ {parseFloat(savR) > 20 ? "Excelente" : "Saludable"}</div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
-
 // ==========================================
 // 3. COMPONENTE DE APOYO
 // ==========================================
