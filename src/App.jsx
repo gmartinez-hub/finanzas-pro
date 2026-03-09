@@ -609,7 +609,18 @@ function Investments({state,update,notify}){
             <div style={{fontSize:14,fontWeight:700}}>{h.ticker||h.name} <span style={{fontSize:10,color:T.muted,fontWeight:400}}>{h.type}</span></div>
             <div style={{fontSize:11,color:T.muted}}>{h.quantity?`${h.quantity} un. a ${symDisplay}${buyPriceDisplay.toLocaleString("en-US")}`:`TNA ${h.rate}%`}{currentMarketPrice&&<span style={{marginLeft:8,color:T.mid}}>· actual: {currentMarketPrice.currency==="USD"?fUSD(currentMarketPrice.price):fARS(currentMarketPrice.price)}</span>}</div>
           </div>
-          <div style={{display:"flex",gap:6}}><button className="btn bg bsm" style={{color:T.lime}} onClick={()=>refreshSingle(h)} disabled={refreshingId===h.id}>{refreshingId===h.id?<Dots/>:"✎ Precio"}</button><button className="btn bd bsm" onClick={()=>delHolding(h.id)}><ic.Trash/></button></div>
+          <div style={{display:"flex",gap:6}}>
+          {["accion", "cedear", "etf", "crypto"].includes(h.type) && (
+            <button className="btn bg bsm" style={{color:T.lime, padding:"4px 8px"}} onClick={() => autoRefreshSingle(h)} disabled={refreshingId === h.id} title="Sincronizar precio automático">
+              {refreshingId === h.id ? <Dots/> : <ic.Refresh/>}
+            </button>
+          )}
+          <button className="btn bg bsm" style={{padding:"4px 8px"}} onClick={() => editPriceManual(h)} title="Cargar precio manual">
+            ✎
+          </button>
+          <button className="btn bd bsm" style={{padding:"4px 8px"}} onClick={() => delHolding(h.id)}>
+            <ic.Trash/>
+          </button>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,background:T.raised,padding:"10px",borderRadius:8,marginTop:8}}>
           <div><div style={{fontSize:9,color:T.muted}}>Inicial</div><div className="mono" style={{fontSize:11}}>{fmt(h.invArs)}</div></div>
