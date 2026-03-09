@@ -330,36 +330,79 @@ function SalaryModule({state,update,notify}){
 }
 
 function Transactions({state,update,notify}){
-  const {transactions,budgets,usdRate}=state;
+  const {transactions,budgets,usdRate,recurring=[]}=state;
   const {fmt}=useDsp(state);
   const CUR=getCUR();
   const [showAdd,setSA]=useState(false);
   const [editTx,setETx]=useState(null);
   const [showBud,setSB]=useState(false);
+  const [showRec,setSRec]=useState(false); // Modal para gestionar los recurrentes
   const [filter,setFilter]=useState({month:"",type:"",cat:""});
-  const [form,setForm]=useState({date:todayISO(),description:"",amount:"",type:"expense",category:"❓ Otros",currency:"ARS"});
+  // Agregamos isRecurring al estado del formulario
+  const [form,setForm]=useState({date:todayISO(),description:"",amount:"",type:"expense",category:"❓ Otros",currency:"ARS",isRecurring:false});
   const [editCat,setEC]=useState(null);
   const [bf,setBF]=useState({category:CATS[0],limit:""});
+  
   const rows=useMemo(()=>transactions.filter(t=>{if(filter.month&&gMonth(t.date)!==filter.month)return false;if(filter.type&&t.type!==filter.type)return false;if(filter.cat&&t.category!==filter.cat)return false;return true;}).sort((a,b)=>new Date(b.date)-new Date(a.date)),[transactions,filter]);
   const cur=transactions.filter(t=>gMonth(t.date)===CUR);
   const months=[...new Set(transactions.map(t=>gMonth(t.date)))].sort().reverse();
+
+  // ── MOTOR AUTOMÁTICO DE RECURRENTES ──
+  // Verifica si hay que cobrar alguna suscripción o alquiler de este mes
+  useEffect(()=>{
+    const pending = recurring.filter(r => r.lastMonth < CUR);
+    if(pending.length === 0) return; 
+    
+    let newTxs = [...transactions];
+    let newRec = recurring.map(r => {
+      if(r.lastMonth < CUR) {
+        newTxs.push({id:`auto_${uid()}`, date:`${CUR}-01`, description:`🔁 ${r.description}`, amount:r.amount, type:r.type, category:r.category, currency:r.currency, source:"auto"});
+        return {...r, lastMonth:CUR};
+      }
+      return r;
+    });
+    
+    // Timeout breve para evitar conflictos de renderizado con React
+    setTimeout(() => {
+      update({transactions: newTxs, recurring: newRec});
+      notify(`${pending.length} cargos recurrentes aplicados automáticamente ✓`, "info");
+    }, 100);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [CUR]); // Se ejecuta solo cuando entramos a un nuevo mes
+
   const saveTx=()=>{
     if(!form.description||!form.amount)return notify("Completá descripción y monto","err");
     const ars=Math.abs(px(form.amount))*(form.currency==="USD"?usdRate:1);
     if(ars<=0)return notify("Monto inválido","err");
-    if(editTx){update({transactions:transactions.map(t=>t.id===editTx?{...t,...form,amount:ars}:t)});setETx(null);notify("Movimiento actualizado ✓");}
-    else{update({transactions:[...transactions,{...form,id:`m_${uid()}`,amount:ars,source:"manual"}]});notify("Movimiento agregado ✓");}
-    setForm({date:todayISO(),description:"",amount:"",type:"expense",category:"❓ Otros",currency:"ARS"});
+    
+    if(editTx){
+      update({transactions:transactions.map(t=>t.id===editTx?{...t,...form,amount:ars}:t)});
+      setETx(null);notify("Movimiento actualizado ✓");
+    }else{
+      const newTxs = [...transactions,{...form,id:`m_${uid()}`,amount:ars,source:"manual"}];
+      // Si el usuario marcó que es recurrente, lo guardamos en la base inteligente
+      if(form.isRecurring) {
+        const newR = {id:`rec_${uid()}`, description:form.description, amount:ars, type:form.type, category:form.category, currency:"ARS", lastMonth:gMonth(form.date)};
+        update({transactions: newTxs, recurring: [...recurring, newR]});
+        notify("Movimiento guardado y programado para repetirse ✓");
+      } else {
+        update({transactions: newTxs});
+        notify("Movimiento agregado ✓");
+      }
+    }
+    setForm({date:todayISO(),description:"",amount:"",type:"expense",category:"❓ Otros",currency:"ARS",isRecurring:false});
     setSA(false);
   };
-  return(<div className="up"><PH title="Movimientos" sub={`${rows.length} registros`} right={<div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button className="btn bg" onClick={()=>setSB(true)}><ic.Bell/> Presupuestos</button><button className="btn bl" onClick={()=>{setETx(null);setForm({date:todayISO(),description:"",amount:"",type:"expense",category:"❓ Otros",currency:"ARS"});setSA(true);}}><ic.Plus/> Nuevo</button></div>}/>
+
+  return(<div className="up"><PH title="Movimientos" sub={`${rows.length} registros`} right={<div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button className="btn bg" onClick={()=>setSRec(true)}><ic.Refresh/> Recurrentes</button><button className="btn bg" onClick={()=>setSB(true)}><ic.Bell/> Presupuestos</button><button className="btn bl" onClick={()=>{setETx(null);setForm({date:todayISO(),description:"",amount:"",type:"expense",category:"❓ Otros",currency:"ARS",isRecurring:false});setSA(true);}}><ic.Plus/> Nuevo</button></div>}/>
+  
   {Object.keys(budgets||{}).length>0&&(<div style={{display:"flex",gap:10,marginBottom:14,overflowX:"auto",paddingBottom:4}}>{Object.entries(budgets).map(([cat,lim])=>{const spent=cur.filter(t=>t.category===cat&&t.type==="expense").reduce((s,t)=>s+t.amount,0);const pct=clamp(spent/lim*100,0,200);return<div key={cat} style={{background:T.raised,border:`1px solid ${pct>=100?T.red:pct>=80?T.amber:T.border}`,borderRadius:10,padding:"10px 14px",minWidth:150,flexShrink:0}}><div style={{fontSize:10,color:T.muted,marginBottom:4}}>{cat}</div><div className="mono" style={{fontSize:13,color:pct>=100?T.red:pct>=80?T.amber:T.white}}>{fmt(spent)}/{fmt(lim)}</div><div className="prog" style={{marginTop:6}}><div className="progf" style={{width:`${clamp(pct,0,100)}%`,background:pct>=100?T.red:pct>=80?T.amber:T.teal}}/></div></div>;})} </div>)}
   <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}><select className="inp" style={{width:"auto",minWidth:100}} value={filter.month} onChange={e=>setFilter(f=>({...f,month:e.target.value}))}><option value="">Todos los meses</option>{months.map(m=><option key={m}>{m}</option>)}</select><select className="inp" style={{width:"auto"}} value={filter.type} onChange={e=>setFilter(f=>({...f,type:e.target.value}))}><option value="">Todos</option><option value="expense">Gastos</option><option value="income">Ingresos</option></select><select className="inp" style={{width:"auto",minWidth:100}} value={filter.cat} onChange={e=>setFilter(f=>({...f,cat:e.target.value}))}><option value="">Categorías</option>{CATS.map(c=><option key={c}>{c}</option>)}</select>{(filter.month||filter.type||filter.cat)&&<button className="btn bg bsm" onClick={()=>setFilter({month:"",type:"",cat:""})}>Limpiar</button>}</div>
-  <div className="card" style={{padding:0,overflow:"auto"}}><table className="tbl"><thead><tr><th className="hide-m">Fecha</th><th>Descripción</th><th>Categoría</th><th className="hide-m">Tipo</th><th>Monto</th><th></th></tr></thead><tbody>{rows.length===0?<tr><td colSpan={6} style={{textAlign:"center",padding:"36px 0",color:T.muted,fontSize:13}}>Sin movimientos</td></tr>:rows.map(t=>(<tr key={t.id}><td className="mono hide-m" style={{color:T.muted,fontSize:11}}>{t.date}</td><td style={{maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td><td><button onClick={()=>setEC({id:t.id,cat:t.category})} style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:6,padding:"3px 9px",fontSize:11,color:T.mid,cursor:"pointer"}}>{t.category}</button></td><td className="hide-m"><span className={`tag ${t.type==="income"?"ti":t.category==="💰 Ahorro"?"ts":"te"}`}>{t.type==="income"?"Ingreso":t.category==="💰 Ahorro"?"Ahorro":"Gasto"}</span></td><td className="mono" style={{color:t.type==="income"?T.teal:T.red,fontWeight:500}}>{t.type==="income"?"+":"-"}{fmt(t.amount)}</td><td style={{display:"flex",gap:6,justifyContent:"flex-end"}}><button className="btn bg bsm" style={{padding:"4px 8px"}} onClick={()=>{setForm({date:t.date,description:t.description,amount:t.amount,type:t.type,category:t.category,currency:"ARS"});setETx(t.id);setSA(true);}}>✎</button><button className="btn bd bsm" style={{padding:"4px 8px"}} onClick={()=>{update({transactions:transactions.filter(x=>x.id!==t.id)});notify("Eliminado","err");}}><ic.Trash/></button></td></tr>))}</tbody></table></div>
-  {showAdd&&<div className="ov" onClick={e=>{if(e.target===e.currentTarget){setSA(false);setETx(null);}}}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h2 style={{fontSize:18,fontWeight:700}}>{editTx?"Editar movimiento":"Nuevo movimiento"}</h2><button className="btn bg bsm" onClick={()=>{setSA(false);setETx(null);}}><ic.X/></button></div><div style={{display:"flex",flexDirection:"column",gap:12}}><div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha</label><input type="date" className="inp" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tipo</label><select className="inp" value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))}><option value="expense">💸 Gasto</option><option value="income">💵 Ingreso</option></select></div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Descripción</label><input className="inp" placeholder="ej: Supermercado Coto" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/></div><div className="g3"><div style={{gridColumn:"1/3"}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Monto (positivo siempre)</label><input className="inp" placeholder="15000" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda</label><select className="inp" value={form.currency} onChange={e=>setForm(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select></div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Categoría</label><select className="inp" value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select></div>{form.currency==="USD"&&px(form.amount)>0&&<div style={{background:"rgba(77,158,255,.08)",border:`1px solid rgba(77,158,255,.2)`,borderRadius:8,padding:"8px 12px",fontSize:11,color:T.blue}}>💡 = {fARS(Math.abs(px(form.amount))*usdRate)} ARS al tipo oficial ${usdRate}</div>}<div style={{background:form.type==="income"?"rgba(0,229,195,.06)":"rgba(255,77,106,.06)",border:`1px solid ${form.type==="income"?"rgba(0,229,195,.2)":"rgba(255,77,106,.2)"}`,borderRadius:8,padding:"8px 12px",fontSize:11,color:form.type==="income"?T.teal:T.red}}>{form.type==="income"?"✓ Se registrará como INGRESO (+)":"✓ Se registrará como GASTO (-)"}</div><button className="btn bl" style={{justifyContent:"center"}} onClick={saveTx}>{editTx?"Guardar cambios":"Agregar"}</button></div></div></div>}
-  {editCat&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setEC(null)}><div className="modal" style={{width:320}}><h2 style={{fontSize:16,fontWeight:700,marginBottom:14}}>Cambiar categoría</h2><select className="inp" style={{marginBottom:14}} value={editCat.cat} onChange={e=>setEC(c=>({...c,cat:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select><div style={{display:"flex",gap:8}}><button className="btn bl" style={{flex:1,justifyContent:"center"}} onClick={()=>{update({transactions:transactions.map(t=>t.id===editCat.id?{...t,category:editCat.cat}:t)});setEC(null);notify("Guardado ✓");}}>Guardar</button><button className="btn bg" onClick={()=>setEC(null)}>Cancelar</button></div></div></div>}
-  {showBud&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setSB(false)}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}><h2 style={{fontSize:18,fontWeight:700}}>Presupuestos</h2><button className="btn bg bsm" onClick={()=>setSB(false)}><ic.X/></button></div><div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}><select className="inp" style={{flex:1.5,minWidth:120}} value={bf.category} onChange={e=>setBF(f=>({...f,category:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select><input className="inp" style={{flex:1,minWidth:100}} placeholder="Límite ARS" value={bf.limit} onChange={e=>setBF(f=>({...f,limit:e.target.value}))}/><button className="btn bl" onClick={()=>{if(!bf.limit)return;update({budgets:{...budgets,[bf.category]:px(bf.limit)}});setSB(false);notify("Guardado ✓");}}><ic.Plus/></button></div>{Object.entries(budgets||{}).map(([cat,lim])=>(<div key={cat} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:T.raised,borderRadius:10,padding:"10px 14px",marginBottom:7,flexWrap:"wrap",gap:6}}><span style={{fontSize:13}}>{cat}</span><div style={{display:"flex",alignItems:"center",gap:10}}><span className="mono" style={{fontSize:12,color:T.mid}}>{fmt(lim)}/mes</span><button className="btn bd bsm" onClick={()=>{const b={...budgets};delete b[cat];update({budgets:b});}}>✕</button></div></div>))}</div></div>}</div>);
-}
+  
+  <div className="card" style={{padding:0,overflow:"auto"}}><table className="tbl"><thead><tr><th className="hide-m">Fecha</th><th>Descripción</th><th>Categoría</th><th className="hide-m">Tipo</th><th>Monto</th><th></th></tr></thead><tbody>{rows.length===0?<tr><td colSpan={6} style={{textAlign:"center",padding:"36px 0",color:T.muted,fontSize:13}}>Sin movimientos</td></tr>:rows.map(t=>(<tr key={t.id}><td className="mono hide-m" style={{color:T.muted,fontSize:11}}>{t.date}</td><td style={{maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td><td><button onClick={()=>setEC({id:t.id,cat:t.category})} style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:6,padding:"3px 9px",fontSize:11,color:T.mid,cursor:"pointer"}}>{t.category}</button></td><td className="hide-m"><span className={`tag ${t.type==="income"?"ti":t.category==="💰 Ahorro"?"ts":"te"}`}>{t.type==="income"?"Ingreso":t.category==="💰 Ahorro"?"Ahorro":"Gasto"}</span></td><td className="mono" style={{color:t.type==="income"?T.teal:T.red,fontWeight:500}}>{t.type==="income"?"+":"-"}{fmt(t.amount)}</td><td style={{display:"flex",gap:6,justifyContent:"flex-end"}}><button className="btn bg bsm" style={{padding:"4px 8px"}} onClick={()=>{setForm({date:t.date,description:t.description.replace("🔁 ",""),amount:t.amount,type:t.type,category:t.category,currency:"ARS",isRecurring:false});setETx(t.id);setSA(true);}}>✎</button><button className="btn bd bsm" style={{padding:"4px 8px"}} onClick={()=>{update({transactions:transactions.filter(x=>x.id!==t.id)});notify("Eliminado","err");}}><ic.Trash/></button></td></tr>))}</tbody></table></div>
+  
+  {/* MODAL AGREGAR MOVIMIENTO CON CHECKBOX RECURRENTE */}
+  {showAdd&&<div className="ov" onClick={e=>{if(e.target===e.currentTarget){setSA(false);setETx(null);}}}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h2 style={{fontSize:18,fontWeight:700}}>{editTx?"Editar movimiento":"Nuevo movimiento"}</h2><button className="btn bg bsm" onClick={()=>{setSA(false);setETx(null);}}><ic.X/></button></div><div style={{display:"flex",flexDirection:"column",gap:12}}><div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha</label><input type="date" className="inp" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tipo</label><select className="inp" value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))}><option value="expense">💸 Gasto</option><option value="income">💵 Ingreso</option></select></div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Descripción</label><input className="inp" placeholder="ej: Alquiler / Netflix" value={form.description} onChange={e=>setForm(f=>({...f,description
 
 function Goals({state,update,notify}){
   const {goals,transactions,usdRate,salaries,holdings=[],marketPrices={}}=state;
