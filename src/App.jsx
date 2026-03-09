@@ -359,24 +359,114 @@ function Dashboard({state,update,notify,setView}){
   })}</div>{catData.length>0&&<div className="card csm up"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:8}}>Gastos este mes</div><div style={{display:"flex",gap:10,alignItems:"center"}}><div style={{width:80,minWidth:0,overflow:"hidden"}}><ResponsiveContainer width={80} height={80}><PieChart><Pie data={catData} cx="50%" cy="50%" innerRadius={22} outerRadius={36} dataKey="value" stroke="none">{catData.map((c,i)=><Cell key={i} fill={c.color}/>)}</Pie></PieChart></ResponsiveContainer></div><div style={{flex:1,minWidth:0}}>{catData.slice(0,4).map((c,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:6,fontSize:10,color:T.muted,marginBottom:4}}><div style={{width:7,height:7,borderRadius:2,background:c.color,flexShrink:0}}/><span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name}</span></div>)}</div></div></div>}</div></div></div>);
 }
 function SalaryModule({state,update,notify}){
-  const {salaries=[],transactions}=state;
+  // Sumamos usdRate al destructuring para poder calcular
+  const {salaries=[],transactions,usdRate}=state;
   const {fmt}=useDsp(state);
   const NOW=getNow();const CUR=getCUR();
-  const [form,setForm]=useState({base:"",month:CUR});
-  const [ef,setEF]=useState({desc:"",amt:""});
+  
+  // Agregamos currency a los estados de los formularios
+  const [form,setForm]=useState({base:"",month:CUR, currency: state.lastSalaryCurrency || "ARS"});
+  const [ef,setEF]=useState({desc:"",amt:"", currency:"ARS"});
   const [addingE,setAE]=useState(null);
+  
   const totalCur=getSalaryTotal(salaries);
   const curExp=transactions.filter(t=>gMonth(t.date)===CUR&&t.type==="expense").reduce((s,t)=>s+t.amount,0);
   const disponible=Math.max(0,totalCur-curExp);
   const curSal=salaries.find(s=>s.month===form.month);
-  const saveSalary=()=>{const base=Math.abs(px(form.base));if(!base)return notify("Ingresá un monto","err");const exists=salaries.find(s=>s.month===form.month);const updated=exists?salaries.map(s=>s.month===form.month?{...s,base}:s):[...salaries,{month:form.month,base,extras:[]}];const existingTx=transactions.find(t=>t.type==="income"&&gMonth(t.date)===form.month&&t.source==="salary");let txList=transactions;if(existingTx){txList=txList.map(t=>t.id===existingTx.id?{...t,amount:base,description:`Sueldo ${form.month}`}:t);}else{txList=[...txList,{id:`sal_${uid()}`,date:form.month+"-01",description:`Sueldo ${form.month}`,amount:base,type:"income",category:"❓ Otros",currency:"ARS",source:"salary"}];}update({salaries:updated,lastSalaryBase:base,transactions:txList});notify(curSal?"Sueldo actualizado ✓":"Sueldo registrado ✓");};
-  const addExtra=(month)=>{const amt=Math.abs(px(ef.amt));if(!ef.desc||!amt)return notify("Completá descripción y monto","err");const updated=salaries.map(s=>s.month===month?{...s,extras:[...(s.extras||[]),{id:`e_${uid()}`,desc:ef.desc,amt}]}:s);const newTx={id:`ex_${uid()}`,date:month+"-15",description:ef.desc,amount:amt,type:"income",category:"❓ Otros",currency:"ARS",source:"extra"};update({salaries:updated,transactions:[...transactions,newTx]});setEF({desc:"",amt:""});setAE(null);notify("Ingreso extra agregado ✓");};
+
+  const saveSalary=()=>{
+    const rawBase=Math.abs(px(form.base));
+    if(!rawBase)return notify("Ingresá un monto","err");
+    
+    // Convertimos a ARS si el usuario eligió USD
+    const baseArs = rawBase * (form.currency === "USD" ? usdRate : 1);
+    
+    const exists=salaries.find(s=>s.month===form.month);
+    // Guardamos el valor original y la moneda para mostrarlo prolijo en la tabla
+    const updated=exists
+        ? salaries.map(s=>s.month===form.month?{...s, base:baseArs, originalBase:rawBase, baseCurrency:form.currency}:s)
+        : [...salaries,{month:form.month, base:baseArs, originalBase:rawBase, baseCurrency:form.currency, extras:[]}];
+        
+    const existingTx=transactions.find(t=>t.type==="income"&&gMonth(t.date)===form.month&&t.source==="salary");
+    let txList=transactions;
+    if(existingTx){
+        txList=txList.map(t=>t.id===existingTx.id?{...t, amount:baseArs, currency:form.currency}:t);
+    }else{
+        txList=[...txList,{id:`sal_${uid()}`,date:form.month+"-01",description:`Sueldo ${form.month}`,amount:baseArs,type:"income",category:"❓ Otros",currency:form.currency,source:"salary"}];
+    }
+    
+    update({salaries:updated, lastSalaryBase:rawBase, lastSalaryCurrency:form.currency, transactions:txList});
+    notify(exists?"Sueldo actualizado ✓":"Sueldo registrado ✓");
+  };
+
+  const addExtra=(month)=>{
+    const rawAmt=Math.abs(px(ef.amt));
+    if(!ef.desc||!rawAmt)return notify("Completá descripción y monto","err");
+    
+    // Convertimos a ARS si es necesario
+    const amtArs = rawAmt * (ef.currency === "USD" ? usdRate : 1);
+    
+    const updated=salaries.map(s=>s.month===month?{...s,extras:[...(s.extras||[]),{id:`e_${uid()}`,desc:ef.desc,amt:amtArs, originalAmt:rawAmt, cur:ef.currency}]}:s);
+    const newTx={id:`ex_${uid()}`,date:month+"-15",description:ef.desc,amount:amtArs,type:"income",category:"❓ Otros",currency:ef.currency,source:"extra"};
+    update({salaries:updated,transactions:[...transactions,newTx]});
+    
+    setEF({desc:"",amt:"", currency:"ARS"});
+    setAE(null);
+    notify("Ingreso extra agregado ✓");
+  };
+
   const delExtra=(month,id)=>{update({salaries:salaries.map(s=>s.month===month?{...s,extras:(s.extras||[]).filter(e=>e.id!==id)}:s)});notify("Eliminado","err");};
   const hist=Array.from({length:6},(_,i)=>{const d=new Date(NOW.getFullYear(),NOW.getMonth()-5+i,1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;});
-  const pVal=(state.holdings||[]).reduce((s,h)=>s+(h.currentValue||h.totalInvested||0),0);
+  
+  // FIX: Portfolio ahora usa la misma función maestra para calcular el valor total real
+  let pVal=0;
+  (state.holdings||[]).forEach(h=>{pVal += calcHoldingValueArs(h, state.marketPrices, usdRate).curArs;});
+
   return(<div className="up"><PH title="Sueldo e ingresos" sub="Registrá tu sueldo y agregá ingresos extra"/><div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:12,marginBottom:18}}>{[{l:"Sueldo base",v:fmt(salaries.find(s=>s.month===CUR)?.base||0),c:T.lime,i:"💵"},{l:"Ingresos extra",v:fmt((salaries.find(s=>s.month===CUR)?.extras||[]).reduce((s,e)=>s+e.amt,0)),c:T.blue,i:"💼"},{l:"Disponible libre",v:fmt(disponible),c:disponible>0?T.teal:T.red,i:"🆓"},{l:"Portfolio",v:fmt(pVal),c:T.blue,i:"📊"}].map((k,i)=>(<div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".6px",fontWeight:600}}>{k.l}</span><span style={{fontSize:18}}>{k.i}</span></div><div className="mono" title={k.v} style={{fontSize:20,fontWeight:500,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div><div style={{fontSize:10,color:T.muted,marginTop:3}}>{CUR}</div></div>))}</div>
-  <div className="card" style={{marginBottom:14}}><div style={{fontSize:13,fontWeight:700,marginBottom:14}}>📅 Registrar sueldo</div><div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}><div style={{flex:1,minWidth:130}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Mes</label><select className="inp" value={form.month} onChange={e=>setForm(f=>({...f,month:e.target.value}))}>{hist.map(m=><option key={m}>{m}</option>)}</select></div><div style={{flex:1,minWidth:150}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Sueldo neto (ARS)</label><input className="inp" placeholder={state.lastSalaryBase?String(state.lastSalaryBase):"800000"} value={form.base} onChange={e=>setForm(f=>({...f,base:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&saveSalary()}/></div><button className="btn bl" onClick={saveSalary}><ic.Refresh/>{curSal?"Actualizar":"Registrar"}</button></div>{state.lastSalaryBase>0&&!curSal&&<div style={{marginTop:10,fontSize:11,color:T.muted}}>💡 Último sueldo: <span className="mono" style={{color:T.mid}}>{fmt(state.lastSalaryBase)}</span></div>}</div>
-  <div className="card" style={{padding:0,overflow:"auto"}}><div style={{padding:"14px 18px",borderBottom:`1px solid ${T.border}`,fontSize:13,fontWeight:700}}>Historial de ingresos</div><table className="tbl"><thead><tr><th>Mes</th><th>Sueldo base</th><th>Extras</th><th>Total</th><th></th></tr></thead><tbody>{hist.slice().reverse().map(m=>{const sal=salaries.find(s=>s.month===m);const base=sal?.base||0;const exT=(sal?.extras||[]).reduce((s,e)=>s+e.amt,0);return(<tr key={m}><td className="mono" style={{fontSize:12,color:T.muted}}>{m}</td><td className="mono" style={{color:base>0?T.white:T.muted}}>{base>0?fmt(base):"—"}</td><td>{(sal?.extras||[]).length===0?<span style={{color:T.muted,fontSize:12}}>—</span>:<div style={{display:"flex",flexDirection:"column",gap:3}}>{(sal?.extras||[]).map(e=>(<div key={e.id} style={{display:"flex",gap:8,alignItems:"center"}}><span className="mono" style={{fontSize:11,color:T.blue}}>+{fmt(e.amt)}</span><span style={{fontSize:11,color:T.muted}}>{e.desc}</span><button className="btn bd bsm" style={{padding:"2px 6px",fontSize:10}} onClick={()=>delExtra(m,e.id)}><ic.Trash/></button></div>))}</div>}</td><td className="mono" style={{fontWeight:600,color:base+exT>0?T.lime:T.muted}}>{base+exT>0?fmt(base+exT):"—"}</td><td>{addingE===m?<div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}><input className="inp" style={{width:130,fontSize:12,padding:"6px 10px"}} placeholder="Descripción" value={ef.desc} onChange={e=>setEF(f=>({...f,desc:e.target.value}))} autoFocus/><input className="inp" style={{width:100,fontSize:12,padding:"6px 10px"}} placeholder="Monto ARS" value={ef.amt} onChange={e=>setEF(f=>({...f,amt:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&addExtra(m)}/><button className="btn bl bsm" onClick={()=>addExtra(m)}>+</button><button className="btn bg bsm" onClick={()=>{setAE(null);setEF({desc:"",amt:""});}}>✕</button></div>:<button className="btn bg bsm" onClick={()=>{setAE(m);if(!sal)setForm(f=>({...f,month:m}));}}><ic.Plus/> Extra</button>}</td></tr>);})}</tbody></table></div></div>);
+  
+  <div className="card" style={{marginBottom:14}}><div style={{fontSize:13,fontWeight:700,marginBottom:14}}>📅 Registrar sueldo</div>
+    <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+      <div style={{flex:1,minWidth:130}}>
+        <label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Mes</label>
+        <select className="inp" value={form.month} onChange={e=>{
+          const newM = e.target.value;
+          const existing = salaries.find(s=>s.month===newM);
+          setForm({
+            month: newM,
+            base: existing ? (existing.originalBase || existing.base) : "",
+            currency: existing ? (existing.baseCurrency || "ARS") : (state.lastSalaryCurrency || "ARS")
+          });
+        }}>{hist.map(m=><option key={m}>{m}</option>)}</select>
+      </div>
+      <div style={{flex:1.5,minWidth:180}}>
+        <label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Sueldo neto</label>
+        <div style={{display:"flex", gap:8}}>
+          <input className="inp" style={{flex:1}} placeholder={state.lastSalaryBase?String(state.lastSalaryBase):"800000"} value={form.base} onChange={e=>setForm(f=>({...f,base:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&saveSalary()}/>
+          <select className="inp" style={{width:80, padding:"0 10px"}} value={form.currency} onChange={e=>setForm(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select>
+        </div>
+      </div>
+      <button className="btn bl" onClick={saveSalary}><ic.Refresh/>{curSal?"Actualizar":"Registrar"}</button>
+    </div>
+    {form.currency==="USD"&&px(form.base)>0&&<div style={{marginTop:10,fontSize:11,color:T.blue}}>💡 Equivalente a {fARS(Math.abs(px(form.base))*usdRate)} ARS al tipo de cambio actual.</div>}
+  </div>
+  
+  <div className="card" style={{padding:0,overflow:"auto"}}><div style={{padding:"14px 18px",borderBottom:`1px solid ${T.border}`,fontSize:13,fontWeight:700}}>Historial de ingresos</div><table className="tbl"><thead><tr><th>Mes</th><th>Sueldo base</th><th>Extras</th><th>Total</th><th></th></tr></thead><tbody>{hist.slice().reverse().map(m=>{const sal=salaries.find(s=>s.month===m);const base=sal?.base||0;const exT=(sal?.extras||[]).reduce((s,e)=>s+e.amt,0);return(<tr key={m}><td className="mono" style={{fontSize:12,color:T.muted}}>{m}</td>
+  
+  <td className="mono" style={{color:base>0?T.white:T.muted}}>
+    {base>0 ? <div>{fmt(base)}{sal?.baseCurrency==="USD" && <span style={{fontSize:10,color:T.muted,marginLeft:6}}>(U$D {sal.originalBase})</span>}</div> : "—"}
+  </td>
+  
+  <td>{(sal?.extras||[]).length===0?<span style={{color:T.muted,fontSize:12}}>—</span>:<div style={{display:"flex",flexDirection:"column",gap:3}}>{(sal?.extras||[]).map(e=>(<div key={e.id} style={{display:"flex",gap:8,alignItems:"center"}}><span className="mono" style={{fontSize:11,color:T.blue}}>+{fmt(e.amt)} {e.cur==="USD"&&<span style={{color:T.muted}}>(U$D {e.originalAmt})</span>}</span><span style={{fontSize:11,color:T.muted}}>{e.desc}</span><button className="btn bd bsm" style={{padding:"2px 6px",fontSize:10}} onClick={()=>delExtra(m,e.id)}><ic.Trash/></button></div>))}</div>}</td><td className="mono" style={{fontWeight:600,color:base+exT>0?T.lime:T.muted}}>{base+exT>0?fmt(base+exT):"—"}</td><td>{addingE===m?
+  
+  <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+    <input className="inp" style={{width:130,fontSize:12,padding:"6px 10px"}} placeholder="Descripción" value={ef.desc} onChange={e=>setEF(f=>({...f,desc:e.target.value}))} autoFocus/>
+    <input className="inp" style={{width:90,fontSize:12,padding:"6px 10px"}} placeholder="Monto" value={ef.amt} onChange={e=>setEF(f=>({...f,amt:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&addExtra(m)}/>
+    <select className="inp" style={{width:70,fontSize:12,padding:"6px"}} value={ef.currency} onChange={e=>setEF(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select>
+    <button className="btn bl bsm" onClick={()=>addExtra(m)}>+</button>
+    <button className="btn bg bsm" onClick={()=>{setAE(null);setEF({desc:"",amt:"",currency:"ARS"});}}>✕</button>
+  </div>
+  
+  :<button className="btn bg bsm" onClick={()=>{setAE(m);if(!sal)setForm(f=>({...f,month:m}));}}><ic.Plus/> Extra</button>}</td></tr>);})}</tbody></table></div></div>);
 }
 
 function Transactions({state,update,notify}){
