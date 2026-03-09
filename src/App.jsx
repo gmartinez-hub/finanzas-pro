@@ -31,13 +31,26 @@ const CATS=["🏠 Vivienda","🛒 Supermercado","🚗 Transporte","🍔 Comida y
 const CATS_PLAIN=CATS.map(c=>c.split(" ").slice(1).join(" "));
 const matchCat=raw=>{if(!raw)return "❓ Otros";const found=CATS.find(c=>c===raw);if(found)return found;const lower=raw.toLowerCase().trim();const idx=CATS_PLAIN.findIndex(p=>p.toLowerCase()===lower);return idx>=0?CATS[idx]:"❓ Otros";};
 const CPAL=["#C8FF57","#4D9EFF","#FF4D6A","#FFB830","#00E5C3","#A78BFA","#F97316","#EC4899","#84CC16","#14B8A6","#60A5FA","#4ADE80","#FB923C","#EF4444","#94A3B8","#CBD5E1"];
-const DEFAULT={transactions:[],goals:[],budgets:{},usdRate:1350,displayCurrency:"ARS",riskProfile:null,onboardingDone:false,savedAnalyses:[],weeklyInsight:null,weeklyInsightDate:null,salaries:[],lastSalaryBase:0,holdings:[],marketPrices:{}};
+const DEFAULT={transactions:[],goals:[],budgets:{},usdRate:1350,usdType:"mep",usdRates:{oficial:1350,mep:1350,blue:1350},displayCurrency:"ARS",riskProfile:null,onboardingDone:false,savedAnalyses:[],weeklyInsight:null,weeklyInsightDate:null,salaries:[],lastSalaryBase:0,holdings:[],marketPrices:{}};
 const uid=()=>`${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
 
 const cleanJSON=r=>{if(!r)return"";let s=r.replace(/`{3}json|`{3}/gi,"").trim();const f=s.search(/[\{\[]/);const l=Math.max(s.lastIndexOf("}"),s.lastIndexOf("]"));return f!==-1&&l!==-1?s.slice(f,l+1):s;};
 
-async function fetchUSDOficial(){try{const c=new AbortController();const tmr=setTimeout(()=>c.abort(),6000);const r=await fetch("https://dolarapi.com/v1/dolares/oficial",{signal:c.signal});clearTimeout(tmr);const d=await r.json();return Math.round((d.compra+d.venta)/2);}catch{try{const c2=new AbortController();const t2=setTimeout(()=>c2.abort(),6000);const r2=await fetch("https://api.bluelytics.com.ar/v2/latest",{signal:c2.signal});clearTimeout(t2);const d2=await r2.json();return Math.round(d2.oficial.value_avg);}catch{return null;}}}
-
+async function fetchUSDRates(){
+  try{
+    const r=await fetch("https://dolarapi.com/v1/dolares");
+    if(!r.ok) return null;
+    const d=await r.json();
+    const oficial = d.find(x=>x.casa==="oficial");
+    const mep = d.find(x=>x.casa==="bolsa" || x.casa==="mep");
+    const blue = d.find(x=>x.casa==="blue");
+    return {
+      oficial: oficial ? (oficial.compra+oficial.venta)/2 : 1350,
+      mep: mep ? (mep.compra+mep.venta)/2 : 1350,
+      blue: blue ? (blue.compra+blue.venta)/2 : 1350
+    };
+  }catch{return null;}
+}
 async function fetchStockPrice(ticker){
   try{
     const r=await fetch(`/api/price?ticker=${encodeURIComponent(ticker)}`);
@@ -228,20 +241,73 @@ export default function App(){
   const [usdLoading,setUL]=useState(false);
   const [sideOpen,setSO]=useState(false);
   const isMobile=useIsMobile();
+
   useEffect(()=>{hydrate().then(s=>{if(s)setState(p=>({...p,...s}));setReady(true);});},[]);
   useEffect(()=>{if(ready)persist(state);},[state,ready]);
-  useEffect(()=>{if(!ready)return;setUL(true);fetchUSDOficial().then(r=>{if(r&&r>0)setState(p=>({...p,usdRate:r}));setUL(false);}).catch(()=>setUL(false));},[ready]);
+  
+  // Limpiador automático de fechas
+  useEffect(() => {
+    if(!ready) return;
+    const hasBadDates = state.transactions?.some(t => t.date.includes("/") || (t.date.includes("-") && t.date.indexOf("-") !== 4));
+    if(hasBadDates) {
+      const fixed = state.transactions.map(t => {
+        if(t.date.includes("/") || (t.date.includes("-") && t.date.indexOf("-") !== 4)) {
+          const parts = t.date.split(/[\/\-]/);
+          if(parts.length >= 3) {
+            const [d, m, y] = parts[0].length === 4 ? [parts[2], parts[1], parts[0]] : [parts[0], parts[1], parts[2]];
+            const year = y.length === 2 ? "20"+y : y;
+            return { ...t, date: `${year}-${m.padStart(2,'0')}-${d.padStart(2,'0')}` };
+          }
+        }
+        return t;
+      });
+      setState(s=>({...s, transactions: fixed}));
+    }
+  }, [ready, state.transactions]);
+
+  // Actualizador Inteligente de Dólares
+  const updateRates = useCallback(async () => {
+    setUL(true);
+    const r = await fetchUSDRates();
+    if(r){
+      const currentType = state.usdType || "mep";
+      setState(p=>({...p, usdRates:r, usdRate: r[currentType]}));
+    }
+    setUL(false);
+  }, [state.usdType]);
+
+  useEffect(()=>{ if(ready) updateRates(); },[ready, updateRates]);
+
   const notify=(msg,type="ok")=>{setToast({msg,type});setTimeout(()=>setToast(null),4000);};
   const update=useCallback(patch=>setState(s=>({...s,...patch})),[]);
   const navTo=useCallback(id=>{setView(id);setSO(false);},[]);
+
   if(!ready)return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:T.bg,color:T.muted,fontFamily:"Sora",fontSize:14,gap:10}}><Dots/>Cargando</div>;
   if(!state.onboardingDone)return <><style>{CSS}</style><Onboarding update={update} notify={notify}/></>;
+
   const pages={dashboard:<Dashboard state={state} update={update} notify={notify} setView={navTo}/>,transactions:<Transactions state={state} update={update} notify={notify}/>,goals:<Goals state={state} update={update} notify={notify}/>,salary:<SalaryModule state={state} update={update} notify={notify}/>,analytics:<Analytics state={state}/>,investments:<Investments state={state} update={update} notify={notify}/>,import:<Import state={state} update={update} notify={notify}/>};
   const nav=[{id:"dashboard",l:"Dashboard",I:ic.Grid},{id:"transactions",l:"Movimientos",I:ic.Tx},{id:"goals",l:"Metas",I:ic.Target},{id:"salary",l:"Sueldo",I:ic.Salary},{id:"analytics",l:"Analíticas",I:ic.Chart},{id:"investments",l:"Inversiones",I:ic.Stock},{id:"import",l:"Importar",I:ic.Import}];
   const CUR=getCUR();
   const alerts=Object.entries(state.budgets||{}).filter(([cat,lim])=>state.transactions.filter(t=>gMonth(t.date)===CUR&&t.category===cat&&t.type==="expense").reduce((s,t)=>s+t.amount,0)>lim*0.8);
 
-  const sidebar=<aside style={{width:isMobile?"100%":212,background:T.surface,borderRight:isMobile?"none":`1px solid ${T.border}`,display:"flex",flexDirection:"column",padding:"20px 12px",gap:2,flexShrink:0,...(isMobile?{position:"fixed",top:0,left:0,bottom:0,zIndex:300,width:260,transform:sideOpen?"translateX(0)":"translateX(-100%)",transition:"transform .25s cubic-bezier(.16,1,.3,1)",boxShadow:sideOpen?"8px 0 30px rgba(0,0,0,.6)":"none"}:{})}}><div style={{padding:"4px 10px 20px",display:"flex",alignItems:"center",gap:9,justifyContent:"space-between"}}><div style={{display:"flex",alignItems:"center",gap:9}}><div style={{width:30,height:30,background:T.lime,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>💳</div><div style={{fontSize:14,fontWeight:700,letterSpacing:"-.4px"}}>FinanzasPro</div></div>{isMobile&&<button onClick={()=>setSO(false)} style={{color:T.muted,padding:4}}><ic.X/></button>}</div>{nav.map(({id,l,I})=>(<button key={id} className={`nav${view===id?" on":""}`} onClick={()=>navTo(id)}><I/>{l}{id==="investments"&&state.savedAnalyses?.length>0&&<span style={{marginLeft:"auto",fontSize:10,background:T.raised,padding:"2px 6px",borderRadius:99,color:T.muted}}>{state.savedAnalyses.length}</span>}</button>))}<div style={{flex:1}}/>{alerts.length>0&&<div onClick={()=>navTo("transactions")} style={{background:"rgba(255,184,48,.08)",border:`1px solid rgba(255,184,48,.2)`,borderRadius:10,padding:"9px 12px",cursor:"pointer",marginBottom:8}}><div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:T.amber,fontWeight:600}}><ic.Bell/>{alerts.length} alerta{alerts.length>1?"s":""}</div></div>}<div style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 14px"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}><span style={{fontSize:9,color:T.muted,textTransform:"uppercase",letterSpacing:".7px",fontWeight:600}}>USD Oficial</span>{usdLoading?<Dots/>:<button onClick={()=>{setUL(true);fetchUSDOficial().then(r=>{if(r>0)update({usdRate:r});setUL(false);}).catch(()=>setUL(false));}} style={{fontSize:10,color:T.muted,cursor:"pointer",display:"flex",alignItems:"center",gap:3}}><ic.Refresh/>Auto</button>}</div><input className="mono" style={{background:"transparent",border:"none",outline:"none",fontSize:18,fontWeight:600,color:T.lime,width:"100%"}} value={state.usdRate} onChange={e=>{const v=px(e.target.value);if(v>0)update({usdRate:v});}}/><div style={{display:"flex",gap:5,marginTop:8}}>{["ARS","USD"].map(c=>(<button key={c} onClick={()=>update({displayCurrency:c})} style={{flex:1,padding:"5px 0",borderRadius:6,fontSize:10,fontWeight:600,border:`1px solid ${state.displayCurrency===c?T.lime:T.border}`,background:state.displayCurrency===c?"rgba(200,255,87,.1)":T.surface,color:state.displayCurrency===c?T.lime:T.muted,cursor:"pointer"}}>{c}</button>))}</div></div></aside>;
+  const sidebar=<aside style={{width:isMobile?"100%":212,background:T.surface,borderRight:isMobile?"none":`1px solid ${T.border}`,display:"flex",flexDirection:"column",padding:"20px 12px",gap:2,flexShrink:0,...(isMobile?{position:"fixed",top:0,left:0,bottom:0,zIndex:300,width:260,transform:sideOpen?"translateX(0)":"translateX(-100%)",transition:"transform .25s cubic-bezier(.16,1,.3,1)",boxShadow:sideOpen?"8px 0 30px rgba(0,0,0,.6)":"none"}:{})}}><div style={{padding:"4px 10px 20px",display:"flex",alignItems:"center",gap:9,justifyContent:"space-between"}}><div style={{display:"flex",alignItems:"center",gap:9}}><div style={{width:30,height:30,background:T.lime,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>💳</div><div style={{fontSize:14,fontWeight:700,letterSpacing:"-.4px"}}>FinanzasPro</div></div>{isMobile&&<button onClick={()=>setSO(false)} style={{color:T.muted,padding:4}}><ic.X/></button>}</div>{nav.map(({id,l,I})=>(<button key={id} className={`nav${view===id?" on":""}`} onClick={()=>navTo(id)}><I/>{l}{id==="investments"&&state.savedAnalyses?.length>0&&<span style={{marginLeft:"auto",fontSize:10,background:T.raised,padding:"2px 6px",borderRadius:99,color:T.muted}}>{state.savedAnalyses.length}</span>}</button>))}<div style={{flex:1}}/>{alerts.length>0&&<div onClick={()=>navTo("transactions")} style={{background:"rgba(255,184,48,.08)",border:`1px solid rgba(255,184,48,.2)`,borderRadius:10,padding:"9px 12px",cursor:"pointer",marginBottom:8}}><div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:T.amber,fontWeight:600}}><ic.Bell/>{alerts.length} alerta{alerts.length>1?"s":""}</div></div>}
+  
+  <div style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 14px"}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+      <select className="inp" style={{fontSize:9, padding:"0", width:"auto", height:"auto", textTransform:"uppercase", fontWeight:700, letterSpacing:".5px", color:T.muted, border:"none", background:"transparent", cursor:"pointer", outline:"none"}} value={state.usdType||"mep"} onChange={e=>{const t=e.target.value; update({usdType: t, usdRate: state.usdRates?.[t] || state.usdRate});}}>
+         <option value="oficial">💵 USD Oficial</option>
+         <option value="mep">📈 USD MEP</option>
+         <option value="blue">🟦 USD Blue</option>
+      </select>
+      {usdLoading?<Dots/>:<button onClick={updateRates} style={{fontSize:10,color:T.muted,cursor:"pointer",display:"flex",alignItems:"center",gap:3}}><ic.Refresh/>Auto</button>}
+    </div>
+    <input className="mono" style={{background:"transparent",border:"none",outline:"none",fontSize:18,fontWeight:600,color:T.lime,width:"100%"}} value={state.usdRate} onChange={e=>{const v=px(e.target.value);if(v>0)update({usdRate:v});}}/>
+    <div style={{display:"flex",gap:5,marginTop:8}}>{["ARS","USD"].map(c=>(<button key={c} onClick={()=>update({displayCurrency:c})} style={{flex:1,padding:"5px 0",borderRadius:6,fontSize:10,fontWeight:600,border:`1px solid ${state.displayCurrency===c?T.lime:T.border}`,background:state.displayCurrency===c?"rgba(200,255,87,.1)":T.surface,color:state.displayCurrency===c?T.lime:T.muted,cursor:"pointer"}}>{c}</button>))}</div>
+  </div>
+  
+  {/* DISCLAIMER */}
+  <div style={{fontSize:9, color:T.muted, textAlign:"center", marginTop:16, lineHeight:1.4, padding:"0 10px"}}>⚠️ FinanzasPro es una herramienta educativa y de gestión personal. No constituye asesoramiento financiero.</div>
+  </aside>;
 
   return(<div style={{display:"flex",height:"100vh",overflow:"hidden",background:T.bg}}><style>{CSS}</style>{isMobile?<>{sideOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:299}} onClick={()=>setSO(false)}/>}{sidebar}</>:sidebar}{isMobile&&<div style={{position:"fixed",top:0,left:0,right:0,height:52,background:T.surface,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",padding:"0 14px",gap:12,zIndex:100}}><button onClick={()=>setSO(true)} style={{color:T.white,padding:4}}><ic.Menu/></button><div style={{fontSize:14,fontWeight:700}}>FinanzasPro</div><div style={{flex:1}}/><div className="mono" style={{fontSize:11,color:T.lime}}>{state.displayCurrency==="USD"?fUSD(1):fARS(state.usdRate)}</div></div>}<main style={{flex:1,overflow:"auto",padding:isMobile?"66px 14px 20px":"28px 32px"}}>{pages[view]}</main>{toast&&<div className={`toast t${toast.type}`}>{toast.msg}</div>}</div>);
 }
@@ -265,7 +331,8 @@ function Onboarding({update,notify}){
   ];
   const finish=()=>{const rawBase=px(d.income);const base=d.incomeCurrency==="USD"?rawBase*1350:rawBase;const CUR=getCUR();const patch={onboardingDone:true,riskProfile:{risk:profile,horizon,monthlyIncome:base,incomeCurrency:d.incomeCurrency,incomeRaw:rawBase,score,answers:ans},lastSalaryBase:base,salaries:base>0?[{month:CUR,base,extras:[]}]:[]};if(d.goalName&&d.goalAmt)patch.goals=[{id:`g_${uid()}`,name:d.goalName,target:px(d.goalAmt),saved:0,icon:"🎯",deadline:d.goalDate,createdAt:todayISO()}];update(patch);notify("¡Todo listo! 🎉");};
   const canNext=step===0?true:step>=1&&step<=4?ans[step-1]!==null:true;
-  return(<div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:T.bg,padding:16,overflow:"auto"}}><div style={{width:480,maxWidth:"100%",background:T.surface,borderRadius:24,border:`1px solid ${T.border}`,padding:"clamp(20px,5vw,40px)"}}><div style={{display:"flex",gap:4,marginBottom:28}}>{Array.from({length:STEPS}).map((_,i)=><div key={i} style={{flex:1,height:3,borderRadius:3,background:i<=step?T.lime:T.raised,transition:"background .3s"}}/>)}</div>
+  return(<div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:T.bg,padding:16,overflow:"auto"}}><div style={{width:480,maxWidth:"100%",background:T.surface,borderRadius:24,border:`1px solid ${T.border}`,padding:"clamp(20px,5vw,40px)"}}><div style={{fontSize:10, color:T.muted, textAlign:"center", marginTop:24, background:"rgba(255,255,255,0.02)", padding:"10px", borderRadius:8}}>⚠️ Al continuar, entendés que esta app es para organización personal y no reemplaza la consulta con un asesor idóneo o matriculado.</div>
+<div style={{display:"flex",gap:10,marginTop:16}}>{Array.from({length:STEPS}).map((_,i)=><div key={i} style={{flex:1,height:3,borderRadius:3,background:i<=step?T.lime:T.raised,transition:"background .3s"}}/>)}</div>
   {step===0&&<><div style={{fontSize:22,fontWeight:800,marginBottom:6,letterSpacing:"-.5px"}}>Bienvenido a FinanzasPro</div><div style={{fontSize:13,color:T.muted,marginBottom:24}}>Tomá el control de tu dinero</div><div style={{display:"flex",flexDirection:"column",gap:12}}><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tu nombre (opcional)</label><input className="inp" placeholder="ej: Martín" value={d.name} onChange={e=>setD(p=>({...p,name:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Sueldo neto mensual</label><div style={{display:"flex",gap:8}}><input className="inp" style={{flex:1}} placeholder={d.incomeCurrency==="ARS"?"ej: 800000":"ej: 1200"} value={d.income} onChange={e=>setD(p=>({...p,income:e.target.value}))}/><div style={{display:"flex",borderRadius:10,overflow:"hidden",border:`1px solid ${T.border}`,flexShrink:0}}>{["ARS","USD"].map(c=><button key={c} onClick={()=>setD(p=>({...p,incomeCurrency:c}))} style={{padding:"8px 12px",fontSize:12,fontWeight:600,background:d.incomeCurrency===c?"rgba(200,255,87,.15)":T.raised,color:d.incomeCurrency===c?T.lime:T.muted,border:"none",cursor:"pointer",transition:"all .15s"}}>{c}</button>)}</div></div></div></div></>}
   {step>=1&&step<=4&&<><div style={{fontSize:28,marginBottom:6}}>{QS[step-1].icon}</div><div style={{fontSize:22,fontWeight:800,marginBottom:4,letterSpacing:"-.5px"}}>{QS[step-1].title}</div><div style={{fontSize:13,color:T.muted,marginBottom:20}}>{QS[step-1].sub}</div><div style={{display:"flex",flexDirection:"column",gap:8}}>{QS[step-1].opts.map(o=><button key={o.v} onClick={()=>pickAns(step-1,o.v)} style={{display:"block",width:"100%",padding:"13px 16px",borderRadius:12,border:`1.5px solid ${ans[step-1]===o.v?T.lime:T.border}`,background:ans[step-1]===o.v?"rgba(200,255,87,.08)":T.raised,textAlign:"left",cursor:"pointer",transition:"all .15s"}}><div style={{fontSize:13,fontWeight:600,color:ans[step-1]===o.v?T.lime:T.white}}>{o.l}</div><div style={{fontSize:11,color:T.muted,marginTop:2}}>{o.d}</div></button>)}</div></>}
   {step===5&&<><div style={{textAlign:"center",marginBottom:24}}><div style={{fontSize:48,marginBottom:8}}>{pf.emoji}</div><div style={{fontSize:24,fontWeight:800,letterSpacing:"-.5px",color:pf.color}}>{pf.label}</div><div style={{fontSize:13,color:T.muted,marginTop:6,lineHeight:1.6}}>{pf.desc}</div><div style={{display:"flex",justifyContent:"center",gap:6,marginTop:16}}>{[{l:"Renta fija",p:pf.pct[0],c:"#4D9EFF"},{l:"Mixto",p:pf.pct[1],c:"#FFB830"},{l:"Renta variable",p:pf.pct[2],c:"#FF4D6A"}].map(s=><div key={s.l} style={{background:T.raised,borderRadius:10,padding:"10px 14px",textAlign:"center",minWidth:80}}><div className="mono" style={{fontSize:18,fontWeight:700,color:s.c}}>{s.p}%</div><div style={{fontSize:10,color:T.muted,marginTop:3}}>{s.l}</div></div>)}</div><div className="mono" style={{fontSize:11,color:T.muted,marginTop:12}}>Score: {score}/12 · Horizonte: {horizon}</div></div><div style={{borderTop:`1px solid ${T.border}`,paddingTop:20}}><div style={{fontSize:16,fontWeight:700,marginBottom:4}}>Primera meta <span style={{fontSize:12,color:T.muted,fontWeight:400}}>(opcional)</span></div><div className="g2" style={{marginTop:12}}><div style={{gridColumn:"1/-1"}}><input className="inp" placeholder="ej: Viaje a Europa" value={d.goalName} onChange={e=>setD(p=>({...p,goalName:e.target.value}))}/></div><input className="inp" placeholder="Monto ARS" value={d.goalAmt} onChange={e=>setD(p=>({...p,goalAmt:e.target.value}))}/><input type="date" className="inp" value={d.goalDate} onChange={e=>setD(p=>({...p,goalDate:e.target.value}))}/></div></div></>}
@@ -504,13 +571,13 @@ function Transactions({state,update,notify}){
   const cur=transactions.filter(t=>gMonth(t.date)===CUR);
   const months=[...new Set(transactions.map(t=>gMonth(t.date)))].sort().reverse();
 
-  // ── MOTOR AUTOMÁTICO DE RECURRENTES ──
+  // ── MOTOR AUTOMÁTICO DE RECURRENTES (Ahorá ignora los pausados) ──
   useEffect(()=>{
-    const pending=recurring.filter(r=>r.lastMonth<CUR);
+    const pending=recurring.filter(r=>r.lastMonth<CUR && !r.paused);
     if(pending.length===0)return;
     let newTxs=[...transactions];
     let newRec=recurring.map(r=>{
-      if(r.lastMonth<CUR){
+      if(r.lastMonth<CUR && !r.paused){
         newTxs.push({id:`auto_${uid()}`,date:`${CUR}-01`,description:`🔁 ${r.description}`,amount:r.amount,type:r.type,category:r.category,currency:r.currency,source:"auto"});
         return{...r,lastMonth:CUR};
       }
@@ -530,7 +597,8 @@ function Transactions({state,update,notify}){
     }else{
       const newTxs=[...transactions,{...form,id:`m_${uid()}`,amount:ars,source:"manual"}];
       if(form.isRecurring){
-        const newR={id:`rec_${uid()}`,description:form.description,amount:ars,type:form.type,category:form.category,currency:"ARS",lastMonth:gMonth(form.date)};
+        // Por defecto arranca activo (paused: false)
+        const newR={id:`rec_${uid()}`,description:form.description,amount:ars,type:form.type,category:form.category,currency:"ARS",lastMonth:gMonth(form.date), paused: false};
         update({transactions:newTxs,recurring:[...recurring,newR]});
         notify("Movimiento programado para repetirse ✓");
       }else{
@@ -548,9 +616,25 @@ function Transactions({state,update,notify}){
     <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}><select className="inp" style={{width:"auto",minWidth:100}} value={filter.month} onChange={e=>setFilter(f=>({...f,month:e.target.value}))}><option value="">Todos los meses</option>{months.map(m=><option key={m}>{m}</option>)}</select><select className="inp" style={{width:"auto"}} value={filter.type} onChange={e=>setFilter(f=>({...f,type:e.target.value}))}><option value="">Todos</option><option value="expense">Gastos</option><option value="income">Ingresos</option></select><select className="inp" style={{width:"auto",minWidth:100}} value={filter.cat} onChange={e=>setFilter(f=>({...f,cat:e.target.value}))}><option value="">Categorías</option>{CATS.map(c=><option key={c}>{c}</option>)}</select>{(filter.month||filter.type||filter.cat)&&<button className="btn bg bsm" onClick={()=>setFilter({month:"",type:"",cat:""})}>Limpiar</button>}</div>
     <div className="card" style={{padding:0,overflow:"auto"}}><table className="tbl"><thead><tr><th className="hide-m">Fecha</th><th>Descripción</th><th>Categoría</th><th className="hide-m">Tipo</th><th>Monto</th><th></th></tr></thead><tbody>{rows.length===0?<tr><td colSpan={6} style={{textAlign:"center",padding:"36px 0",color:T.muted,fontSize:13}}>Sin movimientos</td></tr>:rows.map(t=>(<tr key={t.id}><td className="mono hide-m" style={{color:T.muted,fontSize:11}}>{t.date}</td><td style={{maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td><td><button onClick={()=>setEC({id:t.id,cat:t.category})} style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:6,padding:"3px 9px",fontSize:11,color:T.mid,cursor:"pointer"}}>{t.category}</button></td><td className="hide-m"><span className={`tag ${t.type==="income"?"ti":t.category==="💰 Ahorro"?"ts":"te"}`}>{t.type==="income"?"Ingreso":t.category==="💰 Ahorro"?"Ahorro":"Gasto"}</span></td><td className="mono" style={{color:t.type==="income"?T.teal:T.red,fontWeight:500}}>{t.type==="income"?"+":"-"}{fmt(t.amount)}</td><td style={{display:"flex",gap:6,justifyContent:"flex-end"}}><button className="btn bg bsm" style={{padding:"4px 8px"}} onClick={()=>{setForm({date:t.date,description:t.description.replace("🔁 ",""),amount:t.amount,type:t.type,category:t.category,currency:"ARS",isRecurring:false});setETx(t.id);setSA(true);}}>✎</button><button className="btn bd bsm" style={{padding:"4px 8px"}} onClick={()=>{update({transactions:transactions.filter(x=>x.id!==t.id)});notify("Eliminado","err");}}><ic.Trash/></button></td></tr>))}</tbody></table></div>
     
-    {showAdd&&<div className="ov" onClick={e=>{if(e.target===e.currentTarget){setSA(false);setETx(null);}}}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h2 style={{fontSize:18,fontWeight:700}}>{editTx?"Editar movimiento":"Nuevo movimiento"}</h2><button className="btn bg bsm" onClick={()=>{setSA(false);setETx(null);}}><ic.X/></button></div><div style={{display:"flex",flexDirection:"column",gap:12}}><div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha</label><input type="date" className="inp" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tipo</label><select className="inp" value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))}><option value="expense">💸 Gasto</option><option value="income">💵 Ingreso</option></select></div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Descripción</label><input className="inp" placeholder="ej: Alquiler / Netflix" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/></div><div className="g3"><div style={{gridColumn:"1/3"}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Monto (positivo siempre)</label><input className="inp" placeholder="15000" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda</label><select className="inp" value={form.currency} onChange={e=>setForm(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select></div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Categoría</label><select className="inp" value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select></div>{!editTx&&(<label style={{display:"flex",alignItems:"center",gap:10,fontSize:12,color:form.isRecurring?T.lime:T.white,marginTop:4,background:form.isRecurring?"rgba(200,255,87,.08)":T.raised,padding:"12px 14px",borderRadius:10,border:`1px solid ${form.isRecurring?"rgba(200,255,87,.3)":T.border}`,cursor:"pointer",transition:"all .2s"}}><input type="checkbox" checked={form.isRecurring} onChange={e=>setForm(f=>({...f,isRecurring:e.target.checked}))} style={{accentColor:T.lime,width:16,height:16}}/><div><div style={{fontWeight:600}}>🔁 Repetir todos los meses</div><div style={{fontSize:10,color:T.muted,marginTop:2,fontWeight:400}}>La app lo cargará automáticamente el día 1 de cada mes.</div></div></label>)}{form.currency==="USD"&&px(form.amount)>0&&<div style={{background:"rgba(77,158,255,.08)",border:`1px solid rgba(77,158,255,.2)`,borderRadius:8,padding:"8px 12px",fontSize:11,color:T.blue}}>💡 = {fARS(Math.abs(px(form.amount))*usdRate)} ARS al tipo oficial ${usdRate}</div>}<button className="btn bl" style={{justifyContent:"center",marginTop:8}} onClick={saveTx}>{editTx?"Guardar cambios":"Agregar Movimiento"}</button></div></div></div>}
+    {showAdd&&<div className="ov" onClick={e=>{if(e.target===e.currentTarget){setSA(false);setETx(null);}}}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h2 style={{fontSize:18,fontWeight:700}}>{editTx?"Editar movimiento":"Nuevo movimiento"}</h2><button className="btn bg bsm" onClick={()=>{setSA(false);setETx(null);}}><ic.X/></button></div><div style={{display:"flex",flexDirection:"column",gap:12}}><div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha</label><input type="date" className="inp" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tipo</label><select className="inp" value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))}><option value="expense">💸 Gasto</option><option value="income">💵 Ingreso</option></select></div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Descripción</label><input className="inp" placeholder="ej: Alquiler / Netflix" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/></div><div className="g3"><div style={{gridColumn:"1/3"}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Monto (positivo siempre)</label><input className="inp" placeholder="15000" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda</label><select className="inp" value={form.currency} onChange={e=>setForm(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select></div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Categoría</label><select className="inp" value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select></div>{!editTx&&(<label style={{display:"flex",alignItems:"center",gap:10,fontSize:12,color:form.isRecurring?T.lime:T.white,marginTop:4,background:form.isRecurring?"rgba(200,255,87,.08)":T.raised,padding:"12px 14px",borderRadius:10,border:`1px solid ${form.isRecurring?"rgba(200,255,87,.3)":T.border}`,cursor:"pointer",transition:"all .2s"}}><input type="checkbox" checked={form.isRecurring} onChange={e=>setForm(f=>({...f,isRecurring:e.target.checked}))} style={{accentColor:T.lime,width:16,height:16}}/><div><div style={{fontWeight:600}}>🔁 Repetir todos los meses</div><div style={{fontSize:10,color:T.muted,marginTop:2,fontWeight:400}}>La app lo cargará automáticamente el día 1 de cada mes.</div></div></label>)}{form.currency==="USD"&&px(form.amount)>0&&<div style={{background:"rgba(77,158,255,.08)",border:`1px solid rgba(77,158,255,.2)`,borderRadius:8,padding:"8px 12px",fontSize:11,color:T.blue}}>💡 = {fARS(Math.abs(px(form.amount))*usdRate)} ARS al tipo oficial actual</div>}<button className="btn bl" style={{justifyContent:"center",marginTop:8}} onClick={saveTx}>{editTx?"Guardar cambios":"Agregar Movimiento"}</button></div></div></div>}
     
-    {showRec&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setSRec(false)}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}><h2 style={{fontSize:18,fontWeight:700}}>Suscripciones y Recurrentes</h2><button className="btn bg bsm" onClick={()=>setSRec(false)}><ic.X/></button></div><div style={{fontSize:12,color:T.mid,marginBottom:16}}>Acá ves los gastos que se inyectan automáticamente cada mes. Si eliminás uno, no afectará a los meses anteriores.</div>{recurring.length===0?<div style={{color:T.muted,fontSize:12,textAlign:"center",padding:20,background:T.raised,borderRadius:12}}>No tenés gastos recurrentes configurados.</div>:recurring.map(r=>(<div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:T.raised,borderRadius:10,padding:"12px 14px",marginBottom:8,border:`1px solid ${T.border}`}}><div><div style={{fontSize:13,fontWeight:600}}>{r.description}</div><div style={{fontSize:10,color:T.muted,marginTop:3}}>{r.category} · Último cobro: {r.lastMonth}</div></div><div style={{display:"flex",alignItems:"center",gap:12}}><span className="mono" style={{fontSize:14,color:r.type==="income"?T.teal:T.red,fontWeight:500}}>{fmt(r.amount)}</span><button className="btn bd bsm" onClick={()=>{update({recurring:recurring.filter(x=>x.id!==r.id)});notify("Suscripción cancelada","err");}}><ic.Trash/></button></div></div>))}</div></div>}
+    {/* ── ACÁ ESTÁ EL BOTÓN DE PAUSA MÁGICO ── */}
+    {showRec&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setSRec(false)}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}><h2 style={{fontSize:18,fontWeight:700}}>Suscripciones y Recurrentes</h2><button className="btn bg bsm" onClick={()=>setSRec(false)}><ic.X/></button></div><div style={{fontSize:12,color:T.mid,marginBottom:16}}>Acá ves los gastos que se inyectan automáticamente cada mes. Si eliminás uno, no afectará a los meses anteriores.</div>
+    {recurring.length===0?<div style={{color:T.muted,fontSize:12,textAlign:"center",padding:20,background:T.raised,borderRadius:12}}>No tenés gastos recurrentes configurados.</div>:recurring.map(r=>(
+      <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:T.raised,borderRadius:10,padding:"12px 14px",marginBottom:8,border:`1px solid ${T.border}`, opacity: r.paused ? 0.5 : 1}}>
+        <div>
+          <div style={{fontSize:13,fontWeight:600,color: r.paused ? T.muted : T.white}}>{r.paused&&"⏸️ "}{r.description}</div>
+          <div style={{fontSize:10,color:T.muted,marginTop:3}}>{r.category} · Último cobro: {r.lastMonth}</div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span className="mono" style={{fontSize:14,color:r.paused ? T.muted : (r.type==="income"?T.teal:T.red),fontWeight:500,marginRight:4}}>{fmt(r.amount)}</span>
+          <button className="btn bg bsm" style={{padding:"4px 8px"}} title={r.paused?"Reanudar":"Pausar"} onClick={()=>update({recurring: recurring.map(x=>x.id===r.id?{...x,paused:!x.paused}:x)})}>
+            {r.paused ? "▶️" : "⏸️"}
+          </button>
+          <button className="btn bd bsm" style={{padding:"4px 8px"}} onClick={()=>{update({recurring:recurring.filter(x=>x.id!==r.id)});notify("Suscripción eliminada","err");}}><ic.Trash/></button>
+        </div>
+      </div>
+    ))}</div></div>}
     
     {editCat&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setEC(null)}><div className="modal" style={{width:320}}><h2 style={{fontSize:16,fontWeight:700,marginBottom:14}}>Cambiar categoría</h2><select className="inp" style={{marginBottom:14}} value={editCat.cat} onChange={e=>setEC(c=>({...c,cat:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select><div style={{display:"flex",gap:8}}><button className="btn bl" style={{flex:1,justifyContent:"center"}} onClick={()=>{update({transactions:transactions.map(t=>t.id===editCat.id?{...t,category:editCat.cat}:t)});setEC(null);notify("Guardado ✓");}}>Guardar</button><button className="btn bg" onClick={()=>setEC(null)}>Cancelar</button></div></div></div>}
     
@@ -925,7 +1009,7 @@ function Analytics({state}){
   const NOW=getNow();
   const [range,setRange]=useState(6);
 
-  // 1. GRÁFICO DE BARRAS (Tendencia limpia y perfecta leyendo sueldos)
+  // 1. GRÁFICO DE BARRAS (Tendencia limpia)
   const months=useMemo(()=>Array.from({length:range},(_,i)=>{
     const d=new Date(NOW.getFullYear(),NOW.getMonth()-range+1+i,1);
     const m=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
@@ -952,7 +1036,7 @@ function Analytics({state}){
   const ctot=Object.values(cm).reduce((s,v)=>s+v,0);
   const cats=Object.entries(cm).sort((a,b)=>b[1]-a[1]).map(([c,v],i)=>({c,v:toDsp(v),pct:ctot>0?(v/ctot*100).toFixed(1):0,col:CPAL[i%CPAL.length]}));
 
-  // 3. TOTALES GLOBALES (Para la segunda fila de tarjetas)
+  // 3. TOTALES GLOBALES (Flujo de caja histórico)
   const allMonths = [...new Set([...transactions.map(t=>gMonth(t.date)), ...salaries.map(s=>s.month)])];
   let totInc = 0;
   allMonths.forEach(m => {
@@ -964,24 +1048,24 @@ function Analytics({state}){
   const savR=totInc>0?clamp(((totInc-totExp)/totInc)*100,-100,100).toFixed(1):"0";
   const savN=parseFloat(savR);
 
-  // 4. PATRIMONIO REAL (Portfolio + Ahorros explícitos)
+  // 4. PATRIMONIO REAL (Inversiones + Efectivo guardado)
   const portfolioValArs=holdings.reduce((s,h)=>s+calcHoldingValueArs(h,marketPrices,usdRate).curArs,0);
   const portfolioInvArs=holdings.reduce((s,h)=>s+calcHoldingValueArs(h,marketPrices,usdRate).invArs,0);
   const portfolioPnlArs=portfolioValArs-portfolioInvArs;
   
-  // Ahorro: Solo suma la plata que vos decidiste separar (Categoría: Ahorro)
+  // Suma solo la plata categorizada explícitamente como "Ahorro"
   const totalSavingsArs=transactions.filter(t=>t.category==="💰 Ahorro").reduce((s,t)=>s+t.amount,0);
 
   return(
     <div className="up">
       <PH title="Analíticas" sub="Histórico · Proyecciones · Patrimonio" right={<select className="inp" style={{width:"auto"}} value={range} onChange={e=>setRange(+e.target.value)}><option value={3}>3 meses</option><option value={6}>6 meses</option><option value={12}>12 meses</option></select>}/>
 
-      {/* FILA 1: PATRIMONIO */}
+      {/* FILA 1: PATRIMONIO REAL */}
       {(portfolioValArs>0||totalSavingsArs>0)&&
         <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
           {[{l:"Portfolio",v:fmt(portfolioValArs),c:T.blue,i:"📊"},
             {l:"P&L Portfolio",v:`${portfolioPnlArs>=0?"+":""}${fmt(portfolioPnlArs)}`,c:portfolioPnlArs>=0?T.teal:T.red,i:portfolioPnlArs>=0?"📈":"📉"},
-            {l:"Ahorros",v:fmt(totalSavingsArs),c:T.teal,i:"💰"},
+            {l:"Ahorros (Efectivo)",v:fmt(totalSavingsArs),c:T.teal,i:"💰"},
             {l:"Patrimonio Total",v:fmt(portfolioValArs+totalSavingsArs),c:T.lime,i:"🏛️"}
           ].map((k,i)=>(
             <div key={i} className="card csm">
