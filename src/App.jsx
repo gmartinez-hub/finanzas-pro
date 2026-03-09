@@ -133,18 +133,40 @@ const goalPlan=(goals,salaries,transactions,holdings=[],marketPrices={},usdRate=
 };
 
 const healthScore=(txs,goals,holdings=[])=>{
-  const CUR=getCUR();const c=txs.filter(t=>gMonth(t.date)===CUR);
+  const CUR=getCUR();
+  const c=txs.filter(t=>gMonth(t.date)===CUR);
+  
   const inc=c.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
-  const sav=c.filter(t=>t.category==="💰 Ahorro").reduce((s,t)=>s+t.amount,0);
   const exp=c.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
   const cuotas=c.filter(t=>t.category==="💳 Cuotas").reduce((s,t)=>s+t.amount,0);
+
   const hasPortfolio=holdings.length>0;
-  const s1=Math.min(inc>0?clamp(sav/inc,0,1)*30:0,30);
-  const s2=inc>0&&inc>exp?25:0;
-  const s3=Math.max(0,25-(inc>0?clamp(cuotas/inc,0,1)*100:0));
-  const s4Base=goals.some(g=>g.saved>0)?15:5;
-  const s4=s4Base+(hasPortfolio?5:0);
-  return{score:clamp(Math.round(s1+s2+s3+s4),0,100),items:[{l:"Tasa ahorro",v:s1,m:30},{l:"Balance +",v:s2,m:25},{l:"Sin cuotas",v:s3,m:25},{l:"Metas + inversiones",v:s4,m:20}]};
+  // Verifica si hay metas con plata guardada o inversiones vinculadas a metas
+  const hasActiveGoals=goals.some(g=>g.saved>0 || holdings.some(h=>h.goalId===g.id));
+
+  // 1. Ahorro Real (Max 30) -> Se llena si te sobra el 20% o más de tu ingreso real
+  const savRate = inc > 0 ? clamp((inc - exp) / inc, 0, 1) : 0;
+  const s1 = inc > 0 ? clamp((savRate / 0.20) * 30, 0, 30) : 0;
+
+  // 2. Superávit (Max 20) -> Ganar más de lo que se gasta en el mes corriente
+  const s2 = (inc > 0 && inc > exp) ? 20 : 0;
+
+  // 3. Deuda Controlada (Max 30) -> Cuotas sanas bajo el 30% del ingreso
+  const debtRate = inc > 0 ? clamp(cuotas / inc, 0, 1) : 0;
+  const s3 = inc > 0 ? Math.max(0, 30 - (debtRate / 0.30 * 30)) : (cuotas === 0 ? 30 : 0);
+
+  // 4. Diversificación (Max 20) -> 10 por tener metas, 10 por tener inversiones
+  const s4 = (hasActiveGoals ? 10 : 0) + (hasPortfolio ? 10 : 0);
+
+  return {
+    score: clamp(Math.round(s1 + s2 + s3 + s4), 0, 100),
+    items: [
+      {l: "Ahorro (>20%)", v: s1, m: 30},
+      {l: "Superávit mensual", v: s2, m: 20},
+      {l: "Deuda (<30%)", v: s3, m: 30},
+      {l: "Inversión y Metas", v: s4, m: 20}
+    ]
+  };
 };
 
 const CSS=`@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=DM+Mono:wght@300;400;500&display=swap');*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{background:#07080D;color:#F0F2F7;font-family:'Sora',sans-serif;overflow:hidden;height:100%}::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#3A4255;border-radius:99px}input,select,textarea,button{font-family:inherit}button{cursor:pointer;border:none;background:none}.mono{font-family:'DM Mono',monospace}.up{animation:up .35s cubic-bezier(.16,1,.3,1) both}@keyframes up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}.d1{animation-delay:.05s}.d2{animation-delay:.1s}.d3{animation-delay:.15s}.d4{animation-delay:.2s}.nav{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;font-size:13px;font-weight:500;color:#3A4255;transition:all .18s;width:100%;text-align:left;position:relative}.nav:hover{color:#F0F2F7;background:#111520}.nav.on{color:#C8FF57;background:rgba(200,255,87,.07)}.nav.on::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:60%;background:#C8FF57;border-radius:0 2px 2px 0}.inp{background:#111520;border:1px solid #1C2030;border-radius:10px;padding:10px 13px;font-size:13px;color:#F0F2F7;outline:none;transition:border .15s;width:100%}.inp:focus{border-color:#7CB33A}.inp::placeholder{color:#3A4255}.btn{display:inline-flex;align-items:center;gap:7px;padding:10px 18px;border-radius:10px;font-size:13px;font-weight:600;transition:all .15s;white-space:nowrap}.btn:disabled{opacity:.5;cursor:not-allowed}.bl{background:#C8FF57;color:#07080D}.bl:hover:not(:disabled){background:#A8E030;transform:translateY(-1px);box-shadow:0 4px 20px rgba(200,255,87,.3)}.bg{background:#111520;color:#8892A4;border:1px solid #1C2030}.bg:hover:not(:disabled){background:#1C2030;color:#F0F2F7}.bd{background:rgba(255,77,106,.08);color:#FF4D6A;border:1px solid rgba(255,77,106,.2)}.bd:hover:not(:disabled){background:rgba(255,77,106,.18)}.bsm{padding:6px 12px;font-size:12px;border-radius:8px}.card{background:#0C0E15;border:1px solid #1C2030;border-radius:16px;padding:20px}.csm{border-radius:12px;padding:14px}.tag{display:inline-flex;align-items:center;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:600}.ti{background:rgba(0,229,195,.12);color:#00E5C3}.te{background:rgba(255,77,106,.12);color:#FF4D6A}.ts{background:rgba(77,158,255,.12);color:#4D9EFF}.prog{height:6px;border-radius:3px;background:#111520;overflow:hidden}.progf{height:100%;border-radius:3px;transition:width .7s cubic-bezier(.16,1,.3,1)}.ov{position:fixed;inset:0;background:rgba(0,0,0,.8);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px}.modal{background:#0C0E15;border:1px solid #1C2030;border-radius:20px;padding:28px;width:520px;max-width:100%;max-height:92vh;overflow-y:auto}.tbl{width:100%;border-collapse:collapse}.tbl th{padding:9px 14px;font-size:10px;color:#3A4255;font-weight:600;text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid #1C2030;text-align:left}.tbl td{padding:9px 14px;font-size:13px;border-bottom:1px solid #0E1117;vertical-align:middle}.tbl tr:hover td{background:#111520}.tbl tr:last-child td{border-bottom:none}.toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:12px;font-size:13px;font-weight:500;z-index:999;animation:up .3s ease}.tok{background:rgba(0,229,195,.1);color:#00E5C3;border:1px solid rgba(0,229,195,.3)}.terr{background:rgba(255,77,106,.1);color:#FF4D6A;border:1px solid rgba(255,77,106,.3)}.tinfo{background:rgba(77,158,255,.1);color:#4D9EFF;border:1px solid rgba(77,158,255,.3)}.dots{display:inline-flex;gap:4px;align-items:center}.dots span{width:5px;height:5px;border-radius:50%;background:currentColor;animation:blink 1.2s infinite}.dots span:nth-child(2){animation-delay:.2s}.dots span:nth-child(3){animation-delay:.4s}@keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1}}.dz{border:2px dashed #1C2030;border-radius:14px;padding:36px 24px;text-align:center;transition:all .2s;cursor:pointer}.dz:hover,.dz.ov2{border-color:#C8FF57;background:rgba(200,255,87,.03)}.imgdrop{border:2px dashed #1C2030;border-radius:14px;min-height:180px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;cursor:pointer;transition:all .2s;overflow:hidden}.imgdrop:hover,.imgdrop.ov2{border-color:#A78BFA;background:rgba(167,139,250,.04)}.g2{display:grid;gap:10px;grid-template-columns:1fr 1fr}.g3{display:grid;gap:10px;grid-template-columns:1fr 1fr 1fr}.tabbar{display:flex;gap:3px;background:#111520;padding:4px;border-radius:11px;width:fit-content;flex-wrap:wrap}.tab{padding:7px 15px;border-radius:8px;font-size:12px;font-weight:600;transition:all .15s;color:#3A4255;cursor:pointer}.tab.on{background:#0C0E15;color:#F0F2F7;box-shadow:0 0 0 1px #1C2030}.chip{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:8px;font-size:11px;font-weight:600;background:#111520;border:1px solid #1C2030;color:#8892A4}.sb{background:rgba(200,255,87,.15);color:#C8FF57;border:1px solid rgba(200,255,87,.3)}.buy{background:rgba(0,229,195,.12);color:#00E5C3;border:1px solid rgba(0,229,195,.25)}.hld{background:rgba(255,184,48,.12);color:#FFB830;border:1px solid rgba(255,184,48,.25)}.sel{background:rgba(255,77,106,.12);color:#FF4D6A;border:1px solid rgba(255,77,106,.25)}@media(max-width:768px){.hide-m{display:none!important}.modal{padding:18px;width:100%;border-radius:16px}.card{padding:14px}.kpi-grid{grid-template-columns:1fr 1fr!important}.trend-grid{grid-template-columns:1fr!important}.g2,.g3{grid-template-columns:1fr!important}.tbl td,.tbl th{padding:6px 8px;font-size:11px}.inv-grid{grid-template-columns:1fr!important}}@media(max-width:480px){.kpi-grid{grid-template-columns:1fr!important}}`;
