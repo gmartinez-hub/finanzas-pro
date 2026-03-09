@@ -430,7 +430,7 @@ function Investments({state,update,notify}){
     return{items,gInvArs,gCurArs,gPnlArs:gCurArs-gInvArs};
   },[holdings,marketPrices,usdRate]);
 
-  // ── refreshPortfolio: Yahoo Finance para acciones + Binance para crypto ──
+ // ── refreshPortfolio: auto Yahoo/Binance ──
   const refreshPortfolio=async()=>{
     setRI("all");
     notify("Sincronizando mercado...","info");
@@ -443,7 +443,9 @@ function Investments({state,update,notify}){
           if(r.ok){const d=await r.json();newPrices[h.ticker]={price:parseFloat(d.price),currency:"USD"};updated++;}
         }catch(e){}
       }else if(["accion","cedear","etf"].includes(h.type)){
-        const pd=await fetchStockPrice(h.ticker);
+        // MAGIA TRANSPARENTE: Si es CEDEAR o se compró en pesos, busca en la bolsa local
+        const queryTicker = (h.type === "cedear" || h.originalCurrency === "ARS") && !h.ticker.endsWith(".BA") ? `${h.ticker}.BA` : h.ticker;
+        const pd=await fetchStockPrice(queryTicker);
         if(pd?.price){newPrices[h.ticker]={price:pd.price,currency:pd.currency||"USD"};updated++;}
       }
     }
@@ -452,35 +454,42 @@ function Investments({state,update,notify}){
     notify(`Mercado actualizado (${updated} activos) ✓`);
   };
 
-  // ── refreshSingle: auto Yahoo/Binance, fallback a prompt manual ──
+// ── refreshSingle: RESTAURADO CON PROMPT MANUAL ──
   const refreshSingle=async(h)=>{
     setRI(h.id);
     let newPrices={...marketPrices};
+
     if(h.type==="crypto"){
       try{
         const r=await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${h.ticker.toUpperCase()}USDT`);
         if(r.ok){
           const d=await r.json();
-          newPrices[h.ticker]={price:parseFloat(d.price),currency:"USD"};
-          update({marketPrices:newPrices});
-          notify(`${h.ticker}: $${parseFloat(d.price).toLocaleString("en-US")} USD ✓`);
+          // Restauramos el prompt para crypto
+          const p = window.prompt(`Cotización actual de ${h.ticker} (Binance):`, parseFloat(d.price));
+          if(p && !isNaN(px(p)) && px(p) > 0){
+            newPrices[h.ticker]={price:px(p),currency:"USD"};
+            update({marketPrices:newPrices});
+            notify(`Precio actualizado ✓`);
+          }
         }else throw new Error();
       }catch{notify(`Error Binance para ${h.ticker}`,"err");}
     }else if(["accion","cedear","etf"].includes(h.type)){
       notify(`Buscando precio de ${h.ticker}...`,"info");
-      const pd=await fetchStockPrice(h.ticker);
-      if(pd?.price){
-        newPrices[h.ticker]={price:pd.price,currency:pd.currency||"USD"};
+      
+      // MAGIA TRANSPARENTE:
+      const queryTicker = (h.type === "cedear" || h.originalCurrency === "ARS") && !h.ticker.endsWith(".BA") ? `${h.ticker}.BA` : h.ticker;
+      const pd=await fetchStockPrice(queryTicker);
+      
+      // RESTAURAMOS EL PROMPT: Sugiere el de Yahoo, pero te deja editarlo manualmente
+      const suggestedPrice = pd?.price || marketPrices[h.ticker]?.price || h.originalBuyPrice || h.buyPrice || 0;
+      const currentCur = pd?.currency || h.originalCurrency || "ARS";
+      
+      const p=window.prompt(`Precio manual para ${h.ticker} en ${currentCur}:`, suggestedPrice);
+      
+      if(p && !isNaN(px(p)) && px(p) > 0){
+        newPrices[h.ticker]={price:px(p),currency:currentCur};
         update({marketPrices:newPrices});
-        notify(`${h.ticker}: ${pd.currency==="ARS"?fARS(pd.price):fUSD(pd.price)} ✓`);
-      }else{
-        const cur=marketPrices[h.ticker]?.price||h.originalBuyPrice||h.buyPrice;
-        const p=window.prompt(`No se encontró precio automático para ${h.ticker}.\nIngresá el precio en ${h.originalCurrency||"USD"}:`,cur);
-        if(p&&!isNaN(px(p))&&px(p)>0){
-          newPrices[h.ticker]={price:px(p),currency:h.originalCurrency||"USD"};
-          update({marketPrices:newPrices});
-          notify(`Precio de ${h.ticker} guardado ✓`);
-        }
+        notify(`Precio de ${h.ticker} guardado ✓`);
       }
     }else{
       notify(`Rendimiento calculado a hoy ✓`);
