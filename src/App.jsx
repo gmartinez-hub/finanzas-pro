@@ -44,8 +44,15 @@ async function ai(prompt,sys=""){try{const r=await fetch(AI_URL,{method:"POST",h
 
 async function aiVision(b64,rawMime,prompt){const VALID=["image/jpeg","image/png","image/gif","image/webp"];const mime=VALID.includes(rawMime)?rawMime:"image/png";try{const r=await fetch(AI_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5-20250929",max_tokens:1500,system:"Financial data extractor. Return ONLY valid JSON, no markdown.",messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:mime,data:b64}},{type:"text",text:prompt}]}]})});if(!r.ok){const e=await r.text();throw new Error(`HTTP ${r.status}: ${e}`);}const d=await r.json();return(d.content?.filter(b=>b.type==="text").map(b=>b.text).join("")||"").replace(/`{3}json|`{3}/g,"").trim();}catch(e){console.error("Vision error",e);return null;}}
 
-async function extractFromImage(b64,mime){const raw=await aiVision(b64,mime,`Extract transactions from Argentine banking app screenshot. Return ONLY JSON: {"transactions":[{"date":"YYYY-MM-DD","description":"<merchant>","amount":<positive number>,"type":"income|expense","category":"<one of: ${CATS.join(", ")}>"}],"currency":"ARS|USD","appDetected":"<app or null>"} Rules: amounts always POSITIVE. income for deposits/credits/salary. expense for purchases. Use ${todayISO()} if date unclear. IMPORTANT: category MUST include the emoji prefix exactly as listed.`);if(!raw)return null;try{const parsed=JSON.parse(cleanJSON(raw));if(parsed.transactions){parsed.transactions=parsed.transactions.map(t=>({...t,category:matchCat(t.category)}));}return parsed;}catch{return null;}}
-
+async function extractFromImage(b64,mime){
+  const raw=await aiVision(b64,mime,`Extract transactions from Argentine banking app screenshot. Return ONLY JSON: {"transactions":[{"date":"YYYY-MM-DD","description":"<merchant>","amount":<positive number>,"type":"income|expense","category":"<one of: ${CATS.join(", ")}>"}],"currency":"ARS|USD","appDetected":"<app or null>"} Rules: Try hard to find the transaction year; if not visible, use ${new Date().getFullYear()}. Amounts always POSITIVE. IMPORTANT: category MUST include the emoji prefix exactly as listed.`);
+  if(!raw)return null;
+  try{
+    const parsed=JSON.parse(cleanJSON(raw));
+    if(parsed.transactions){parsed.transactions=parsed.transactions.map(t=>({...t,category:matchCat(t.category)}));}
+    return parsed;
+  }catch{return null;}
+}
 async function autoScanInvestments(profile,usdRate){const raw=await ai(`Argentine market. ${todayISO()}. Risk="${profile.risk}", horizon="${profile.horizon}". USD:${usdRate}. Find 3 investment opportunities. CONCISE. Return ONLY valid JSON: {"opportunities":[{"ticker":"","name":"","type":"CEDEAR|ARG_STOCK|ETF|BOND","signal":"STRONG BUY|BUY|HOLD","timeframe":"SHORT|LONG|BOTH","upside":0,"currentEstimate":0,"peRatio":null,"revenueGrowth":null,"moat":"one sentence","thesis":"two sentences max","risk":"low|medium|high","catalysts":["max 2"],"bearRisk":"one sentence","confidenceScore":0,"profileFit":0}],"marketContext":"one sentence","topPick":"","scanDate":"${todayISO()}"}`, "Argentine equity analyst. CONCISE responses. Valid JSON only.");if(!raw)throw new Error("Sin respuesta");return JSON.parse(cleanJSON(raw));}
 
 async function analyzeStock(ticker,name){const raw=await ai(`Analyze ${name||ticker} (${ticker}) fundamentals ${todayISO()}. Return ONLY valid JSON: {"ticker":"${ticker}","company":"${name||ticker}","sector":"","signal":"STRONG BUY|BUY|HOLD|SELL|STRONG SELL","timeframe":"SHORT|LONG|BOTH","priceTarget12m":0,"currentEstimate":0,"upside":0,"peRatio":null,"revenueGrowth":null,"moat":"","bullCase":"","bearCase":"","catalysts":[""],"risks":[""],"summary":"","confidenceScore":0}`,"Senior equity analyst. Valid JSON only.");if(!raw)return null;try{return JSON.parse(cleanJSON(raw));}catch{return null;}}
@@ -958,5 +965,61 @@ function Import({state,update,notify}){
   {tab==="csv"&&<div><div className={`dz${over?" ov2":""}`} onDragOver={e=>{e.preventDefault();setOver(true);}} onDragLeave={()=>setOver(false)} onDrop={e=>{e.preventDefault();setOver(false);const f=e.dataTransfer.files[0];if(f)handleCSV(f);}} onClick={()=>csvRef.current?.click()}><div style={{fontSize:40,marginBottom:10}}>📂</div><div style={{fontSize:15,fontWeight:600,color:T.mid}}>Arrastrá o hacé clic</div><div style={{fontSize:12,color:T.muted}}>CSV con coma, punto y coma o tabulación</div><input ref={csvRef} type="file" accept=".csv,.txt" style={{display:"none"}} onChange={e=>e.target.files[0]&&handleCSV(e.target.files[0])}/></div><div className="card csm" style={{marginTop:12}}><div style={{fontSize:11,color:T.mid,fontWeight:600,marginBottom:7}}>Formato esperado</div><code style={{fontSize:11,color:T.lime,display:"block",background:T.raised,padding:"10px 14px",borderRadius:8,lineHeight:1.7,fontFamily:"'DM Mono',monospace"}}>fecha;descripcion;importe<br/>2025-01-15;Supermercado Coto;-15000<br/>2025-01-20;Sueldo enero;350000</code></div></div>}
   {tab==="paste"&&<div><div style={{fontSize:12,color:T.mid,marginBottom:8}}>Pegá el texto copiado de cualquier app o homebanking</div><textarea className="inp" style={{minHeight:150,resize:"vertical",lineHeight:1.6,fontSize:13}} placeholder={"15/01 Netflix $2.800\n16/01 Supermercado $15.200\n20/01 Sueldo $350.000"} value={paste} onChange={e=>setPaste(e.target.value)}/><button className="btn bl" style={{marginTop:10}} onClick={doPaste} disabled={!paste.trim()}>Analizar texto</button></div>}
   {tab==="guide"&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:12}}>{[{app:"🟢 Mercado Pago",steps:["App → Actividad","Filtrar fecha → ⋮ → Exportar CSV","O capturá screenshot y subí la imagen"]},{app:"🟣 Ualá",steps:["Movimientos → ⬇ Descargar CSV","O screenshot del historial"]},{app:"🔵 Brubank",steps:["Cuenta → Movimientos → Exportar CSV","O screenshot del historial"]},{app:"🏦 Galicia / Nación",steps:["Homebanking → Extracto → CSV","Formato: fecha;descripcion;debito;credito"]},{app:"📸 Cualquier app",steps:["Capturá screenshot del historial","Subí la imagen en 'Imagen'","La IA detecta los movimientos"]}].map(({app,steps})=><div key={app} className="card csm"><div style={{fontSize:13,fontWeight:600,marginBottom:9}}>{app}</div><ol style={{paddingLeft:16,display:"flex",flexDirection:"column",gap:6}}>{steps.map((s,i)=><li key={i} style={{fontSize:12,color:T.muted}}>{s}</li>)}</ol></div>)}</div>}
-  {preview.length>0&&<div style={{marginTop:22}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}><h2 style={{fontSize:16,fontWeight:700}}>{preview.length} movimientos detectados</h2><div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button className="btn bg" onClick={autoCatAll} disabled={autoRunning}>{autoRunning?<><Dots/> Categorizando...</>:"✨ Auto-categorizar IA"}</button><button className="btn bg" onClick={()=>{setPreview([]);setCE({});}}>Cancelar</button><button className="btn bl" onClick={confirm}>✓ Importar todo</button></div></div><div className="card" style={{padding:0,overflow:"auto",maxHeight:380}}><table className="tbl"><thead><tr><th className="hide-m">Fecha</th><th>Descripción</th><th>Monto</th><th className="hide-m">Tipo</th><th>Categoría</th></tr></thead><tbody>{preview.slice(0,50).map(t=>(<tr key={t.id}><td className="mono hide-m" style={{fontSize:11,color:T.muted}}>{t.date}</td><td style={{fontSize:12,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td><td className="mono" style={{fontSize:12,color:t.type==="income"?T.teal:T.red}}>{t.type==="income"?"+":"-"}{fARS(t.amount)}</td><td className="hide-m"><span className={`tag ${t.type==="income"?"ti":"te"}`} style={{fontSize:10}}>{t.type==="income"?"Ingreso":"Gasto"}</span></td><td><select className="inp" style={{fontSize:11,padding:"4px 8px"}} value={catE[t.id]||t.category} onChange={e=>setCE(c=>({...c,[t.id]:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select></td></tr>))}</tbody></table>{preview.length>50&&<div style={{padding:"8px 16px",fontSize:11,color:T.muted,textAlign:"center"}}>...y {preview.length-50} más</div>}</div></div>}</div>);
-}
+  {preview.length>0&&<div style={{marginTop:22}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
+      <h2 style={{fontSize:16,fontWeight:700}}>{preview.length} movimientos detectados</h2>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <button className="btn bg" onClick={autoCatAll} disabled={autoRunning}>{autoRunning?<><Dots/> Categorizando...</>:"✨ Auto-categorizar IA"}</button>
+        <button className="btn bg" onClick={()=>{setPreview([]);setCE({});}}>Cancelar</button>
+        <button className="btn bl" onClick={confirm}>✓ Importar todo</button>
+      </div>
+    </div>
+    <div className="card" style={{padding:0,overflow:"auto",maxHeight:450}}>
+      <table className="tbl">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Descripción</th>
+            <th>Monto</th>
+            <th className="hide-m">Tipo</th>
+            <th>Categoría</th>
+          </tr>
+        </thead>
+        <tbody>
+          {preview.slice(0,50).map((t, idx)=>(
+            <tr key={t.id}>
+              {/* FECHA EDITABLE: Ahora podés viajar al pasado */}
+              <td>
+                <input 
+                  type="date" 
+                  className="inp" 
+                  style={{fontSize:11, padding:"4px 6px", width:"auto", border:"none", background:T.raised, color:T.white}} 
+                  value={t.date} 
+                  onChange={e => {
+                    const upd = [...preview];
+                    upd[idx].date = e.target.value;
+                    setPreview(upd);
+                  }}
+                />
+              </td>
+              <td style={{fontSize:12,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td>
+              <td className="mono" style={{fontSize:12,color:t.type==="income"?T.teal:T.red}}>
+                {t.type==="income"?"+":"-"}{fARS(t.amount)}
+              </td>
+              <td className="hide-m">
+                <span className={`tag ${t.type==="income"?"ti":"te"}`} style={{fontSize:10}}>
+                  {t.type==="income"?"Ingreso":"Gasto"}
+                </span>
+              </td>
+              <td>
+                <select className="inp" style={{fontSize:11,padding:"4px 8px"}} value={catE[t.id]||t.category} onChange={e=>setCE(c=>({...c,[t.id]:e.target.value}))}>
+                  {CATS.map(c=><option key={c}>{c}</option>)}
+                </select>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {preview.length>50&&<div style={{padding:"8px 16px",fontSize:11,color:T.muted,textAlign:"center"}}>...y {preview.length-50} más</div>}
+    </div>
+  </div>}
