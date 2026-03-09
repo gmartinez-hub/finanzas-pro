@@ -442,16 +442,16 @@ function Investments({state,update,notify}){
           const r=await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${h.ticker.toUpperCase()}USDT`);
           if(r.ok){const d=await r.json();newPrices[h.ticker]={price:parseFloat(d.price),currency:"USD"};updated++;}
         }catch(e){}
-      }else if(["accion","cedear","etf"].includes(h.type)){
-        const pd=await fetchStockPrice(h.ticker);
-        if(pd?.price){newPrices[h.ticker]={price:pd.price,currency:pd.currency||"USD"};updated++;}
+}else if(["accion","cedear","etf"].includes(h.type)){
+        // Si lo compraste en ARS, le agregamos .BA para que Yahoo traiga el precio local exacto
+        const queryTicker = h.originalCurrency === "ARS" && !h.ticker.endsWith(".BA") ? `${h.ticker}.BA` : h.ticker;
+        const pd = await fetchStockPrice(queryTicker);
+        
+        if(pd?.price){
+          newPrices[h.ticker]={price:pd.price,currency:pd.currency||"USD"};
+          updated++;
+        }
       }
-    }
-    update({marketPrices:newPrices});
-    setRI(null);
-    notify(`Mercado actualizado (${updated} activos) ✓`);
-  };
-
   // ── refreshSingle: auto Yahoo/Binance, fallback a prompt manual ──
   const refreshSingle=async(h)=>{
     setRI(h.id);
@@ -473,15 +473,17 @@ function Investments({state,update,notify}){
         newPrices[h.ticker]={price:pd.price,currency:pd.currency||"USD"};
         update({marketPrices:newPrices});
         notify(`${h.ticker}: ${pd.currency==="ARS"?fARS(pd.price):fUSD(pd.price)} ✓`);
-      }else{
-        const cur=marketPrices[h.ticker]?.price||h.originalBuyPrice||h.buyPrice;
-        const p=window.prompt(`No se encontró precio automático para ${h.ticker}.\nIngresá el precio en ${h.originalCurrency||"USD"}:`,cur);
-        if(p&&!isNaN(px(p))&&px(p)>0){
-          newPrices[h.ticker]={price:px(p),currency:h.originalCurrency||"USD"};
-          update({marketPrices:newPrices});
-          notify(`Precio de ${h.ticker} guardado ✓`);
-        }
-      }
+}else if(["accion","cedear","etf"].includes(h.type)){
+      notify(`Buscando precio de ${h.ticker}...`,"info");
+      
+      // Misma lógica: si es ARS, buscamos el CEDEAR/Acción local
+      const queryTicker = h.originalCurrency === "ARS" && !h.ticker.endsWith(".BA") ? `${h.ticker}.BA` : h.ticker;
+      const pd = await fetchStockPrice(queryTicker);
+      
+      if(pd?.price){
+        newPrices[h.ticker]={price:pd.price,currency:pd.currency||"USD"};
+        update({marketPrices:newPrices});
+        notify(`${h.ticker}: ${pd.currency==="ARS"?fARS(pd.price):fUSD(pd.price)} ✓`);
     }else{
       notify(`Rendimiento calculado a hoy ✓`);
     }
