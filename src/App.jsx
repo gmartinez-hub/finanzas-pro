@@ -454,47 +454,50 @@ function Investments({state,update,notify}){
     notify(`Mercado actualizado (${updated} activos) ✓`);
   };
 
-// ── refreshSingle: RESTAURADO CON PROMPT MANUAL ──
-  const refreshSingle=async(h)=>{
+// ── 1. ACTUALIZACIÓN AUTOMÁTICA (Botoncito Refresh) ──
+  const autoRefreshSingle = async (h) => {
     setRI(h.id);
-    let newPrices={...marketPrices};
-
-    if(h.type==="crypto"){
-      try{
-        const r=await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${h.ticker.toUpperCase()}USDT`);
-        if(r.ok){
-          const d=await r.json();
-          // Restauramos el prompt para crypto
-          const p = window.prompt(`Cotización actual de ${h.ticker} (Binance):`, parseFloat(d.price));
-          if(p && !isNaN(px(p)) && px(p) > 0){
-            newPrices[h.ticker]={price:px(p),currency:"USD"};
-            update({marketPrices:newPrices});
-            notify(`Precio actualizado ✓`);
-          }
-        }else throw new Error();
-      }catch{notify(`Error Binance para ${h.ticker}`,"err");}
-    }else if(["accion","cedear","etf"].includes(h.type)){
-      notify(`Buscando precio de ${h.ticker}...`,"info");
-      
-      // MAGIA TRANSPARENTE:
+    let newPrices = { ...marketPrices };
+    if (h.type === "crypto") {
+      try {
+        const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${h.ticker.toUpperCase()}USDT`);
+        if (r.ok) {
+          const d = await r.json();
+          newPrices[h.ticker] = { price: parseFloat(d.price), currency: "USD" };
+          update({ marketPrices: newPrices });
+          notify(`Cotización Binance actualizada ✓`);
+        } else throw new Error();
+      } catch { notify(`Error Binance para ${h.ticker}`, "err"); }
+    } else if (["accion", "cedear", "etf"].includes(h.type)) {
+      notify(`Buscando precio de ${h.ticker}...`, "info");
       const queryTicker = (h.type === "cedear" || h.originalCurrency === "ARS") && !h.ticker.endsWith(".BA") ? `${h.ticker}.BA` : h.ticker;
-      const pd=await fetchStockPrice(queryTicker);
+      const pd = await fetchStockPrice(queryTicker);
       
-      // RESTAURAMOS EL PROMPT: Sugiere el de Yahoo, pero te deja editarlo manualmente
-      const suggestedPrice = pd?.price || marketPrices[h.ticker]?.price || h.originalBuyPrice || h.buyPrice || 0;
-      const currentCur = pd?.currency || h.originalCurrency || "ARS";
-      
-      const p=window.prompt(`Precio manual para ${h.ticker} en ${currentCur}:`, suggestedPrice);
-      
-      if(p && !isNaN(px(p)) && px(p) > 0){
-        newPrices[h.ticker]={price:px(p),currency:currentCur};
-        update({marketPrices:newPrices});
-        notify(`Precio de ${h.ticker} guardado ✓`);
+      if (pd?.price) {
+        newPrices[h.ticker] = { price: pd.price, currency: pd.currency || "USD" };
+        update({ marketPrices: newPrices });
+        notify(`${h.ticker}: ${pd.currency === "ARS" ? fARS(pd.price) : fUSD(pd.price)} ✓`);
+      } else {
+        notify(`No se encontró precio auto para ${h.ticker}`, "err");
       }
-    }else{
-      notify(`Rendimiento calculado a hoy ✓`);
+    } else {
+      notify(`Activo de tasa fija, rinde por tiempo ✓`);
     }
     setRI(null);
+  };
+
+  // ── 2. ACTUALIZACIÓN MANUAL (Botoncito Lápiz) ──
+  const editPriceManual = (h) => {
+    const currentPrice = marketPrices[h.ticker]?.price || h.originalBuyPrice || h.buyPrice || 0;
+    const currentCur = marketPrices[h.ticker]?.currency || h.originalCurrency || "ARS";
+    
+    const p = window.prompt(`Precio manual para ${h.ticker} en ${currentCur}:`, currentPrice);
+    if (p && !isNaN(px(p)) && px(p) > 0) {
+      let newPrices = { ...marketPrices };
+      newPrices[h.ticker] = { price: px(p), currency: currentCur };
+      update({ marketPrices: newPrices });
+      notify(`Precio manual guardado ✓`);
+    }
   };
 
   const addHolding=()=>{
