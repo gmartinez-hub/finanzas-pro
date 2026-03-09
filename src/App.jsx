@@ -291,7 +291,6 @@ export default function App(){
 
   const sidebar=<aside style={{width:isMobile?"100%":212,background:T.surface,borderRight:isMobile?"none":`1px solid ${T.border}`,display:"flex",flexDirection:"column",padding:"20px 12px",gap:2,flexShrink:0,...(isMobile?{position:"fixed",top:0,left:0,bottom:0,zIndex:300,width:260,transform:sideOpen?"translateX(0)":"translateX(-100%)",transition:"transform .25s cubic-bezier(.16,1,.3,1)",boxShadow:sideOpen?"8px 0 30px rgba(0,0,0,.6)":"none"}:{})}}><div style={{padding:"4px 10px 20px",display:"flex",alignItems:"center",gap:9,justifyContent:"space-between"}}><div style={{display:"flex",alignItems:"center",gap:9}}><div style={{width:30,height:30,background:T.lime,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>💳</div><div style={{fontSize:14,fontWeight:700,letterSpacing:"-.4px"}}>FinanzasPro</div></div>{isMobile&&<button onClick={()=>setSO(false)} style={{color:T.muted,padding:4}}><ic.X/></button>}</div>{nav.map(({id,l,I})=>(<button key={id} className={`nav${view===id?" on":""}`} onClick={()=>navTo(id)}><I/>{l}{id==="investments"&&state.savedAnalyses?.length>0&&<span style={{marginLeft:"auto",fontSize:10,background:T.raised,padding:"2px 6px",borderRadius:99,color:T.muted}}>{state.savedAnalyses.length}</span>}</button>))}<div style={{flex:1}}/>{alerts.length>0&&<div onClick={()=>navTo("transactions")} style={{background:"rgba(255,184,48,.08)",border:`1px solid rgba(255,184,48,.2)`,borderRadius:10,padding:"9px 12px",cursor:"pointer",marginBottom:8}}><div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:T.amber,fontWeight:600}}><ic.Bell/>{alerts.length} alerta{alerts.length>1?"s":""}</div></div>}
   
-  {/* NUEVO PANEL DEL DÓLAR (SLIDER) */}
   <div style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px"}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
       <span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".7px",fontWeight:600}}>Cotización Dólar</span>
@@ -311,7 +310,6 @@ export default function App(){
     </div>
   </div>
   
-  {/* DISCLAIMER */}
   <div style={{fontSize:9, color:T.muted, textAlign:"center", marginTop:16, lineHeight:1.4, padding:"0 10px"}}>⚠️ FinanzasPro es una herramienta educativa y de gestión personal. No constituye asesoramiento financiero.</div>
   </aside>;
 
