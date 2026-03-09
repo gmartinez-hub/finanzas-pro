@@ -57,7 +57,7 @@ async function fetchStockPrice(ticker){
     if(!r.ok)return null;
     const d=await r.json();
     if(d.error||!d.price)return null;
-    return d; // { price, currency, symbol, name }
+    return d; 
   }catch{return null;}
 }
 
@@ -172,21 +172,16 @@ const healthScore=(txs,goals,holdings=[])=>{
   const cuotas=c.filter(t=>t.category==="💳 Cuotas").reduce((s,t)=>s+t.amount,0);
 
   const hasPortfolio=holdings.length>0;
-  // Verifica si hay metas con plata guardada o inversiones vinculadas a metas
   const hasActiveGoals=goals.some(g=>g.saved>0 || holdings.some(h=>h.goalId===g.id));
 
-  // 1. Ahorro Real (Max 30) -> Se llena si te sobra el 20% o más de tu ingreso real
   const savRate = inc > 0 ? clamp((inc - exp) / inc, 0, 1) : 0;
   const s1 = inc > 0 ? clamp((savRate / 0.20) * 30, 0, 30) : 0;
 
-  // 2. Superávit (Max 20) -> Ganar más de lo que se gasta en el mes corriente
   const s2 = (inc > 0 && inc > exp) ? 20 : 0;
 
-  // 3. Deuda Controlada (Max 30) -> Cuotas sanas bajo el 30% del ingreso
   const debtRate = inc > 0 ? clamp(cuotas / inc, 0, 1) : 0;
   const s3 = inc > 0 ? Math.max(0, 30 - (debtRate / 0.30 * 30)) : (cuotas === 0 ? 30 : 0);
 
-  // 4. Diversificación (Max 20) -> 10 por tener metas, 10 por tener inversiones
   const s4 = (hasActiveGoals ? 10 : 0) + (hasPortfolio ? 10 : 0);
 
   return {
@@ -201,6 +196,7 @@ const healthScore=(txs,goals,holdings=[])=>{
 };
 
 const CSS=`@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=DM+Mono:wght@300;400;500&display=swap');*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{background:#07080D;color:#F0F2F7;font-family:'Sora',sans-serif;overflow:hidden;height:100%}::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#3A4255;border-radius:99px}input,select,textarea,button{font-family:inherit}button{cursor:pointer;border:none;background:none}.mono{font-family:'DM Mono',monospace}.up{animation:up .35s cubic-bezier(.16,1,.3,1) both}@keyframes up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}.d1{animation-delay:.05s}.d2{animation-delay:.1s}.d3{animation-delay:.15s}.d4{animation-delay:.2s}.nav{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;font-size:13px;font-weight:500;color:#3A4255;transition:all .18s;width:100%;text-align:left;position:relative}.nav:hover{color:#F0F2F7;background:#111520}.nav.on{color:#C8FF57;background:rgba(200,255,87,.07)}.nav.on::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:60%;background:#C8FF57;border-radius:0 2px 2px 0}.inp{background:#111520;border:1px solid #1C2030;border-radius:10px;padding:10px 13px;font-size:13px;color:#F0F2F7;outline:none;transition:border .15s;width:100%}.inp:focus{border-color:#7CB33A}.inp::placeholder{color:#3A4255}.btn{display:inline-flex;align-items:center;gap:7px;padding:10px 18px;border-radius:10px;font-size:13px;font-weight:600;transition:all .15s;white-space:nowrap}.btn:disabled{opacity:.5;cursor:not-allowed}.bl{background:#C8FF57;color:#07080D}.bl:hover:not(:disabled){background:#A8E030;transform:translateY(-1px);box-shadow:0 4px 20px rgba(200,255,87,.3)}.bg{background:#111520;color:#8892A4;border:1px solid #1C2030}.bg:hover:not(:disabled){background:#1C2030;color:#F0F2F7}.bd{background:rgba(255,77,106,.08);color:#FF4D6A;border:1px solid rgba(255,77,106,.2)}.bd:hover:not(:disabled){background:rgba(255,77,106,.18)}.bsm{padding:6px 12px;font-size:12px;border-radius:8px}.card{background:#0C0E15;border:1px solid #1C2030;border-radius:16px;padding:20px}.csm{border-radius:12px;padding:14px}.tag{display:inline-flex;align-items:center;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:600}.ti{background:rgba(0,229,195,.12);color:#00E5C3}.te{background:rgba(255,77,106,.12);color:#FF4D6A}.ts{background:rgba(77,158,255,.12);color:#4D9EFF}.prog{height:6px;border-radius:3px;background:#111520;overflow:hidden}.progf{height:100%;border-radius:3px;transition:width .7s cubic-bezier(.16,1,.3,1)}.ov{position:fixed;inset:0;background:rgba(0,0,0,.8);backdrop-filter:blur(6px);display:flex;align-items:flex-start;justify-content:center;z-index:200;padding:5vh 16px 16px;overflow-y:auto}.modal{background:#0C0E15;border:1px solid #1C2030;border-radius:20px;padding:28px;width:520px;max-width:100%;flex-shrink:0}.tbl{width:100%;border-collapse:collapse}.tbl th{padding:9px 14px;font-size:10px;color:#3A4255;font-weight:600;text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid #1C2030;text-align:left}.tbl td{padding:9px 14px;font-size:13px;border-bottom:1px solid #0E1117;vertical-align:middle}.tbl tr:hover td{background:#111520}.tbl tr:last-child td{border-bottom:none}.toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:12px;font-size:13px;font-weight:500;z-index:999;animation:up .3s ease}.tok{background:rgba(0,229,195,.1);color:#00E5C3;border:1px solid rgba(0,229,195,.3)}.terr{background:rgba(255,77,106,.1);color:#FF4D6A;border:1px solid rgba(255,77,106,.3)}.tinfo{background:rgba(77,158,255,.1);color:#4D9EFF;border:1px solid rgba(77,158,255,.3)}.dots{display:inline-flex;gap:4px;align-items:center}.dots span{width:5px;height:5px;border-radius:50%;background:currentColor;animation:blink 1.2s infinite}.dots span:nth-child(2){animation-delay:.2s}.dots span:nth-child(3){animation-delay:.4s}@keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1}}.dz{border:2px dashed #1C2030;border-radius:14px;padding:36px 24px;text-align:center;transition:all .2s;cursor:pointer}.dz:hover,.dz.ov2{border-color:#C8FF57;background:rgba(200,255,87,.03)}.imgdrop{border:2px dashed #1C2030;border-radius:14px;min-height:180px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;cursor:pointer;transition:all .2s;overflow:hidden}.imgdrop:hover,.imgdrop.ov2{border-color:#A78BFA;background:rgba(167,139,250,.04)}.g2{display:grid;gap:10px;grid-template-columns:1fr 1fr}.g3{display:grid;gap:10px;grid-template-columns:1fr 1fr 1fr}.tabbar{display:flex;gap:3px;background:#111520;padding:4px;border-radius:11px;width:fit-content;flex-wrap:wrap}.tab{padding:7px 15px;border-radius:8px;font-size:12px;font-weight:600;transition:all .15s;color:#3A4255;cursor:pointer}.tab.on{background:#0C0E15;color:#F0F2F7;box-shadow:0 0 0 1px #1C2030}.chip{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:8px;font-size:11px;font-weight:600;background:#111520;border:1px solid #1C2030;color:#8892A4}.sb{background:rgba(200,255,87,.15);color:#C8FF57;border:1px solid rgba(200,255,87,.3)}.buy{background:rgba(0,229,195,.12);color:#00E5C3;border:1px solid rgba(0,229,195,.25)}.hld{background:rgba(255,184,48,.12);color:#FFB830;border:1px solid rgba(255,184,48,.25)}.sel{background:rgba(255,77,106,.12);color:#FF4D6A;border:1px solid rgba(255,77,106,.25)}@media(max-width:768px){.hide-m{display:none!important}.modal{padding:18px;width:100%;border-radius:16px}.card{padding:14px}.kpi-grid{grid-template-columns:1fr 1fr!important}.trend-grid{grid-template-columns:1fr!important}.g2,.g3{grid-template-columns:1fr!important}.tbl td,.tbl th{padding:6px 8px;font-size:11px}.inv-grid{grid-template-columns:1fr!important}}@media(max-width:480px){.kpi-grid{grid-template-columns:1fr!important}}`;
+
 const ic={Grid:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>,Tx:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>,Target:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>,Chart:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>,Import:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,Stock:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>,Salary:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>,Plus:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,X:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,Trash:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>,Refresh:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><path d="M20.5 16a9 9 0 11-2.3-8.7L23 10"/></svg>,Bell:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>,Scan:()=><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 9V5a2 2 0 012-2h4M15 3h4a2 2 0 012 2v4M21 15v4a2 2 0 01-2 2h-4M9 21H5a2 2 0 01-2-2v-4"/><line x1="3" y1="12" x2="21" y2="12"/></svg>,Bolt:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>,Check:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>,Menu:()=><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>,TrendUp:()=><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>,TrendDown:()=><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg>};
 
 const Dots=()=><span className="dots"><span/><span/><span/></span>;
@@ -210,7 +206,6 @@ function useDsp({displayCurrency,usdRate}){const fmt=useCallback(a=>displayCurre
 const sigCls=s=>s==="STRONG BUY"?"sb":s==="BUY"?"buy":s==="HOLD"?"hld":"sel";
 function useIsMobile(){const [m,setM]=useState(window.innerWidth<=768);useEffect(()=>{const h=()=>setM(window.innerWidth<=768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);return m;}
 
-// ── Insight card color map ──
 const insightColorMap={red:{bg:"rgba(255,77,106,.07)",border:"rgba(255,77,106,.2)",text:T.red},amber:{bg:"rgba(255,184,48,.07)",border:"rgba(255,184,48,.2)",text:T.amber},lime:{bg:"rgba(200,255,87,.07)",border:"rgba(200,255,87,.2)",text:T.lime},blue:{bg:"rgba(77,158,255,.07)",border:"rgba(77,158,255,.2)",text:T.blue}};
 
 function InsightCard({card,fmt}){
@@ -244,7 +239,6 @@ export default function App(){
   useEffect(()=>{hydrate().then(s=>{if(s)setState(p=>({...p,...s}));setReady(true);});},[]);
   useEffect(()=>{if(ready)persist(state);},[state,ready]);
   
-  // Limpiador automático de fechas
   useEffect(() => {
     if(!ready) return;
     const hasBadDates = state.transactions?.some(t => t.date.includes("/") || (t.date.includes("-") && t.date.indexOf("-") !== 4));
@@ -264,7 +258,6 @@ export default function App(){
     }
   }, [ready, state.transactions]);
 
-  // Actualizador Inteligente de Dólares
   const updateRates = useCallback(async () => {
     setUL(true);
     const r = await fetchUSDRates();
@@ -310,39 +303,6 @@ export default function App(){
     </div>
   </div>
   
-  <div style={{fontSize:9, color:T.muted, textAlign:"center", marginTop:16, lineHeight:1.4, padding:"0 10px"}}>⚠️ FinanzasPro es una herramienta educativa y de gestión personal. No constituye asesoramiento financiero.</div>
-  </aside>;
-
-  return(<div style={{display:"flex",height:"100vh",overflow:"hidden",background:T.bg}}><style>{CSS}</style>{isMobile?<>{sideOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:299}} onClick={()=>setSO(false)}/>}{sidebar}</>:sidebar}{isMobile&&<div style={{position:"fixed",top:0,left:0,right:0,height:52,background:T.surface,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",padding:"0 14px",gap:12,zIndex:100}}><button onClick={()=>setSO(true)} style={{color:T.white,padding:4}}><ic.Menu/></button><div style={{fontSize:14,fontWeight:700}}>FinanzasPro</div><div style={{flex:1}}/><div className="mono" style={{fontSize:11,color:T.lime}}>{state.displayCurrency==="USD"?fUSD(1):fARS(state.usdRate)}</div></div>}<main style={{flex:1,overflow:"auto",padding:isMobile?"66px 14px 20px":"28px 32px"}}>{pages[view]}</main>{toast&&<div className={`toast t${toast.type}`}>{toast.msg}</div>}</div>);
-}
-  const notify=(msg,type="ok")=>{setToast({msg,type});setTimeout(()=>setToast(null),4000);};
-  const update=useCallback(patch=>setState(s=>({...s,...patch})),[]);
-  const navTo=useCallback(id=>{setView(id);setSO(false);},[]);
-
-  if(!ready)return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:T.bg,color:T.muted,fontFamily:"Sora",fontSize:14,gap:10}}><Dots/>Cargando</div>;
-  if(!state.onboardingDone)return <><style>{CSS}</style><Onboarding update={update} notify={notify}/></>;
-
-  const pages={dashboard:<Dashboard state={state} update={update} notify={notify} setView={navTo}/>,transactions:<Transactions state={state} update={update} notify={notify}/>,goals:<Goals state={state} update={update} notify={notify}/>,salary:<SalaryModule state={state} update={update} notify={notify}/>,analytics:<Analytics state={state}/>,investments:<Investments state={state} update={update} notify={notify}/>,import:<Import state={state} update={update} notify={notify}/>};
-  const nav=[{id:"dashboard",l:"Dashboard",I:ic.Grid},{id:"transactions",l:"Movimientos",I:ic.Tx},{id:"goals",l:"Metas",I:ic.Target},{id:"salary",l:"Sueldo",I:ic.Salary},{id:"analytics",l:"Analíticas",I:ic.Chart},{id:"investments",l:"Inversiones",I:ic.Stock},{id:"import",l:"Importar",I:ic.Import}];
-  const CUR=getCUR();
-  const alerts=Object.entries(state.budgets||{}).filter(([cat,lim])=>state.transactions.filter(t=>gMonth(t.date)===CUR&&t.category===cat&&t.type==="expense").reduce((s,t)=>s+t.amount,0)>lim*0.8);
-
-  const sidebar=<aside style={{width:isMobile?"100%":212,background:T.surface,borderRight:isMobile?"none":`1px solid ${T.border}`,display:"flex",flexDirection:"column",padding:"20px 12px",gap:2,flexShrink:0,...(isMobile?{position:"fixed",top:0,left:0,bottom:0,zIndex:300,width:260,transform:sideOpen?"translateX(0)":"translateX(-100%)",transition:"transform .25s cubic-bezier(.16,1,.3,1)",boxShadow:sideOpen?"8px 0 30px rgba(0,0,0,.6)":"none"}:{})}}><div style={{padding:"4px 10px 20px",display:"flex",alignItems:"center",gap:9,justifyContent:"space-between"}}><div style={{display:"flex",alignItems:"center",gap:9}}><div style={{width:30,height:30,background:T.lime,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>💳</div><div style={{fontSize:14,fontWeight:700,letterSpacing:"-.4px"}}>FinanzasPro</div></div>{isMobile&&<button onClick={()=>setSO(false)} style={{color:T.muted,padding:4}}><ic.X/></button>}</div>{nav.map(({id,l,I})=>(<button key={id} className={`nav${view===id?" on":""}`} onClick={()=>navTo(id)}><I/>{l}{id==="investments"&&state.savedAnalyses?.length>0&&<span style={{marginLeft:"auto",fontSize:10,background:T.raised,padding:"2px 6px",borderRadius:99,color:T.muted}}>{state.savedAnalyses.length}</span>}</button>))}<div style={{flex:1}}/>{alerts.length>0&&<div onClick={()=>navTo("transactions")} style={{background:"rgba(255,184,48,.08)",border:`1px solid rgba(255,184,48,.2)`,borderRadius:10,padding:"9px 12px",cursor:"pointer",marginBottom:8}}><div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:T.amber,fontWeight:600}}><ic.Bell/>{alerts.length} alerta{alerts.length>1?"s":""}</div></div>}
-  
-  <div style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 14px"}}>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
-      <select className="inp" style={{fontSize:9, padding:"0", width:"auto", height:"auto", textTransform:"uppercase", fontWeight:700, letterSpacing:".5px", color:T.muted, border:"none", background:"transparent", cursor:"pointer", outline:"none"}} value={state.usdType||"mep"} onChange={e=>{const t=e.target.value; update({usdType: t, usdRate: state.usdRates?.[t] || state.usdRate});}}>
-         <option value="oficial">💵 USD Oficial</option>
-         <option value="mep">📈 USD MEP</option>
-         <option value="blue">🟦 USD Blue</option>
-      </select>
-      {usdLoading?<Dots/>:<button onClick={updateRates} style={{fontSize:10,color:T.muted,cursor:"pointer",display:"flex",alignItems:"center",gap:3}}><ic.Refresh/>Auto</button>}
-    </div>
-    <input className="mono" style={{background:"transparent",border:"none",outline:"none",fontSize:18,fontWeight:600,color:T.lime,width:"100%"}} value={state.usdRate} onChange={e=>{const v=px(e.target.value);if(v>0)update({usdRate:v});}}/>
-    <div style={{display:"flex",gap:5,marginTop:8}}>{["ARS","USD"].map(c=>(<button key={c} onClick={()=>update({displayCurrency:c})} style={{flex:1,padding:"5px 0",borderRadius:6,fontSize:10,fontWeight:600,border:`1px solid ${state.displayCurrency===c?T.lime:T.border}`,background:state.displayCurrency===c?"rgba(200,255,87,.1)":T.surface,color:state.displayCurrency===c?T.lime:T.muted,cursor:"pointer"}}>{c}</button>))}</div>
-  </div>
-  
-  {/* DISCLAIMER */}
   <div style={{fontSize:9, color:T.muted, textAlign:"center", marginTop:16, lineHeight:1.4, padding:"0 10px"}}>⚠️ FinanzasPro es una herramienta educativa y de gestión personal. No constituye asesoramiento financiero.</div>
   </aside>;
 
@@ -1072,6 +1032,7 @@ function Investments({state,update,notify}){
     </div>}
   </div>);
 }
+
 function Analytics({state}){
   const {transactions=[],salaries=[],displayCurrency,holdings=[],marketPrices={},usdRate}=state;
   const {fmt,toDsp}=useDsp(state);
