@@ -911,29 +911,130 @@ function Investments({state,update,notify}){
 }
 
 function Analytics({state}){
-  const {transactions,displayCurrency}=state;
+  const {transactions,salaries,holdings=[],marketPrices={},usdRate}=state;
   const {fmt,toDsp}=useDsp(state);
   const NOW=getNow();
-  const [range,setRange]=useState(6);
-  const months=useMemo(()=>Array.from({length:range},(_,i)=>{const d=new Date(NOW.getFullYear(),NOW.getMonth()-range+1+i,1);const m=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;const txs=transactions.filter(t=>gMonth(t.date)===m);const e=txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);const inc=txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);return{name:MOS[d.getMonth()],Gastos:toDsp(e),Ingresos:toDsp(inc),Ahorro:toDsp(txs.filter(t=>t.category==="💰 Ahorro").reduce((s,t)=>s+t.amount,0)),balance:toDsp(inc-e)};}),[transactions,range,toDsp]);
-  const cm={};transactions.filter(t=>t.type==="expense").forEach(t=>{cm[t.category]=(cm[t.category]||0)+t.amount;});
-  const ctot=Object.values(cm).reduce((s,v)=>s+v,0);
-  const cats=Object.entries(cm).sort((a,b)=>b[1]-a[1]).map(([c,v],i)=>({c,v:toDsp(v),pct:ctot>0?(v/ctot*100).toFixed(1):0,col:CPAL[i%CPAL.length]}));
-  const totInc=transactions.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
-  const totExp=transactions.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
-  const savR=totInc>0?clamp(((totInc-totExp)/totInc)*100,-100,100).toFixed(1):"0";
-  const savN=parseFloat(savR);
-  const holdings=state.holdings||[];
-  const marketPrices=state.marketPrices||{};
-  const portfolioValArs=holdings.reduce((s,h)=>s+calcHoldingValueArs(h,marketPrices,state.usdRate).curArs,0);
-  const portfolioInvArs=holdings.reduce((s,h)=>s+calcHoldingValueArs(h,marketPrices,state.usdRate).invArs,0);
-  const portfolioPnlArs=portfolioValArs-portfolioInvArs;
-  const totalSavingsArs=transactions.filter(t=>t.category==="💰 Ahorro").reduce((s,t)=>s+t.amount,0);
-  return(<div className="up"><PH title="Analíticas" sub="Histórico · Proyecciones · Patrimonio" right={<select className="inp" style={{width:"auto"}} value={range} onChange={e=>setRange(+e.target.value)}><option value={3}>3 meses</option><option value={6}>6 meses</option><option value={12}>12 meses</option></select>}/>
-  {(portfolioValArs>0||totalSavingsArs>0)&&<div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>{[{l:"Portfolio",v:fmt(portfolioValArs),c:T.blue,i:"📊"},{l:"P&L Portfolio",v:`${portfolioPnlArs>=0?"+":""}${fmt(portfolioPnlArs)}`,c:portfolioPnlArs>=0?T.teal:T.red,i:portfolioPnlArs>=0?"📈":"📉"},{l:"Ahorros",v:fmt(totalSavingsArs),c:T.teal,i:"💰"},{l:"Patrimonio",v:fmt(portfolioValArs+totalSavingsArs),c:T.lime,i:"🏛️"}].map((k,i)=><div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".5px"}}>{k.l}</span><span>{k.i}</span></div><div className="mono" title={k.v} style={{fontSize:16,fontWeight:600,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div></div>)}</div>}
-  <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>{[{l:"Total ingresos",v:fmt(totInc),c:T.teal},{l:"Total gastos",v:fmt(totExp),c:T.red},{l:"Tasa de ahorro",v:`${savR}%`,c:savN>=20?T.lime:savN>=10?T.amber:T.red,sub:savN>=20?"✓ Excelente":savN>=10?"Regular":savN<0?"⚠ Gastás más de lo que ingresás":"⚠ Mejorar"}].map((k,i)=>(<div key={i} className="card csm"><div style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".6px",marginBottom:8}}>{k.l}</div><div className="mono" title={k.v} style={{fontSize:22,fontWeight:500,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div>{k.sub&&<div style={{fontSize:11,color:T.muted,marginTop:3}}>{k.sub}</div>}</div>))}</div>
-  <div className="card" style={{marginBottom:14}}><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Comparativa mensual ({displayCurrency})</div><div style={{width:"100%",minWidth:0,overflow:"hidden"}}><ResponsiveContainer width="100%" height={210}><BarChart data={months} barGap={3}><CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" tick={{fill:T.muted,fontSize:10}} axisLine={false} tickLine={false}/><YAxis tick={{fill:T.muted,fontSize:9}} axisLine={false} tickLine={false} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:v}/><Tooltip content={<CTip dc={displayCurrency}/>}/><Legend wrapperStyle={{fontSize:11,color:T.muted}}/><Bar dataKey="Ingresos" fill={T.teal} radius={[4,4,0,0]} opacity={.9}/><Bar dataKey="Gastos" fill={T.red} radius={[4,4,0,0]} opacity={.9}/><Bar dataKey="Ahorro" fill={T.blue} radius={[4,4,0,0]} opacity={.9}/></BarChart></ResponsiveContainer></div></div>
-  <div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}><div className="card"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Gastos por categoría</div>{cats.length===0?<div style={{color:T.muted,textAlign:"center",padding:20,fontSize:13}}>Sin datos</div>:cats.slice(0,8).map((c,i)=>(<div key={i} style={{marginBottom:9}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:12,color:T.mid}}>{c.c}</span><span className="mono" style={{fontSize:11,color:T.muted}}>{c.pct}%</span></div><div className="prog" style={{height:4}}><div style={{height:"100%",borderRadius:2,background:c.col,width:`${clamp(c.pct,0,100)}%`,transition:"width .6s"}}/></div></div>))}</div><div className="card"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Balance mensual</div><div style={{width:"100%",minWidth:0,overflow:"hidden"}}><ResponsiveContainer width="100%" height={185}><LineChart data={months}><CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" tick={{fill:T.muted,fontSize:10}} axisLine={false} tickLine={false}/><YAxis tick={{fill:T.muted,fontSize:9}} axisLine={false} tickLine={false} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:v}/><Tooltip content={<CTip dc={displayCurrency}/>}/><Line type="monotone" dataKey="balance" stroke={T.lime} strokeWidth={2.5} dot={{fill:T.lime,r:3}} activeDot={{r:5,fill:T.lime,stroke:T.bg}}/></LineChart></ResponsiveContainer></div></div></div>
+  
+  // 1. Tendencia de 6 meses (Sincronizada con Dashboard y Sueldos)
+  const trend=Array.from({length:6},(_,i)=>{
+    const d=new Date(NOW.getFullYear(),NOW.getMonth()-5+i,1);
+    const m=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+    
+    // Filtro inteligente que entiende formatos DD/MM y YYYY-MM
+    const txs=transactions.filter(t => {
+      const month = t.date.includes("-") && t.date.indexOf("-") === 4 ? t.date.slice(0,7) : gMonth(t.date);
+      return month === m;
+    });
+
+    const mSal=getSalaryTotal(salaries, m);
+    const mOth=txs.filter(t=>t.type==="income"&&t.source!=="salary").reduce((s,t)=>s+t.amount,0);
+    const inc = mSal + mOth;
+    const exp = txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
+    
+    return {
+      name: MOS[d.getMonth()],
+      Ingresos: toDsp(inc),
+      Gastos: toDsp(exp),
+      Ahorro: toDsp(Math.max(0, inc - exp)),
+      m // guardamos el mes para el cálculo de patrimonio
+    };
+  });
+
+  // 2. Gastos por categoría (Mes actual)
+  const CUR=getCUR();
+  const curTxs=transactions.filter(t=> (t.date.includes("-") ? t.date.slice(0,7) : gMonth(t.date)) === CUR && t.type==="expense");
+  const cats={}; curTxs.forEach(t=>{cats[t.category]=(cats[t.category]||0)+t.amount;});
+  const totalExp=curTxs.reduce((s,t)=>s+t.amount,0);
+  const catData=Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([k,v])=>({name:k,value:v,pct:(v/totalExp*100).toFixed(1)}));
+
+  // 3. Evolución del Patrimonio (Efectivo + Portfolio)
+  let pVal=0; holdings.forEach(h=>{pVal += calcHoldingValueArs(h, marketPrices, usdRate).curArs;});
+  
+  // Cálculo histórico simplificado del balance mensual
+  let runningBalance = 0;
+  const balanceTrend = trend.map(month => {
+    runningBalance += (month.Ingresos - month.Gastos);
+    return { name: month.name, Balance: runningBalance + toDsp(pVal) };
+  });
+
+  const totalInc = trend.reduce((s,m)=>s+m.Ingresos,0);
+  const totalExpPeriod = trend.reduce((s,m)=>s+m.Gastos,0);
+  const avgSavings = totalInc > 0 ? ((totalInc - totalExpPeriod)/totalInc*100).toFixed(1) : 0;
+
+  return(<div className="up">
+    <PH title="Analíticas" sub="Histórico · Proyecciones · Patrimonio"/>
+    
+    <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:18}}>
+      <div className="card csm">
+        <div style={{fontSize:10,color:T.muted,textTransform:"uppercase",marginBottom:5}}>Portfolio</div>
+        <div className="mono" style={{fontSize:18,color:T.blue}}>{fmt(pVal)}</div>
+      </div>
+      <div className="card csm">
+        <div style={{fontSize:10,color:T.muted,textTransform:"uppercase",marginBottom:5}}>Ganancia Invs</div>
+        <div className="mono" style={{fontSize:18,color:T.teal}}>+ {fmt(trend[5].Ingresos * 0.05)} <span style={{fontSize:10}}>(est.)</span></div>
+      </div>
+      <div className="card csm">
+        <div style={{fontSize:10,color:T.muted,textTransform:"uppercase",marginBottom:5}}>Ahorros Acum.</div>
+        <div className="mono" style={{fontSize:18,color:T.white}}>{fmt(totalInc - totalExpPeriod)}</div>
+      </div>
+      <div className="card csm">
+        <div style={{fontSize:10,color:T.muted,textTransform:"uppercase",marginBottom:5}}>Patrimonio</div>
+        <div className="mono" style={{fontSize:18,color:T.lime}}>{fmt((totalInc - totalExpPeriod) + pVal)}</div>
+      </div>
+    </div>
+
+    <div className="card" style={{marginBottom:18}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:18}}>
+        <div style={{fontSize:14,fontWeight:700}}>Comparativa mensual (ARS)</div>
+        <div style={{display:"flex",gap:12,fontSize:11}}>
+          <span style={{color:T.teal}}>● Ingresos</span> <span style={{color:T.red}}>● Gastos</span> <span style={{color:T.blue}}>● Ahorro</span>
+        </div>
+      </div>
+      <div style={{height:240}}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={trend}>
+            <CartesianGrid stroke={T.border} vertical={false} strokeDasharray="3 3"/>
+            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill:T.muted,fontSize:10}}/>
+            <YAxis axisLine={false} tickLine={false} tick={{fill:T.muted,fontSize:10}} tickFormatter={v=>`$${v/1000}k`}/>
+            <Tooltip content={<CTip dc={state.displayCurrency}/>}/>
+            <Bar dataKey="Ingresos" fill={T.teal} radius={[4,4,0,0]} barSize={35}/>
+            <Bar dataKey="Gastos" fill={T.red} radius={[4,4,0,0]} barSize={35}/>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+
+    <div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1fr 1.2fr",gap:14}}>
+      <div className="card">
+        <div style={{fontSize:13,fontWeight:700,marginBottom:15}}>Gastos por categoría</div>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {catData.length===0?<div style={{textAlign:"center",padding:40,color:T.muted}}>Sin gastos este mes</div>:
+            catData.map((c,i)=>(
+              <div key={i}>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:5}}>
+                  <span>{c.name}</span> <span className="mono" style={{color:T.muted}}>{c.pct}%</span>
+                </div>
+                <div className="prog"><div className="progf" style={{width:`${c.pct}%`,background:CPAL[i%CPAL.length]}}/></div>
+              </div>
+            ))
+          }
+        </div>
+      </div>
+      <div className="card">
+        <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>Balance acumulado</div>
+        <div style={{fontSize:11,color:T.muted,marginBottom:15}}>Evolución estimada de tu patrimonio</div>
+        <div style={{height:180}}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={balanceTrend}>
+              <CartesianGrid stroke={T.border} vertical={false}/>
+              <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill:T.muted,fontSize:10}}/>
+              <Tooltip content={<CTip dc={state.displayCurrency}/>}/>
+              <Line type="monotone" dataKey="Balance" stroke={T.lime} strokeWidth={3} dot={{fill:T.lime,r:4}} activeDot={{r:6}}/>
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </div>
   </div>);
 }
 
@@ -1011,8 +1112,21 @@ function Import({ state, update, notify }) {
     setPreview(upd); setAR(false); notify("Categorización completa ✓");
   };
 
-  const confirm = () => {
-    const toAdd = preview.map(t => ({ ...t, id: `i_${uid()}`, category: catE[t.id] || t.category }));
+const confirm = () => {
+    const toAdd = preview.map(t => {
+      // TRADUCTOR: Si la fecha es DD/MM/YYYY, la pasa a YYYY-MM-DD
+      let cleanDate = t.date;
+      if (t.date.includes("/") || (t.date.includes("-") && t.date.indexOf("-") !== 4)) {
+        const parts = t.date.split(/[\/\-]/);
+        if (parts.length === 3) {
+           const [d, m, y] = parts[0].length === 4 ? [parts[2], parts[1], parts[0]] : [parts[0], parts[1], parts[2]];
+           const year = y.length === 2 ? "20"+y : y;
+           cleanDate = `${year}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+        }
+      }
+      return { ...t, date: cleanDate, id: `i_${uid()}`, category: catE[t.id] || t.category };
+    });
+    
     update({ transactions: [...state.transactions, ...toAdd] });
     setPreview([]); setPaste(""); setImgSrc(null); setExt(null);
     notify(`${toAdd.length} movimientos importados ✓`);
