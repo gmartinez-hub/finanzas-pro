@@ -31,8 +31,7 @@ const CATS=["🏠 Vivienda","🛒 Supermercado","🚗 Transporte","🍔 Comida y
 const CATS_PLAIN=CATS.map(c=>c.split(" ").slice(1).join(" "));
 const matchCat=raw=>{if(!raw)return "❓ Otros";const found=CATS.find(c=>c===raw);if(found)return found;const lower=raw.toLowerCase().trim();const idx=CATS_PLAIN.findIndex(p=>p.toLowerCase()===lower);return idx>=0?CATS[idx]:"❓ Otros";};
 const CPAL=["#C8FF57","#4D9EFF","#FF4D6A","#FFB830","#00E5C3","#A78BFA","#F97316","#EC4899","#84CC16","#14B8A6","#60A5FA","#4ADE80","#FB923C","#EF4444","#94A3B8","#CBD5E1"];
-const DEFAULT={..., onboardingDone:false, tourDone:false, ...};const uid=()=>`${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
-
+const DEFAULT={transactions:[],goals:[],budgets:{},usdRate:1350,usdType:"mep",usdRates:{oficial:1350,mep:1350,blue:1350},displayCurrency:"ARS",riskProfile:null,onboardingDone:false,tourDone:false,savedAnalyses:[],weeklyInsight:null,weeklyInsightDate:null,salaries:[],lastSalaryBase:0,holdings:[],marketPrices:{}};
 const cleanJSON=r=>{if(!r)return"";let s=r.replace(/`{3}json|`{3}/gi,"").trim();const f=s.search(/[\{\[]/);const l=Math.max(s.lastIndexOf("}"),s.lastIndexOf("]"));return f!==-1&&l!==-1?s.slice(f,l+1):s;};
 
 async function fetchUSDRates(){
