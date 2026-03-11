@@ -31,8 +31,7 @@ const CATS=["🏠 Vivienda","🛒 Supermercado","🚗 Transporte","🍔 Comida y
 const CATS_PLAIN=CATS.map(c=>c.split(" ").slice(1).join(" "));
 const matchCat=raw=>{if(!raw)return "❓ Otros";const found=CATS.find(c=>c===raw);if(found)return found;const lower=raw.toLowerCase().trim();const idx=CATS_PLAIN.findIndex(p=>p.toLowerCase()===lower);return idx>=0?CATS[idx]:"❓ Otros";};
 const CPAL=["#C8FF57","#4D9EFF","#FF4D6A","#FFB830","#00E5C3","#A78BFA","#F97316","#EC4899","#84CC16","#14B8A6","#60A5FA","#4ADE80","#FB923C","#EF4444","#94A3B8","#CBD5E1"];
-const DEFAULT={transactions:[],goals:[],budgets:{},usdRate:1350,usdType:"mep",usdRates:{oficial:1350,mep:1350,blue:1350},displayCurrency:"ARS",riskProfile:null,onboardingDone:false,savedAnalyses:[],weeklyInsight:null,weeklyInsightDate:null,salaries:[],lastSalaryBase:0,holdings:[],marketPrices:{}};
-const uid=()=>`${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+const DEFAULT={..., onboardingDone:false, tourDone:false, ...};const uid=()=>`${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
 
 const cleanJSON=r=>{if(!r)return"";let s=r.replace(/`{3}json|`{3}/gi,"").trim();const f=s.search(/[\{\[]/);const l=Math.max(s.lastIndexOf("}"),s.lastIndexOf("]"));return f!==-1&&l!==-1?s.slice(f,l+1):s;};
 
@@ -305,7 +304,7 @@ export default function App(){
   <div style={{fontSize:9, color:T.muted, textAlign:"center", marginTop:16, lineHeight:1.4, padding:"0 10px"}}>⚠️ FinanzasPro es una herramienta educativa y de gestión personal. No constituye asesoramiento financiero.</div>
   </aside>;
 
-  return(<div style={{display:"flex",height:"100vh",overflow:"hidden",background:T.bg}}><style>{CSS}</style>{isMobile?<>{sideOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:299}} onClick={()=>setSO(false)}/>}{sidebar}</>:sidebar}{isMobile&&<div style={{position:"fixed",top:0,left:0,right:0,height:52,background:T.surface,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",padding:"0 14px",gap:12,zIndex:100}}><button onClick={()=>setSO(true)} style={{color:T.white,padding:4}}><ic.Menu/></button><div style={{fontSize:14,fontWeight:700}}>FinanzasPro</div><div style={{flex:1}}/><div className="mono" style={{fontSize:11,color:T.lime}}>{state.displayCurrency==="USD"?fUSD(1):fARS(state.usdRate)}</div></div>}<main style={{flex:1,overflow:"auto",padding:isMobile?"66px 14px 20px":"28px 32px"}}>{pages[view]}</main>{toast&&<div className={`toast t${toast.type}`}>{toast.msg}</div>}</div>);
+  return(<div style={{display:"flex",height:"100vh",overflow:"hidden",background:T.bg}}><style>{CSS}</style>{isMobile?<>{sideOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:299}} onClick={()=>setSO(false)}/>}{sidebar}</>:sidebar}{isMobile&&<div style={{position:"fixed",top:0,left:0,right:0,height:52,background:T.surface,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",padding:"0 14px",gap:12,zIndex:100}}><button onClick={()=>setSO(true)} style={{color:T.white,padding:4}}><ic.Menu/></button><div style={{fontSize:14,fontWeight:700}}>FinanzasPro</div><div style={{flex:1}}/><div className="mono" style={{fontSize:11,color:T.lime}}>{state.displayCurrency==="USD"?fUSD(1):fARS(state.usdRate)}</div></div>}<main style={{flex:1,overflow:"auto",padding:isMobile?"66px 14px 20px":"28px 32px"}}>{pages[view]}</main>{toast&&<div className={`toast t${toast.type}`}>{toast.msg}</div>}{!state.tourDone&&<TourGuide update={update} navTo={navTo}/>}</div>);
 }
 
 function Onboarding({update,notify}){
@@ -1297,4 +1296,223 @@ function Import({ state, update, notify }) {
       </div>
     </div>}
   </div>);
+}
+// ──────────────────────────────────────────────
+// TOUR GUIADO — pegá esto al final de App.jsx
+// ──────────────────────────────────────────────
+// Requiere que T, useIsMobile estén definidos (ya están en App.jsx)
+
+const TOUR_STEPS = [
+  {
+    view: "dashboard",
+    bloque: "Intro",
+    bloqueColor: "#C8FF57",
+    icon: "👋",
+    title: "Bienvenido a tu sistema",
+    body: "Esto es tu Dashboard: de un vistazo ves ingresos, gastos y tu balance libre. Es el punto de control de todo lo que vimos en la charla.",
+    tip: null,
+  },
+  {
+    view: "goals",
+    bloque: "Bloque 1 · Objetivos",
+    bloqueColor: "#C8FF57",
+    icon: "🎯",
+    title: "Empezá por una meta",
+    body: "Antes de hablar de plata, definí para qué la querés. Cargá tu primer objetivo: un viaje, un auto, un colchón de emergencia.",
+    tip: "La app calcula cuánto necesitás separar por mes automáticamente.",
+  },
+  {
+    view: "salary",
+    bloque: "Bloque 2 · Presupuesto",
+    bloqueColor: "#4D9EFF",
+    icon: "💵",
+    title: "Registrá tu sueldo",
+    body: "El sueldo neto es la base de todo el sistema. Lo que queda después de restar los gastos es tu verdadera capacidad de maniobra.",
+    tip: "Si ese número es cero o negativo, no hay plan que aguante.",
+  },
+  {
+    view: "transactions",
+    bloque: "Bloque 2 · Clasificación",
+    bloqueColor: "#4D9EFF",
+    icon: "🗂️",
+    title: "Clasificá tus gastos",
+    body: "Fijos (alquiler, servicios), Variables (salidas, ropa) y Cuotas. Los variables son donde podés 'podar' para liberar plata para tu meta.",
+    tip: "Usá las categorías para ver dónde se va cada peso.",
+  },
+  {
+    view: "transactions",
+    bloque: "Bloque 2 · Fugas",
+    bloqueColor: "#FF4D6A",
+    icon: "🐜",
+    title: "Encontrá tus fugas",
+    body: "Buscá las categorías 🐜 Gastos hormiga y 🧛 Suscripciones. Son chicos, frecuentes e invisibles — pero enormes al sumar el mes.",
+    tip: "¿Cuántos servicios se debitan sin que lo notes?",
+  },
+  {
+    view: "investments",
+    bloque: "Bloque 4 · Optimización",
+    bloqueColor: "#FFB830",
+    icon: "🏦",
+    title: "Hacé rendir el sueldo",
+    body: "Mientras esperás el vencimiento del resumen de la tarjeta, dejá la plata trabajando en un FCI de rescate inmediato (T+0).",
+    tip: "El dinero trabaja un mes entero antes de salir de tu bolsillo.",
+  },
+  {
+    view: "dashboard",
+    bloque: "Bloque 4 · Límite real",
+    bloqueColor: "#FFB830",
+    icon: "⚖️",
+    title: "Tu límite lo pone el presupuesto",
+    body: "El margen que te da el banco no es tu límite real. Tu límite real es el balance libre que ves acá. Ese es el máximo que podés pasar con la tarjeta.",
+    tip: null,
+  },
+  {
+    view: "dashboard",
+    bloque: "Resumen inteligente · IA",
+    bloqueColor: "#A78BFA",
+    icon: "🤖",
+    title: "Tu coach financiero con IA",
+    body: "Una vez que tengas datos, generá tu resumen semanal. La IA analiza tus gastos, portafolio y te da recomendaciones en tarjetas personalizadas.",
+    tip: "Buscá el botón 'Generar resumen semanal' más abajo en el Dashboard.",
+  },
+];
+
+function TourGuide({ update, navTo }) {
+  const [step, setStep] = useState(-1);
+  const isMobile = useIsMobile();
+
+  const current = step >= 0 ? TOUR_STEPS[step] : null;
+  const isLast = step === TOUR_STEPS.length - 1;
+
+  const next = () => {
+    if (isLast) { update({ tourDone: true }); return; }
+    const ns = step + 1;
+    setStep(ns);
+    navTo(TOUR_STEPS[ns].view);
+  };
+
+  const prev = () => {
+    if (step <= 0) return;
+    const ps = step - 1;
+    setStep(ps);
+    navTo(TOUR_STEPS[ps].view);
+  };
+
+  const start = () => { setStep(0); navTo(TOUR_STEPS[0].view); };
+  const dismiss = () => { update({ tourDone: true }); };
+
+  // ── Prompt inicial ──
+  if (step === -1) return (
+    <div style={{
+      position:"fixed", bottom:24, left:"50%", transform:"translateX(-50%)",
+      zIndex:400, display:"flex", alignItems:"center", gap:12,
+      background:"rgba(12,14,21,.96)", border:"1px solid rgba(200,255,87,.25)",
+      borderRadius:99, padding:"10px 14px 10px 16px",
+      boxShadow:"0 8px 32px rgba(0,0,0,.6)", backdropFilter:"blur(12px)",
+      maxWidth:isMobile?"calc(100vw - 32px)":520,
+    }}>
+      <span style={{fontSize:20}}>🗺️</span>
+      <div style={{flex:1, minWidth:0}}>
+        <div style={{fontSize:12, fontWeight:700, color:T.white}}>
+          ¿Querés un recorrido guiado por la app?
+        </div>
+        <div style={{fontSize:11, color:T.mid, marginTop:1}}>Al ritmo de la charla de hoy</div>
+      </div>
+      <button onClick={start} style={{
+        background:T.lime, color:T.ink, border:"none", borderRadius:99,
+        padding:"7px 16px", fontSize:12, fontWeight:700, cursor:"pointer", flexShrink:0,
+      }}>Empezar</button>
+      <button onClick={dismiss} style={{
+        background:"none", border:"none", color:T.muted,
+        fontSize:18, cursor:"pointer", lineHeight:1, padding:"0 4px", flexShrink:0,
+      }}>×</button>
+    </div>
+  );
+
+  // ── Card paso activo ──
+  return (
+    <div style={{
+      position:"fixed", bottom:24,
+      left:isMobile?12:"50%", right:isMobile?12:"auto",
+      transform:isMobile?"none":"translateX(-50%)",
+      zIndex:400, width:isMobile?"auto":540,
+      background:"rgba(12,14,21,.97)",
+      border:`1px solid ${T.border}`,
+      borderRadius:20,
+      boxShadow:"0 16px 48px rgba(0,0,0,.7)",
+      backdropFilter:"blur(16px)",
+      overflow:"hidden",
+    }}>
+      {/* Barra de progreso */}
+      <div style={{height:3, background:T.raised}}>
+        <div style={{
+          height:"100%",
+          width:`${((step+1)/TOUR_STEPS.length)*100}%`,
+          background:current.bloqueColor,
+          transition:"width .4s cubic-bezier(.16,1,.3,1)",
+          boxShadow:`0 0 8px ${current.bloqueColor}60`,
+        }}/>
+      </div>
+
+      <div style={{padding:"16px 18px 14px"}}>
+        {/* Header */}
+        <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10}}>
+          <div style={{display:"flex", alignItems:"center", gap:8}}>
+            <div style={{
+              background:`${current.bloqueColor}18`,
+              border:`1px solid ${current.bloqueColor}30`,
+              borderRadius:99, padding:"3px 10px",
+              fontSize:10, fontWeight:700, color:current.bloqueColor,
+              letterSpacing:".5px", textTransform:"uppercase",
+            }}>{current.bloque}</div>
+            <span style={{fontSize:10, color:T.muted, fontFamily:"monospace"}}>
+              {step+1}/{TOUR_STEPS.length}
+            </span>
+          </div>
+          <button onClick={dismiss} style={{
+            background:"none", border:"none", color:T.muted,
+            fontSize:16, cursor:"pointer", lineHeight:1, padding:2,
+          }}>×</button>
+        </div>
+
+        {/* Body */}
+        <div style={{display:"flex", gap:12, alignItems:"flex-start"}}>
+          <span style={{fontSize:26, flexShrink:0, marginTop:2}}>{current.icon}</span>
+          <div style={{flex:1}}>
+            <div style={{fontSize:14, fontWeight:700, color:T.white, marginBottom:5, lineHeight:1.3}}>
+              {current.title}
+            </div>
+            <div style={{fontSize:12, color:T.mid, lineHeight:1.6}}>{current.body}</div>
+            {current.tip && (
+              <div style={{
+                marginTop:8, background:"rgba(255,255,255,.03)",
+                border:`1px solid ${T.border}`, borderRadius:8,
+                padding:"7px 11px", fontSize:11, color:T.muted,
+                fontStyle:"italic", lineHeight:1.5,
+              }}>💡 {current.tip}</div>
+            )}
+          </div>
+        </div>
+
+        {/* Navegación */}
+        <div style={{display:"flex", gap:8, marginTop:14, justifyContent:"flex-end"}}>
+          {step > 0 && (
+            <button onClick={prev} style={{
+              background:T.raised, border:`1px solid ${T.border}`,
+              borderRadius:10, padding:"7px 14px",
+              fontSize:12, color:T.mid, cursor:"pointer",
+            }}>← Atrás</button>
+          )}
+          <button onClick={next} style={{
+            background:isLast?T.lime:`${current.bloqueColor}1A`,
+            border:`1px solid ${isLast?T.lime:current.bloqueColor}`,
+            borderRadius:10, padding:"7px 18px",
+            fontSize:12, fontWeight:700,
+            color:isLast?T.ink:current.bloqueColor,
+            cursor:"pointer", transition:"all .15s",
+          }}>{isLast?"Terminar recorrido ✓":"Siguiente →"}</button>
+        </div>
+      </div>
+    </div>
+  );
 }
