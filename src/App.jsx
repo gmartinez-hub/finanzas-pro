@@ -67,7 +67,13 @@ async function ai(prompt,sys=""){try{const r=await fetch(AI_URL,{method:"POST",h
 async function aiVision(b64,rawMime,prompt){const VALID=["image/jpeg","image/png","image/gif","image/webp"];const mime=VALID.includes(rawMime)?rawMime:"image/png";try{const r=await fetch(AI_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5-20250929",max_tokens:1500,system:"Financial data extractor. Return ONLY valid JSON, no markdown.",messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:mime,data:b64}},{type:"text",text:prompt}]}]})});if(!r.ok){const e=await r.text();throw new Error(`HTTP ${r.status}: ${e}`);}const d=await r.json();return(d.content?.filter(b=>b.type==="text").map(b=>b.text).join("")||"").replace(/`{3}json|`{3}/g,"").trim();}catch(e){console.error("Vision error",e);return null;}}
 
 async function extractFromImage(b64, mime) {
-  const raw = await aiVision(b64, mime, `Extract transactions from Argentine banking app screenshot. Return ONLY JSON: {"transactions":[{"date":"YYYY-MM-DD","description":"<merchant>","amount":<positive number>,"type":"income|expense","category":"<one of: ${CATS.join(", ")}>"}],"currency":"ARS|USD","appDetected":"<app or null>"} Rules: Try hard to find the transaction year; if not visible, use ${new Date().getFullYear()}. Amounts always POSITIVE. IMPORTANT: category MUST include the emoji prefix exactly as listed.`);
+  const raw = await aiVision(b64, mime, `Extract ALL transactions from this Argentine bank/wallet/credit card screenshot or statement. Return ONLY JSON: {"transactions":[{"date":"YYYY-MM-DD","description":"<merchant or description>","amount":<positive number>,"type":"income|expense","category":"<one of: ${CATS.join(", ")}>" }],"currency":"ARS|USD","appDetected":"<app name or null>"}
+Rules:
+- DATE: Find the EXACT date for each transaction (DD/MM/YYYY or similar). If year is not visible, infer from context (header, statement period). If completely unknown, use ${todayISO()}.
+- AMOUNTS: Always POSITIVE numbers. Negative signs indicate expense type, not negative amount.
+- Skip rows in scientific notation (e.g. 1.44E+11) - those are reference numbers, not amounts.
+- category MUST include the emoji prefix exactly as listed.
+- Works with: bank apps, Mercado Pago, MODO, Ualá, credit card statements, PDF bank extracts.`);
   if (!raw) return null;
   try {
     const parsed = JSON.parse(cleanJSON(raw));
@@ -77,6 +83,38 @@ async function extractFromImage(b64, mime) {
     return parsed;
   } catch { return null; }
 }
+// ── PDF Import helpers ──
+async function loadPDFJS(){
+  if(window.pdfjsLib)return window.pdfjsLib;
+  return new Promise(resolve=>{
+    const s=document.createElement("script");
+    s.src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    s.onload=()=>{window.pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";resolve(window.pdfjsLib);};
+    document.head.appendChild(s);
+  });
+}
+async function extractFromPDF(file,onProgress){
+  const lib=await loadPDFJS();
+  const buf=await file.arrayBuffer();
+  const pdf=await lib.getDocument({data:buf}).promise;
+  const results=[];
+  for(let p=1;p<=pdf.numPages;p++){
+    onProgress?.(`Procesando página ${p}/${pdf.numPages}...`);
+    const page=await pdf.getPage(p);
+    const vp=page.getViewport({scale:2.0});
+    const canvas=document.createElement("canvas");
+    canvas.width=vp.width;canvas.height=vp.height;
+    const ctx=canvas.getContext("2d");
+    await page.render({canvasContext:ctx,viewport:vp}).promise;
+    const b64=canvas.toDataURL("image/jpeg",0.85).split(",")[1];
+    const r=await extractFromImage(b64,"image/jpeg");
+    if(r?.transactions?.length){
+      results.push(...r.transactions.map((t,i)=>({...t,id:`pdf_${uid()}_${p}_${i}`,currency:r.currency||"ARS",source:"pdf"})));
+    }
+  }
+  return results;
+}
+
 async function autoScanInvestments(profile,usdRate){const raw=await ai(`Argentine market. ${todayISO()}. Risk="${profile.risk}", horizon="${profile.horizon}". USD:${usdRate}. Find 3 investment opportunities. CONCISE. Return ONLY valid JSON: {"opportunities":[{"ticker":"","name":"","type":"CEDEAR|ARG_STOCK|ETF|BOND","signal":"STRONG BUY|BUY|HOLD","timeframe":"SHORT|LONG|BOTH","upside":0,"currentEstimate":0,"peRatio":null,"revenueGrowth":null,"moat":"one sentence","thesis":"two sentences max","risk":"low|medium|high","catalysts":["max 2"],"bearRisk":"one sentence","confidenceScore":0,"profileFit":0}],"marketContext":"one sentence","topPick":"","scanDate":"${todayISO()}"}`, "Argentine equity analyst. CONCISE responses. Valid JSON only.");if(!raw)throw new Error("Sin respuesta");return JSON.parse(cleanJSON(raw));}
 
 async function analyzeStock(ticker,name){const raw=await ai(`Analyze ${name||ticker} (${ticker}) fundamentals ${todayISO()}. Return ONLY valid JSON: {"ticker":"${ticker}","company":"${name||ticker}","sector":"","signal":"STRONG BUY|BUY|HOLD|SELL|STRONG SELL","timeframe":"SHORT|LONG|BOTH","priceTarget12m":0,"currentEstimate":0,"upside":0,"peRatio":null,"revenueGrowth":null,"moat":"","bullCase":"","bearCase":"","catalysts":[""],"risks":[""],"summary":"","confidenceScore":0}`,"Senior equity analyst. Valid JSON only.");if(!raw)return null;try{return JSON.parse(cleanJSON(raw));}catch{return null;}}
@@ -115,8 +153,51 @@ Rules: be motivating not judgmental. Use real numbers from the data. If no portf
   try{return JSON.parse(cleanJSON(raw));}catch{return null;}
 }
 
-function parseCSV(txt){const lines=txt.trim().split("\n").filter(l=>l.trim());if(lines.length<2)return[];const sep=lines[0].includes(";")?";":lines[0].includes("\t")?"\t":",";const hdrs=lines[0].split(sep).map(h=>h.trim().replace(/"/g,"").toLowerCase());const out=[];for(let i=1;i<lines.length;i++){const cols=lines[i].split(sep).map(c=>c.trim().replace(/^"|"$/g,""));const obj={};hdrs.forEach((h,idx)=>obj[h]=cols[idx]||"");const dK=hdrs.find(h=>/^(fecha|date|dia)$/i.test(h)||/fecha|date/.test(h));const dscK=hdrs.find(h=>/desc|concepto|detalle|comer|estab|ref/.test(h));const debK=hdrs.find(h=>/debito|debe|debit|cargo|egreso/.test(h));const creK=hdrs.find(h=>/credito|haber|credit|abono/.test(h));const aK=hdrs.find(h=>/import|monto|amount|total/.test(h));let amount=0,type="expense";if(debK&&creK){const deb=px(obj[debK]),cre=px(obj[creK]);if(cre>0){amount=cre;type="income";}else if(deb>0){amount=deb;type="expense";}else continue;}else if(aK){const raw2=String(obj[aK]).trim();amount=Math.abs(px(obj[aK]));type=raw2.startsWith("-")||px(obj[aK])<0?"expense":"income";}else{const numVal=Object.values(obj).map(v=>px(v)).find(v=>v>0);if(!numVal)continue;amount=numVal;type="expense";}if(amount<=0)continue;out.push({id:`csv_${uid()}_${i}`,currency:"ARS",date:obj[dK]||getCUR()+"-01",description:obj[dscK]||`TX ${i}`,amount,type,category:"❓ Otros"});}return out;}
-
+function parseCSVLine(line,sep){const fields=[];let f="",inQ=false;for(let i=0;i<line.length;i++){const c=line[i];if(c==='"'){if(inQ&&line[i+1]==='"'){f+='"';i++;}else inQ=!inQ;}else if(c===sep&&!inQ){fields.push(f.trim());f="";}else f+=c;}fields.push(f.trim());return fields;}
+function parseCSV(txt){
+  const lines=txt.trim().split("\n").filter(l=>l.trim());
+  if(lines.length<2)return[];
+  const sep=lines[0].includes(";")?";":(lines[0].includes("\t")?"\t":",");
+  // Encontrar la fila de headers real (saltea filas de resumen tipo MercadoPago)
+  let headerIdx=0;
+  for(let i=0;i<Math.min(lines.length,10);i++){
+    const cols=parseCSVLine(lines[i],sep).map(c=>c.toLowerCase().replace(/"/g,""));
+    const hasDate=cols.some(c=>/^(fecha|date|release_date|transaction_date|dia)/.test(c));
+    const hasAmt=cols.some(c=>/^(transaction_amount|monto|importe|debito|credito|amount|debit|credit)/.test(c));
+    if(hasDate||hasAmt){headerIdx=i;break;}
+  }
+  const hdrs=parseCSVLine(lines[headerIdx],sep).map(h=>h.trim().replace(/"/g,"").toLowerCase());
+  const out=[];
+  for(let i=headerIdx+1;i<lines.length;i++){
+    const cols=parseCSVLine(lines[i],sep);
+    const obj={};hdrs.forEach((h,idx)=>obj[h]=(cols[idx]||"").trim().replace(/^"|"$/g,""));
+    // Fecha: excluir columnas con "reference"
+    const dK=hdrs.find(h=>!h.includes("reference")&&(/^(fecha|date|release_date|transaction_date|dia)$/.test(h)||/fecha|date/.test(h)));
+    // Descripción: excluir reference_number explícitamente
+    const dscK=hdrs.find(h=>!h.includes("reference")&&(/^(description|descripcion|concepto|detalle|establecimiento|comercio|transaction_type)$/.test(h)||/desc|concepto|detalle|comer|estab/.test(h)));
+    const debK=hdrs.find(h=>/^(debito|debe|debit|cargo|egreso)$/.test(h));
+    const creK=hdrs.find(h=>/^(credito|haber|credit|abono)$/.test(h));
+    const aK=hdrs.find(h=>/^(transaction_amount|importe|monto|amount|total)$/.test(h)||(/import|monto|amount|total/.test(h)&&!h.includes("reference")&&!h.includes("balance")));
+    let amount=0,type="expense";
+    if(debK&&creK){
+      const deb=px(obj[debK]),cre=px(obj[creK]);
+      if(cre>0){amount=cre;type="income";}else if(deb>0){amount=deb;type="expense";}else continue;
+    }else if(aK){
+      const rawStr=String(obj[aK]||"").trim();
+      if(/e[+\-]/i.test(rawStr))continue; // saltear notación científica
+      amount=Math.abs(px(obj[aK]));
+      type=rawStr.startsWith("-")||px(obj[aK])<0?"expense":"income";
+    }else{
+      const numVal=Object.entries(obj).filter(([k])=>!k.includes("reference")&&!k.includes("balance")).map(([,v])=>px(v)).find(v=>v>0&&v<1e10);
+      if(!numVal)continue;amount=numVal;type="expense";
+    }
+    if(amount<=0||amount>1e10)continue;
+    // Fecha: si no hay fecha, usar hoy (no primer día del mes)
+    const rawDate=(obj[dK]||"").trim();
+    out.push({id:`csv_${uid()}_${i}`,currency:"ARS",date:rawDate||todayISO(),description:obj[dscK]||`TX ${i-headerIdx}`,amount,type,category:"❓ Otros"});
+  }
+  return out;
+}
 const getSalaryTotal=(salaries,month)=>{const m=month||getCUR();const s=salaries?.find(s=>s.month===m);return s?(s.base+(s.extras||[]).reduce((a,e)=>a+e.amt,0)):0;};
 
 const calcHoldingValueArs=(h,marketPrices={},usdRate=1)=>{
@@ -1189,8 +1270,10 @@ function Import({ state, update, notify }) {
   const [over, setOver] = useState(false);
   const [catE, setCE] = useState({});
   const [autoRunning, setAR] = useState(false);
+  const [pdfProgress, setPDFProgress] = useState(null);
   const imgRef = useRef();
   const csvRef = useRef();
+  const pdfRef = useRef();
 
   const handleImgFile = file => {
     if (!file) return;
@@ -1224,6 +1307,27 @@ function Import({ state, update, notify }) {
     r.readAsText(file, "utf-8");
   };
 
+  const handlePDF = async file => {
+    if (!file) return;
+    setExt("loading"); setEE(null); setPDFProgress("Cargando PDF...");
+    notify("Procesando PDF con IA...", "info");
+    try {
+      const results = await extractFromPDF(file, msg => setPDFProgress(msg));
+      if (!results.length) {
+        setExt("error"); setEE("No se detectaron transacciones en el PDF.");
+        notify("Sin transacciones detectadas", "err");
+      } else {
+        setPreview(results);
+        setExt("done");
+        notify(`${results.length} transacciones extraídas del PDF ✓`);
+      }
+    } catch(e) {
+      setExt("error"); setEE("Error procesando el PDF: " + e.message);
+      notify("Error al procesar el PDF", "err");
+    }
+    setPDFProgress(null);
+  };
+
   const doPaste = () => {
     const lines = paste.trim().split("\n").filter(l => l.trim());
     const out = [];
@@ -1231,7 +1335,7 @@ function Import({ state, update, notify }) {
       const amts = [...l.matchAll(/[\d.,]+/g)].map(m => px(m[0])).filter(a => a > 100);
       if (!amts.length) continue;
       const dm = l.match(/\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]?\d{0,4}/);
-      out.push({ id: `p_${uid()}`, date: dm ? dm[0] : getCUR() + "-01", description: l.replace(/[\d.,$%\/\-]/g, "").trim().slice(0, 60) || "TX", amount: amts[0], type: "expense", category: "❓ Otros", currency: "ARS" });
+      out.push({ id: `p_${uid()}`, date: dm ? dm[0] : todayISO(), description: l.replace(/[\d.,$%\/\-]/g, "").trim().slice(0, 60) || "TX", amount: amts[0], type: "expense", category: "❓ Otros", currency: "ARS" });
     }
     if (!out.length) return notify("Sin montos detectados", "err");
     setPreview(out); notify(`${out.length} movimientos detectados`);
@@ -1254,18 +1358,32 @@ function Import({ state, update, notify }) {
     notify(`${toAdd.length} movimientos importados ✓`);
   };
 
-  return (<div className="up"><PH title="Importar datos" sub="Imagen · CSV · Texto pegado" />
-    <div className="tabbar" style={{ marginBottom: 18 }}>{[{ id: "image", l: "📸 Imagen" }, { id: "csv", l: "📁 CSV" }, { id: "paste", l: "📋 Texto" }, { id: "guide", l: "💡 Guía" }].map(t => (<button key={t.id} className={`tab${tab === t.id ? " on" : ""}`} onClick={() => setTab(t.id)}>{t.l}</button>))}</div>
-    
-    {tab === "image" && <div><div style={{ background: "rgba(167,139,250,.06)", border: `1px solid rgba(167,139,250,.2)`, borderRadius: 12, padding: "12px 16px", marginBottom: 14, fontSize: 12, color: T.purple }}>✨ Subí un screenshot de Mercado Pago o tu banco. La IA detectará la fecha y el año automáticamente.</div><div className={`imgdrop${over ? " ov2" : ""}`} onDragOver={e => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={e => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files[0]; if (f) handleImgFile(f); }} onClick={() => imgRef.current?.click()}>{imgSrc ? <img src={imgSrc} alt="preview" style={{ maxWidth: "100%", maxHeight: 300, borderRadius: 8, objectFit: "contain" }} /> : <><div style={{ fontSize: 40 }}>📸</div><div style={{ fontSize: 15, fontWeight: 600, color: T.mid }}>Arrastrá o hacé clic para subir</div><div style={{ fontSize: 12, color: T.muted }}>Screenshots bancarios</div></>}<input ref={imgRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => e.target.files[0] && handleImgFile(e.target.files[0])} /></div>{imgSrc && <div style={{ display: "flex", gap: 8, marginTop: 10 }}><button className="btn bl" style={{ flex: 1, justifyContent: "center" }} onClick={extractImg} disabled={extracting === "loading"}>{extracting === "loading" ? <><Dots /> Extrayendo...</> : "🔍 Extraer con IA"}</button><button className="btn bg" onClick={() => { setImgSrc(null); setExt(null); setEE(null); }}>Cambiar</button></div>}</div>}
-    
-    {tab === "csv" && <div><div className={`dz${over ? " ov2" : ""}`} onDragOver={e => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={e => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files[0]; if (f) handleCSV(f); }} onClick={() => csvRef.current?.click()}><div style={{ fontSize: 40, marginBottom: 10 }}>📂</div><div style={{ fontSize: 15, fontWeight: 600, color: T.mid }}>Arrastrá un CSV</div><input ref={csvRef} type="file" accept=".csv,.txt" style={{ display: "none" }} onChange={e => e.target.files[0] && handleCSV(e.target.files[0])} /></div></div>}
-    
+  return (<div className="up"><PH title="Importar datos" sub="Imagen · PDF · CSV · Texto pegado" />
+    <div className="tabbar" style={{ marginBottom: 18 }}>{[{ id: "image", l: "📸 Imagen" }, { id: "pdf", l: "📄 PDF" }, { id: "csv", l: "📁 CSV" }, { id: "paste", l: "📋 Texto" }, { id: "guide", l: "💡 Guía" }].map(t => (<button key={t.id} className={`tab${tab === t.id ? " on" : ""}`} onClick={() => setTab(t.id)}>{t.l}</button>))}</div>
+
+    {tab === "image" && <div><div style={{ background: "rgba(167,139,250,.06)", border: `1px solid rgba(167,139,250,.2)`, borderRadius: 12, padding: "12px 16px", marginBottom: 14, fontSize: 12, color: T.purple }}>✨ Subí un screenshot de Mercado Pago, tu banco, o resumen de tarjeta de crédito. La IA detectará fechas y montos automáticamente.</div><div className={`imgdrop${over ? " ov2" : ""}`} onDragOver={e => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={e => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files[0]; if (f) handleImgFile(f); }} onClick={() => imgRef.current?.click()}>{imgSrc ? <img src={imgSrc} alt="preview" style={{ maxWidth: "100%", maxHeight: 300, borderRadius: 8, objectFit: "contain" }} /> : <><div style={{ fontSize: 40 }}>📸</div><div style={{ fontSize: 15, fontWeight: 600, color: T.mid }}>Arrastrá o hacé clic para subir</div><div style={{ fontSize: 12, color: T.muted }}>Screenshots de tu banco, billetera virtual o resumen de tarjeta</div></>}<input ref={imgRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => e.target.files[0] && handleImgFile(e.target.files[0])} /></div>{imgSrc && <div style={{ display: "flex", gap: 8, marginTop: 10 }}><button className="btn bl" style={{ flex: 1, justifyContent: "center" }} onClick={extractImg} disabled={extracting === "loading"}>{extracting === "loading" ? <><Dots /> Extrayendo...</> : "🔍 Extraer con IA"}</button><button className="btn bg" onClick={() => { setImgSrc(null); setExt(null); setEE(null); }}>Cambiar</button></div>}{extractErr && <div style={{ marginTop: 10, background: "rgba(255,77,106,.08)", border: `1px solid rgba(255,77,106,.25)`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: T.red }}>{extractErr}</div>}</div>}
+
+    {tab === "pdf" && <div>
+      <div style={{ background: "rgba(77,158,255,.06)", border: `1px solid rgba(77,158,255,.2)`, borderRadius: 12, padding: "12px 16px", marginBottom: 14, fontSize: 12, color: T.blue }}>📄 Subí el extracto bancario o resumen de tarjeta en PDF. La IA procesa cada página automáticamente.</div>
+      <div className={`dz${over ? " ov2" : ""}`} style={{ borderColor: T.blue + "44" }} onDragOver={e => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={e => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files[0]; if (f) handlePDF(f); }} onClick={() => pdfRef.current?.click()}>
+        {extracting === "loading" ? <><div style={{ fontSize: 36, marginBottom: 8 }}>⏳</div><div style={{ fontSize: 14, color: T.blue }}>{pdfProgress || "Procesando..."}</div><Dots /></> : <><div style={{ fontSize: 40 }}>📄</div><div style={{ fontSize: 15, fontWeight: 600, color: T.mid }}>Arrastrá o hacé clic para subir un PDF</div><div style={{ fontSize: 12, color: T.muted }}>Extractos bancarios · Resúmenes de TC · Salida de homebanking</div></>}
+        <input ref={pdfRef} type="file" accept=".pdf" style={{ display: "none" }} onChange={e => e.target.files[0] && handlePDF(e.target.files[0])} />
+      </div>
+      {extractErr && <div style={{ marginTop: 10, background: "rgba(255,77,106,.08)", border: `1px solid rgba(255,77,106,.25)`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: T.red }}>{extractErr}</div>}
+    </div>}
+
+    {tab === "csv" && <div><div className={`dz${over ? " ov2" : ""}`} onDragOver={e => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={e => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files[0]; if (f) handleCSV(f); }} onClick={() => csvRef.current?.click()}><div style={{ fontSize: 40, marginBottom: 10 }}>📂</div><div style={{ fontSize: 15, fontWeight: 600, color: T.mid }}>Arrastrá un CSV</div><div style={{ fontSize: 12, color: T.muted }}>Compatible con Mercado Pago, bancos argentinos y exportaciones estándar</div><input ref={csvRef} type="file" accept=".csv,.txt" style={{ display: "none" }} onChange={e => e.target.files[0] && handleCSV(e.target.files[0])} /></div></div>}
+
     {tab === "paste" && <div><textarea className="inp" style={{ minHeight: 150 }} placeholder="Pegá acá el texto de tu app..." value={paste} onChange={e => setPaste(e.target.value)} /><button className="btn bl" style={{ marginTop: 10 }} onClick={doPaste} disabled={!paste.trim()}>Analizar texto</button></div>}
-    
-    {tab === "guide" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))", gap: 12 }}>{[{ app: "📸 Capturas", steps: ["Sacá screenshot al historial", "Subila en la pestaña Imagen", "Editá la fecha si es del mes pasado"] }].map(({ app, steps }) => <div key={app} className="card csm"><div style={{ fontSize: 13, fontWeight: 600, marginBottom: 9 }}>{app}</div><ol style={{ paddingLeft: 16 }}>{steps.map((s, i) => <li key={i} style={{ fontSize: 12, color: T.muted }}>{s}</li>)}</ol></div>)}</div>}
+
+    {tab === "guide" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))", gap: 12 }}>{[{ app: "📸 Imágenes", steps: ["Screenshot del historial de tu banco, Mercado Pago o resumen TC", "Subila en la pestaña Imagen", "Revisá y editá las fechas si hace falta"] }, { app: "📄 PDF", steps: ["Bajá el extracto desde tu homebanking", "Subilo en la pestaña PDF", "La IA procesa todas las páginas automáticamente"] }, { app: "📁 CSV", steps: ["Exportá desde Mercado Pago o tu banco", "El parser detecta el formato automáticamente", "Compatible con doble-header (ej: MP)"] }].map(({ app, steps }) => <div key={app} className="card csm"><div style={{ fontSize: 13, fontWeight: 600, marginBottom: 9 }}>{app}</div><ol style={{ paddingLeft: 16 }}>{steps.map((s, i) => <li key={i} style={{ fontSize: 12, color: T.muted, marginBottom: 4 }}>{s}</li>)}</ol></div>)}</div>}
 
     {preview.length > 0 && <div style={{ marginTop: 22 }}>
+      {/* Banner de fechas */}
+      <div style={{ background: "rgba(255,184,48,.08)", border: `1px solid rgba(255,184,48,.25)`, borderRadius: 10, padding: "10px 16px", marginBottom: 14, fontSize: 12, color: T.amber, display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 16 }}>📅</span>
+        <span><strong>Revisá las fechas antes de importar.</strong> Podés editarlas haciendo click en cada una.</span>
+      </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
         <h2 style={{ fontSize: 16, fontWeight: 700 }}>{preview.length} movimientos detectados</h2>
         <div style={{ display: "flex", gap: 8 }}>
@@ -1280,7 +1398,7 @@ function Import({ state, update, notify }) {
             {preview.map((t) => (
               <tr key={t.id}>
                 <td>
-                  <input type="date" className="inp" style={{ fontSize: 11, padding: "4px 6px", width: "auto", border: "none", background: T.raised, color: T.white }} value={t.date}
+                  <input type="date" className="inp" style={{ fontSize: 11, padding: "5px 8px", width: "auto", minWidth: 130, border: `1px solid ${T.border}`, background: T.raised, color: T.white, borderRadius: 6 }} value={t.date}
                     onChange={e => setPreview(prev => prev.map(p => p.id === t.id ? { ...p, date: e.target.value } : p))} />
                 </td>
                 <td style={{ fontSize: 12 }}>{t.description}</td>
