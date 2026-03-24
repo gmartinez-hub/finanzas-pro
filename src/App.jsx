@@ -379,52 +379,77 @@ input,select,textarea,button{font-family:inherit}button{cursor:pointer;border:no
 }`;
 
 const ic={
-  // Dashboard — soft home with rounded roof
-  Grid:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12L12 4l9 8"/><path d="M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9"/></svg>,
-  // Transactions — two flowing arrows
-  Tx:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M7 16V4m0 0L3 8m4-4l4 4"/><path d="M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>,
-  // Goals — flag with organic curve
-  Target:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>,
-  // Analytics — smooth wave chart
-  Chart:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 17c2-4 4-6 6-4s3 5 5 5 4-6 7-9"/><path d="M3 21h18"/></svg>,
-  // Import — tray with arrow
-  Import:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v11m0 0l-4-4m4 4l4-4"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>,
-  // Investments — leaf with upward trend
-  Stock:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 17l4-5 4 3 4-6 4-3"/><path d="M16 6h5v5"/></svg>,
-  // Salary — coin with leaf detail
-  Salary:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5C9.5 8.1 10.6 7 12 7s2.5 1.1 2.5 2.5-1.1 2.5-2.5 2.5-2.5 1.1-2.5 2.5S10.6 17 12 17s2.5-1.1 2.5-2.5"/></svg>,
-  // Plus — rounded
-  Plus:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
-  // X — rounded
-  X:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
-  // Trash — minimal
-  Trash:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>,
-  // Refresh — organic circle arrow
-  Refresh:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2v6h-6"/><path d="M21 8A9 9 0 113 12"/></svg>,
-  // Bell — smooth
-  Bell:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>,
-  // Scan — corners only
-  Scan:()=><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 9V5a2 2 0 012-2h4M15 3h4a2 2 0 012 2v4M21 15v4a2 2 0 01-2 2h-4M9 21H5a2 2 0 01-2-2v-4"/><path d="M8 12h8" strokeDasharray="2 2"/></svg>,
-  // Bolt — lightning
-  Bolt:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2L4.5 13.5H12L11 22l8.5-11.5H12.5L13 2z"/></svg>,
-  // Check
-  Check:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>,
-  // Menu — rounded bars
-  Menu:()=><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="6" y1="12" x2="21" y2="12"/><line x1="9" y1="18" x2="21" y2="18"/></svg>,
-  // Trend up
-  TrendUp:()=><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>,
-  // Trend down
-  TrendDown:()=><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/></svg>,
-  // Download
-  Download:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v11m0 0l-4-4m4 4l4-4"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>,
-  // Link — chain
-  Link:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>,
+  // Dashboard — four organic petal shapes (like a mango cross-section)
+  Grid:()=><svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d="M9 2C6 2 4 4 4 6.5 4 9.5 6.5 10 9 10V2z" fill="currentColor" opacity=".9"/><path d="M11 2c3 0 5 2 5 4.5 0 3-2.5 3.5-5 3.5V2z" fill="currentColor" opacity=".55"/><path d="M9 18C6 18 4 16 4 13.5 4 10.5 6.5 10 9 10v8z" fill="currentColor" opacity=".55"/><path d="M11 18c3 0 5-2 5-4.5 0-3-2.5-3.5-5-3.5v8z" fill="currentColor" opacity=".35"/></svg>,
+
+  // Transactions — two teardrop/fruit-drop shapes flowing in opposite directions
+  Tx:()=><svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d="M6 3c0 0-4 3-4 6s2 4 4 4 4-1 4-4S6 3 6 3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/><path d="M14 17c0 0 4-3 4-6s-2-4-4-4-4 1-4 4 4 6 4 6z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/><path d="M6 7v4M5 8l1-1 1 1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><path d="M14 13V9M13 12l1 1 1-1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>,
+
+  // Goals — mango shape with a small flag/star at top
+  Target:()=><svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d="M10 3C7 3 5 5.5 5 8.5c0 4 3.5 6.5 5 8 1.5-1.5 5-4 5-8C15 5.5 13 3 10 3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/><path d="M10 3V1M10 1l1.5 1H10m0 0H8.5L10 1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/><circle cx="10" cy="8" r="1.5" fill="currentColor" opacity=".6"/></svg>,
+
+  // Analytics — organic juice-wave with rising curve
+  Chart:()=><svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d="M2 14c1.5-3 3-5 5-4s2.5 4 4 4 4.5-5.5 7-8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 17h16" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity=".4"/><circle cx="7" cy="10.5" r="1.2" fill="currentColor" opacity=".5"/><circle cx="11" cy="14" r="1.2" fill="currentColor" opacity=".5"/></svg>,
+
+  // Import — leaf with an inward arrow (absorbing data)
+  Import:()=><svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d="M10 2C7 2 4 5 4 9c0 5 4 8 6 9 2-1 6-4 6-9 0-4-3-7-6-7z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" opacity=".5"/><path d="M10 6v6M7.5 9.5L10 12l2.5-2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+
+  // Investments — sprouting plant with upward growth lines
+  Stock:()=><svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d="M10 16V9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M10 12c0 0-1-4-5-4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M10 9c0 0 1.5-4 5-3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><circle cx="5" cy="8" r="2" stroke="currentColor" strokeWidth="1.3"/><circle cx="15" cy="5.5" r="2" stroke="currentColor" strokeWidth="1.3"/><path d="M4 17h12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity=".4"/></svg>,
+
+  // Salary — coin with mango-leaf relief
+  Salary:()=><svg width="16" height="16" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.5" stroke="currentColor" strokeWidth="1.4"/><path d="M10 5C8.5 5 7 6.2 7 8c0 2.2 2 2.8 3 3s3 .8 3 3c0 1.8-1.5 3-3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M10 5V3.5M10 17v-1.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity=".6"/></svg>,
+
+  // Plus — organic plus with slightly rounded tips
+  Plus:()=><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>,
+
+  // X — clean diagonal cross
+  X:()=><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>,
+
+  // Trash — leaf/bin with stem
+  Trash:()=><svg width="13" height="13" viewBox="0 0 20 20" fill="none"><path d="M4 6h12M8 6V4h4v2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M6 6l.8 10.5h6.4L14 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/><path d="M8.5 9.5v4M11.5 9.5v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity=".7"/></svg>,
+
+  // Refresh — a single organic loop (citrus peel curl)
+  Refresh:()=><svg width="13" height="13" viewBox="0 0 20 20" fill="none"><path d="M16 4.5A7.5 7.5 0 104 14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/><path d="M16 4.5V8.5h-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+
+  // Bell — organic teardrop bell shape
+  Bell:()=><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M10 3C7.5 3 5.5 5 5.5 8c0 4.5-2 5.5-2 5.5h13s-2-1-2-5.5C14.5 5 12.5 3 10 3z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/><path d="M8.5 16.5a1.5 1.5 0 003 0" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>,
+
+  // Scan — mango-leaf corner brackets
+  Scan:()=><svg width="15" height="15" viewBox="0 0 20 20" fill="none"><path d="M4 8V5a1 1 0 011-1h3M12 4h3a1 1 0 011 1v3M16 12v3a1 1 0 01-1 1h-3M8 16H5a1 1 0 01-1-1v-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><path d="M7 10h6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeDasharray="1.5 1.5"/></svg>,
+
+  // Bolt — mango-seed lightning shape
+  Bolt:()=><svg width="13" height="13" viewBox="0 0 20 20" fill="none"><path d="M12 2.5L5 11h5.5L8 18.5 16 8.5h-5.5L12 2.5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" fill="currentColor" fillOpacity=".12"/></svg>,
+
+  // Check — soft tick
+  Check:()=><svg width="13" height="13" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4.5 4.5 8-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+
+  // Menu — three lines, shorter on bottom (organic taper)
+  Menu:()=><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 6h14M3 10h10M3 14h7" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/></svg>,
+
+  // TrendUp — organic upward leaf
+  TrendUp:()=><svg width="12" height="12" viewBox="0 0 20 20" fill="none"><path d="M3 15L8 9l4 3 6-8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><path d="M13 4h4v4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+
+  // TrendDown
+  TrendDown:()=><svg width="12" height="12" viewBox="0 0 20 20" fill="none"><path d="M3 5l5 6 4-3 6 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><path d="M13 16h4v-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+
+  // Download — seed falling into ground
+  Download:()=><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M10 3v9M7 9l3 3 3-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/><path d="M4 15h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" opacity=".5"/><path d="M3 17h14" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity=".3"/></svg>,
+
+  // Link — two organic droplets connected
+  Link:()=><svg width="13" height="13" viewBox="0 0 20 20" fill="none"><path d="M8 12.5a4 4 0 005.5 0l2-2a4 4 0 00-5.5-5.5L8.5 6.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><path d="M12 7.5a4 4 0 00-5.5 0l-2 2a4 4 0 005.5 5.5l1.5-1.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>,
 };
 
 const Dots=()=><span className="dots"><span/><span/><span/></span>;
 const PH=({title,sub,right})=>(<div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24,flexWrap:"wrap",gap:10}}><div><h1 style={{fontSize:24,fontWeight:800,color:T.white,letterSpacing:"-1px"}}>{title}</h1>{sub&&<div style={{fontSize:12,color:T.muted,marginTop:4}}>{sub}</div>}</div>{right}</div>);
 const CTip=({active,payload,label,dc="ARS"})=>{if(!active||!payload?.length)return null;return <div style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 14px",fontSize:12}}><div style={{color:T.muted,marginBottom:5,fontSize:11}}>{label}</div>{payload.map((p,i)=><div key={i} style={{color:p.color,display:"flex",gap:12,justifyContent:"space-between"}}><span>{p.name}</span><span className="mono">{dc==="USD"?fUSD(p.value):fARS(p.value)}</span></div>)}</div>;};
 function useDsp({displayCurrency,usdRate}){const fmt=useCallback(a=>displayCurrency==="USD"?fUSD(a/usdRate):fARS(a),[displayCurrency,usdRate]);const toDsp=useCallback(a=>displayCurrency==="USD"?a/usdRate:a,[displayCurrency,usdRate]);return{fmt,toDsp};}
+// Currency-aware accent: USD shifts to cool blue-teal, ARS stays warm lime-mango
+function useCurrencyAccent(displayCurrency){
+  return displayCurrency==="USD"
+    ?{accent:"#5BCFB8",accentD:"#3ABDA6",accentBg:"rgba(91,207,184,.08)",accentBorder:"rgba(91,207,184,.25)"}
+    :{accent:"#CCFF47",accentD:"#AADC28",accentBg:"rgba(204,255,71,.08)",accentBorder:"rgba(204,255,71,.25)"};
+}
 const sigCls=s=>s==="STRONG BUY"?"sb":s==="BUY"?"buy":s==="HOLD"?"hld":"sel";
 function useIsMobile(){const [m,setM]=useState(window.innerWidth<=768);useEffect(()=>{const h=()=>setM(window.innerWidth<=768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);return m;}
 
@@ -661,7 +686,7 @@ export default function App(){
   const CUR=getCUR();
   const alerts=Object.entries(state.budgets||{}).filter(([cat,lim])=>state.transactions.filter(t=>gMonth(t.date)===CUR&&t.category===cat&&t.type==="expense").reduce((s,t)=>s+t.amount,0)>lim*0.8);
 
-  const sidebar=<aside style={{width:isMobile?"100%":212,background:T.surface,borderRight:isMobile?"none":`1px solid ${T.border}`,display:"flex",flexDirection:"column",padding:"20px 12px",gap:2,flexShrink:0,...(isMobile?{position:"fixed",top:0,left:0,bottom:0,zIndex:300,width:260,transform:sideOpen?"translateX(0)":"translateX(-100%)",transition:"transform .25s cubic-bezier(.16,1,.3,1)",boxShadow:sideOpen?"8px 0 30px rgba(0,0,0,.6)":"none"}:{})}}><div style={{padding:"4px 10px 20px",display:"flex",alignItems:"center",gap:9,justifyContent:"space-between"}}><div style={{display:"flex",alignItems:"center",gap:9}}><div style={{width:30,height:30,background:"linear-gradient(135deg,#FF9A35,#E07A18)",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}><svg width="18" height="18" viewBox="0 0 32 32" fill="none"><path d="M16 4C10 4 6 9 6 15c0 7 5 11 10 13 5-2 10-6 10-13 0-6-4-11-10-11z" fill="#FF9A35" opacity=".9"/><path d="M16 4c0 0 2-4 6-3" stroke="#CCFF47" strokeWidth="1.8" strokeLinecap="round"/><path d="M12 14c1-2 3-3 4-2s0 4-2 5" stroke="#09080A" strokeWidth="1.2" strokeLinecap="round" opacity=".4"/></svg></div><div style={{fontSize:14,fontWeight:800,letterSpacing:"-.5px",background:"linear-gradient(135deg,#F2EBE0,#FF9A35)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>Mangos</div></div>{isMobile&&<button onClick={()=>setSO(false)} style={{color:T.muted,padding:4}}><ic.X/></button>}</div>{nav.map(({id,l,I})=>(<button key={id} className={`nav${view===id?" on":""}`} onClick={()=>navTo(id)}><I/>{l}{id==="investments"&&state.savedAnalyses?.length>0&&<span style={{marginLeft:"auto",fontSize:10,background:T.raised,padding:"2px 6px",borderRadius:99,color:T.muted}}>{state.savedAnalyses.length}</span>}</button>))}<div style={{flex:1}}/>{alerts.length>0&&<div onClick={()=>navTo("transactions")} style={{background:"rgba(255,184,48,.08)",border:`1px solid rgba(255,184,48,.2)`,borderRadius:10,padding:"9px 12px",cursor:"pointer",marginBottom:8}}><div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:T.amber,fontWeight:600}}><ic.Bell/>{alerts.length} alerta{alerts.length>1?"s":""}</div></div>}
+  const sidebar=<aside style={{width:isMobile?"100%":212,background:T.surface,borderRight:isMobile?"none":`1px solid ${T.border}`,display:"flex",flexDirection:"column",padding:"20px 12px",gap:2,flexShrink:0,...(isMobile?{position:"fixed",top:0,left:0,bottom:0,zIndex:300,width:260,transform:sideOpen?"translateX(0)":"translateX(-100%)",transition:"transform .25s cubic-bezier(.16,1,.3,1)",boxShadow:sideOpen?"8px 0 30px rgba(0,0,0,.6)":"none"}:{})}}><div style={{padding:"4px 10px 20px",display:"flex",alignItems:"center",gap:9,justifyContent:"space-between"}}><div style={{display:"flex",alignItems:"center",gap:9}}><div style={{width:30,height:30,background:"linear-gradient(135deg,#FF9A35,#E07A18)",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}><svg width="22" height="22" viewBox="0 0 28 28" fill="none"><path d="M14 4C9 4 6 8 6 13c0 6 4.5 9.5 8 11 3.5-1.5 8-5 8-11 0-5-3-9-8-9z" fill="#FF9A35"/><path d="M14 4C14 4 14 1 17.5 1.5" stroke="#CCFF47" strokeWidth="1.8" strokeLinecap="round"/><ellipse cx="11.5" cy="13" rx="2" ry="3.5" fill="#E07A18" opacity=".4" transform="rotate(-15 11.5 13)"/></svg></div><div style={{fontSize:14,fontWeight:800,letterSpacing:"-.5px",background:"linear-gradient(135deg,#F2EBE0,#FF9A35)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>Mangos</div></div>{isMobile&&<button onClick={()=>setSO(false)} style={{color:T.muted,padding:4}}><ic.X/></button>}</div>{nav.map(({id,l,I})=>(<button key={id} className={`nav${view===id?" on":""}`} onClick={()=>navTo(id)}><I/>{l}{id==="investments"&&state.savedAnalyses?.length>0&&<span style={{marginLeft:"auto",fontSize:10,background:T.raised,padding:"2px 6px",borderRadius:99,color:T.muted}}>{state.savedAnalyses.length}</span>}</button>))}<div style={{flex:1}}/>{alerts.length>0&&<div onClick={()=>navTo("transactions")} style={{background:"rgba(255,184,48,.08)",border:`1px solid rgba(255,184,48,.2)`,borderRadius:10,padding:"9px 12px",cursor:"pointer",marginBottom:8}}><div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:T.amber,fontWeight:600}}><ic.Bell/>{alerts.length} alerta{alerts.length>1?"s":""}</div></div>}
   
   <div style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px"}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -671,14 +696,14 @@ export default function App(){
     
     <div style={{display:"flex", background:T.bg, borderRadius:8, padding:3, marginBottom:12}}>
       {[{id:"oficial",l:"Oficial"},{id:"mep",l:"MEP"},{id:"blue",l:"Blue"}].map(t=>(
-        <button key={t.id} onClick={()=>{update({usdType: t.id, usdRate: state.usdRates?.[t.id] || state.usdRate});}} style={{flex:1, padding:"6px 0", fontSize:10, fontWeight:600, color:state.usdType===t.id?T.bg:T.muted, background:state.usdType===t.id?T.lime:"transparent", borderRadius:6, transition:"all .2s"}}>{t.l}</button>
+        <button key={t.id} onClick={()=>{update({usdType: t.id, usdRate: state.usdRates?.[t.id] || state.usdRate});}} style={{flex:1, padding:"6px 0", fontSize:10, fontWeight:600, color:state.usdType===t.id?"#09080A":T.muted, background:state.usdType===t.id?T.lime:"transparent", borderRadius:6, transition:"all .2s"}}>{t.l}</button>
       ))}
     </div>
 
     <div className="mono" style={{fontSize:24,fontWeight:600,color:T.white,textAlign:"center"}}>{fARS(state.usdRate)}</div>
     
     <div style={{display:"flex",gap:6,marginTop:14}}>
-      {["ARS","USD"].map(c=>(<button key={c} onClick={()=>update({displayCurrency:c})} style={{flex:1,padding:"6px 0",borderRadius:8,fontSize:10,fontWeight:600,border:`1px solid ${state.displayCurrency===c?T.lime:T.border}`,background:state.displayCurrency===c?"rgba(200,255,87,.1)":T.surface,color:state.displayCurrency===c?T.lime:T.muted,cursor:"pointer",transition:"all .2s"}}>{c}</button>))}
+      {["ARS","USD"].map(c=>(<button key={c} onClick={()=>update({displayCurrency:c})} style={{flex:1,padding:"6px 0",borderRadius:8,fontSize:10,fontWeight:600,border:`1px solid ${state.displayCurrency===c?(c==="USD"?"rgba(91,207,184,.4)":"rgba(204,255,71,.35)"):T.border}`,background:state.displayCurrency===c?(c==="USD"?"rgba(91,207,184,.1)":"rgba(204,255,71,.08)"):T.surface,color:state.displayCurrency===c?(c==="USD"?"#5BCFB8":T.lime):T.muted,cursor:"pointer",transition:"all .2s"}}>{c}</button>))}
     </div>
   </div>
   
@@ -686,7 +711,7 @@ export default function App(){
   <button onClick={()=>exportData(state)} style={{display:"flex",alignItems:"center",gap:7,width:"100%",padding:"8px 12px",marginTop:8,borderRadius:9,border:`1px solid ${T.border}`,background:"none",color:T.muted,fontSize:11,cursor:"pointer",transition:"all .15s"}} onMouseEnter={e=>e.currentTarget.style.color=T.white} onMouseLeave={e=>e.currentTarget.style.color=T.muted}><ic.Download/>Exportar mis datos</button>
   </aside>;
 
-  return(<div style={{display:"flex",height:"100vh",overflow:"hidden",background:T.bg}}><style>{CSS}</style>{isMobile?<>{sideOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:299}} onClick={()=>setSO(false)}/>}{sidebar}</>:sidebar}{isMobile&&<div style={{position:"fixed",top:0,left:0,right:0,height:52,background:T.surface,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",padding:"0 14px",gap:12,zIndex:100}}><button onClick={()=>setSO(true)} style={{color:T.white,padding:4}}><ic.Menu/></button><div style={{fontSize:14,fontWeight:800,letterSpacing:"-.4px",background:"linear-gradient(135deg,#F2EBE0,#FF9A35)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>Mangos</div><div style={{flex:1}}/><div className="mono" style={{fontSize:11,color:T.mango}}>{state.displayCurrency==="USD"?fUSD(1):fARS(state.usdRate)}</div></div>}<main style={{flex:1,overflow:"auto",padding:isMobile?"66px 14px 20px":"28px 32px"}}>{pages[view]}</main>{toast&&<div className={`toast t${toast.type}`}>{toast.msg}</div>}<TourGuide setView={navTo}/></div>);
+  return(<div style={{display:"flex",height:"100vh",overflow:"hidden",background:T.bg}}><style>{CSS}</style>{isMobile?<>{sideOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:299}} onClick={()=>setSO(false)}/>}{sidebar}</>:sidebar}{isMobile&&<div style={{position:"fixed",top:0,left:0,right:0,height:52,background:T.surface,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",padding:"0 14px",gap:12,zIndex:100}}><button onClick={()=>setSO(true)} style={{color:T.white,padding:4}}><ic.Menu/></button><div style={{fontSize:14,fontWeight:800,letterSpacing:"-.4px",background:"linear-gradient(135deg,#F2EBE0,#FF9A35)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>Mangos</div><div style={{flex:1}}/><div className="mono" style={{fontSize:11,color:state.displayCurrency==="USD"?"#5BCFB8":T.mango}}>{state.displayCurrency==="USD"?fUSD(1):fARS(state.usdRate)}</div></div>}<main style={{flex:1,overflow:"auto",padding:isMobile?"66px 14px 20px":"28px 32px"}}>{pages[view]}</main>{toast&&<div className={`toast t${toast.type}`}>{toast.msg}</div>}<TourGuide setView={navTo}/></div>);
 }
 
 function Onboarding({update,notify}){
