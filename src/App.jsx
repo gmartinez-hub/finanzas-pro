@@ -381,8 +381,8 @@ function TourGuide({setView}){
 }
 
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
-const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://ghfnscswtsgnylumcxyp.supabase.co";
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdoZm5zY3N3dHNnbnlsdW1jeHlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNzUxOTgsImV4cCI6MjA4OTk1MTE5OH0.dq2Xhy7c7X_kZvGtln5Ko8hl5woYsHGq5hXLSfJQoic";
 
 const SLIDE_MAP = {
   2:   { section:"goals",        tip:"🎯 Creá tu primera meta ahora — nombre, monto y fecha límite.", btn:"Ir a Metas" },
