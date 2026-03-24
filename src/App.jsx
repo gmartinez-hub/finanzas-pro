@@ -2,9 +2,12 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
 const T = {
-  bg:"#07080D",surface:"#0C0E15",raised:"#111520",border:"#1C2030",hi:"#252D45",
-  lime:"#C8FF57",limeD:"#A8E030",blue:"#4D9EFF",red:"#FF4D6A",amber:"#FFB830",
-  teal:"#00E5C3",purple:"#A78BFA",mango:"#FF9F43",white:"#F0F2F7",mid:"#8892A4",muted:"#3A4255",ink:"#0E1117",
+  bg:"#09080A",surface:"#100E12",raised:"#181519",border:"#25202A",hi:"#302838",
+  lime:"#CCFF47",limeD:"#AADC28",mango:"#FF9A35",mangoD:"#E07A18",
+  coral:"#FF5F6D",blue:"#5B9EFF",amber:"#FFB830",teal:"#00D4AA",purple:"#B89BFF",
+  white:"#F2EBE0",mid:"#8A7D75",muted:"#48403A",ink:"#09080A",
+  // aliases for compat
+  red:"#FF5F6D",
 };
 const SK="fp_v3b";
 const persist=async d=>{try{await window.storage?.set(SK,JSON.stringify(d),false);}catch(e){console.warn("persist fail",e);}};
@@ -30,7 +33,7 @@ const MOS=["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Di
 const CATS=["🏠 Vivienda","🛒 Supermercado","🚗 Transporte","🍔 Comida y delivery","💊 Salud","👕 Indumentaria","📱 Servicios digitales","🎬 Ocio","💪 Deporte","✈️ Viajes","📚 Educación","💰 Ahorro","💳 Cuotas","🐜 Gastos hormiga","🧛 Suscripciones","❓ Otros"];
 const CATS_PLAIN=CATS.map(c=>c.split(" ").slice(1).join(" "));
 const matchCat=raw=>{if(!raw)return "❓ Otros";const found=CATS.find(c=>c===raw);if(found)return found;const lower=raw.toLowerCase().trim();const idx=CATS_PLAIN.findIndex(p=>p.toLowerCase()===lower);return idx>=0?CATS[idx]:"❓ Otros";};
-const CPAL=["#C8FF57","#4D9EFF","#FF4D6A","#FFB830","#00E5C3","#A78BFA","#F97316","#EC4899","#84CC16","#14B8A6","#60A5FA","#4ADE80","#FB923C","#EF4444","#94A3B8","#CBD5E1"];
+const CPAL=["#CCFF47","#FF9A35","#5B9EFF","#FFB830","#00D4AA","#FF5F6D","#B89BFF","#FF6B9D","#8ED44A","#00B89A","#7BB5FF","#FFD166","#FF8C42","#E05F6B","#A09090","#D4C5B8"];
 const DEFAULT={transactions:[],goals:[],budgets:{},usdRate:1350,usdType:"mep",usdRates:{oficial:1350,mep:1350,blue:1350},displayCurrency:"ARS",riskProfile:null,onboardingDone:false,savedAnalyses:[],weeklyInsight:null,weeklyInsightDate:null,salaries:[],lastSalaryBase:0,holdings:[],marketPrices:{}};
 const uid=()=>`${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
 
@@ -276,8 +279,147 @@ const healthScore=(txs,goals,holdings=[])=>{
   };
 };
 
-const CSS=`@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=DM+Mono:wght@300;400;500&display=swap');*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{background:#07080D;color:#F0F2F7;font-family:'Sora',sans-serif;overflow:hidden;height:100%}::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#3A4255;border-radius:99px}input,select,textarea,button{font-family:inherit}button{cursor:pointer;border:none;background:none}.mono{font-family:'DM Mono',monospace}.up{animation:up .35s cubic-bezier(.16,1,.3,1) both}@keyframes up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}.d1{animation-delay:.05s}.d2{animation-delay:.1s}.d3{animation-delay:.15s}.d4{animation-delay:.2s}.nav{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;font-size:13px;font-weight:500;color:#3A4255;transition:all .18s;width:100%;text-align:left;position:relative}.nav:hover{color:#F0F2F7;background:#111520}.nav.on{color:#C8FF57;background:rgba(200,255,87,.07)}.nav.on::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:60%;background:#C8FF57;border-radius:0 2px 2px 0}.inp{background:#111520;border:1px solid #1C2030;border-radius:10px;padding:10px 13px;font-size:13px;color:#F0F2F7;outline:none;transition:border .15s;width:100%}.inp:focus{border-color:#7CB33A}.inp::placeholder{color:#3A4255}.btn{display:inline-flex;align-items:center;gap:7px;padding:10px 18px;border-radius:10px;font-size:13px;font-weight:600;transition:all .15s;white-space:nowrap}.btn:disabled{opacity:.5;cursor:not-allowed}.bl{background:#C8FF57;color:#07080D}.bl:hover:not(:disabled){background:#A8E030;transform:translateY(-1px);box-shadow:0 4px 20px rgba(200,255,87,.3)}.bg{background:#111520;color:#8892A4;border:1px solid #1C2030}.bg:hover:not(:disabled){background:#1C2030;color:#F0F2F7}.bd{background:rgba(255,77,106,.08);color:#FF4D6A;border:1px solid rgba(255,77,106,.2)}.bd:hover:not(:disabled){background:rgba(255,77,106,.18)}.bsm{padding:6px 12px;font-size:12px;border-radius:8px}.card{background:#0C0E15;border:1px solid #1C2030;border-radius:16px;padding:20px}.csm{border-radius:12px;padding:14px}.tag{display:inline-flex;align-items:center;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:600}.ti{background:rgba(0,229,195,.12);color:#00E5C3}.te{background:rgba(255,77,106,.12);color:#FF4D6A}.ts{background:rgba(77,158,255,.12);color:#4D9EFF}.prog{height:6px;border-radius:3px;background:#111520;overflow:hidden}.progf{height:100%;border-radius:3px;transition:width .7s cubic-bezier(.16,1,.3,1)}.ov{position:fixed;inset:0;background:rgba(0,0,0,.8);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px}.modal{background:#0C0E15;border:1px solid #1C2030;border-radius:20px;padding:28px;width:520px;max-width:100%;max-height:85vh;overflow-y:auto}.tbl{width:100%;border-collapse:collapse}.tbl th{padding:9px 14px;font-size:10px;color:#3A4255;font-weight:600;text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid #1C2030;text-align:left}.tbl td{padding:9px 14px;font-size:13px;border-bottom:1px solid #0E1117;vertical-align:middle}.tbl tr:hover td{background:#111520}.tbl tr:last-child td{border-bottom:none}.toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:12px;font-size:13px;font-weight:500;z-index:999;animation:up .3s ease}.tok{background:rgba(0,229,195,.1);color:#00E5C3;border:1px solid rgba(0,229,195,.3)}.terr{background:rgba(255,77,106,.1);color:#FF4D6A;border:1px solid rgba(255,77,106,.3)}.tinfo{background:rgba(77,158,255,.1);color:#4D9EFF;border:1px solid rgba(77,158,255,.3)}.dots{display:inline-flex;gap:4px;align-items:center}.dots span{width:5px;height:5px;border-radius:50%;background:currentColor;animation:blink 1.2s infinite}.dots span:nth-child(2){animation-delay:.2s}.dots span:nth-child(3){animation-delay:.4s}@keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1}}.dz{border:2px dashed #1C2030;border-radius:14px;padding:36px 24px;text-align:center;transition:all .2s;cursor:pointer}.dz:hover,.dz.ov2{border-color:#C8FF57;background:rgba(200,255,87,.03)}.imgdrop{border:2px dashed #1C2030;border-radius:14px;min-height:180px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;cursor:pointer;transition:all .2s;overflow:hidden}.imgdrop:hover,.imgdrop.ov2{border-color:#A78BFA;background:rgba(167,139,250,.04)}.g2{display:grid;gap:10px;grid-template-columns:1fr 1fr}.g3{display:grid;gap:10px;grid-template-columns:1fr 1fr 1fr}.tabbar{display:flex;gap:3px;background:#111520;padding:4px;border-radius:11px;width:fit-content;flex-wrap:wrap}.tab{padding:7px 15px;border-radius:8px;font-size:12px;font-weight:600;transition:all .15s;color:#3A4255;cursor:pointer}.tab.on{background:#0C0E15;color:#F0F2F7;box-shadow:0 0 0 1px #1C2030}.chip{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:8px;font-size:11px;font-weight:600;background:#111520;border:1px solid #1C2030;color:#8892A4}.sb{background:rgba(200,255,87,.15);color:#C8FF57;border:1px solid rgba(200,255,87,.3)}.buy{background:rgba(0,229,195,.12);color:#00E5C3;border:1px solid rgba(0,229,195,.25)}.hld{background:rgba(255,184,48,.12);color:#FFB830;border:1px solid rgba(255,184,48,.25)}.sel{background:rgba(255,77,106,.12);color:#FF4D6A;border:1px solid rgba(255,77,106,.25)}@media(max-width:768px){.hide-m{display:none!important}.modal{padding:18px;width:100%;border-radius:16px}.card{padding:14px}.kpi-grid{grid-template-columns:1fr 1fr!important}.trend-grid{grid-template-columns:1fr!important}.g2,.g3{grid-template-columns:1fr!important}.tbl td,.tbl th{padding:6px 8px;font-size:11px}.inv-grid{grid-template-columns:1fr!important}}@media(max-width:480px){.kpi-grid{grid-template-columns:1fr!important}}`;
-const ic={Grid:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>,Tx:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>,Target:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>,Chart:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>,Import:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,Stock:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>,Salary:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>,Plus:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,X:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,Trash:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>,Refresh:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><path d="M20.5 16a9 9 0 11-2.3-8.7L23 10"/></svg>,Bell:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>,Scan:()=><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 9V5a2 2 0 012-2h4M15 3h4a2 2 0 012 2v4M21 15v4a2 2 0 01-2 2h-4M9 21H5a2 2 0 01-2-2v-4"/><line x1="3" y1="12" x2="21" y2="12"/></svg>,Bolt:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>,Check:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>,Menu:()=><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>,TrendUp:()=><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>,TrendDown:()=><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg>,Download:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,Link:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>};
+const CSS=`@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=DM+Mono:wght@300;400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#09080A;color:#F2EBE0;font-family:'Sora',sans-serif;overflow:hidden;height:100%}
+::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#48403A;border-radius:99px}
+input,select,textarea,button{font-family:inherit}button{cursor:pointer;border:none;background:none}
+.mono{font-family:'DM Mono',monospace}
+.up{animation:up .35s cubic-bezier(.16,1,.3,1) both}
+@keyframes up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.d1{animation-delay:.05s}.d2{animation-delay:.1s}.d3{animation-delay:.15s}.d4{animation-delay:.2s}
+@keyframes pulse-glow{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}
+/* ── NAV ── */
+.nav{display:flex;align-items:center;gap:10px;padding:10px 13px;border-radius:12px;font-size:13px;font-weight:500;color:#48403A;transition:all .2s;width:100%;text-align:left;position:relative}
+.nav:hover{color:#F2EBE0;background:rgba(255,154,53,.07)}
+.nav.on{color:#CCFF47;background:rgba(204,255,71,.07)}
+.nav.on::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:55%;background:linear-gradient(180deg,#CCFF47,#FF9A35);border-radius:0 3px 3px 0}
+/* ── INPUTS ── */
+.inp{background:#181519;border:1px solid #25202A;border-radius:11px;padding:10px 14px;font-size:13px;color:#F2EBE0;outline:none;transition:border .15s,box-shadow .15s;width:100%}
+.inp:focus{border-color:#FF9A35;box-shadow:0 0 0 3px rgba(255,154,53,.12)}
+.inp::placeholder{color:#48403A}
+/* ── BUTTONS ── */
+.btn{display:inline-flex;align-items:center;gap:7px;padding:10px 18px;border-radius:11px;font-size:13px;font-weight:600;transition:all .18s;white-space:nowrap}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.bl{background:linear-gradient(135deg,#CCFF47,#B8E830);color:#09080A}
+.bl:hover:not(:disabled){background:linear-gradient(135deg,#DAFF6B,#CCFF47);transform:translateY(-1px);box-shadow:0 6px 24px rgba(204,255,71,.28)}
+.bg{background:#181519;color:#8A7D75;border:1px solid #25202A}
+.bg:hover:not(:disabled){background:#25202A;color:#F2EBE0;border-color:#302838}
+.bd{background:rgba(255,95,109,.07);color:#FF5F6D;border:1px solid rgba(255,95,109,.2)}
+.bd:hover:not(:disabled){background:rgba(255,95,109,.15)}
+.bm{background:rgba(255,154,53,.1);color:#FF9A35;border:1px solid rgba(255,154,53,.25)}
+.bm:hover:not(:disabled){background:rgba(255,154,53,.2)}
+.bsm{padding:6px 12px;font-size:12px;border-radius:9px}
+/* ── CARDS ── */
+.card{background:#100E12;border:1px solid #25202A;border-radius:18px;padding:20px;transition:border-color .2s}
+.csm{border-radius:14px;padding:14px}
+.card-glow-lime{border-color:rgba(204,255,71,.2);box-shadow:0 0 0 1px rgba(204,255,71,.05),0 8px 32px rgba(0,0,0,.4)}
+.card-glow-mango{border-color:rgba(255,154,53,.25);box-shadow:0 0 0 1px rgba(255,154,53,.06),0 8px 32px rgba(0,0,0,.4)}
+/* ── TAGS ── */
+.tag{display:inline-flex;align-items:center;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:600}
+.ti{background:rgba(0,212,170,.1);color:#00D4AA}.te{background:rgba(255,95,109,.1);color:#FF5F6D}.ts{background:rgba(91,158,255,.1);color:#5B9EFF}
+/* ── PROGRESS ── */
+.prog{height:6px;border-radius:3px;background:rgba(255,255,255,.06);overflow:hidden}
+.progf{height:100%;border-radius:3px;transition:width .7s cubic-bezier(.16,1,.3,1)}
+/* ── OVERLAYS ── */
+.ov{position:fixed;inset:0;background:rgba(9,8,10,.85);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px}
+.modal{background:#100E12;border:1px solid #25202A;border-radius:22px;padding:28px;width:520px;max-width:100%;max-height:88vh;overflow-y:auto;box-shadow:0 32px 80px rgba(0,0,0,.7)}
+/* ── TABLE ── */
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{padding:9px 14px;font-size:10px;color:#48403A;font-weight:700;text-transform:uppercase;letter-spacing:.9px;border-bottom:1px solid #25202A;text-align:left}
+.tbl td{padding:9px 14px;font-size:13px;border-bottom:1px solid #181519;vertical-align:middle}
+.tbl tr:hover td{background:rgba(255,154,53,.04)}
+.tbl tr:last-child td{border-bottom:none}
+/* ── TOASTS ── */
+.toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:14px;font-size:13px;font-weight:600;z-index:999;animation:up .3s ease;backdrop-filter:blur(12px)}
+.tok{background:rgba(0,212,170,.12);color:#00D4AA;border:1px solid rgba(0,212,170,.3)}
+.terr{background:rgba(255,95,109,.12);color:#FF5F6D;border:1px solid rgba(255,95,109,.3)}
+.tinfo{background:rgba(255,154,53,.12);color:#FF9A35;border:1px solid rgba(255,154,53,.3)}
+/* ── LOADING DOTS ── */
+.dots{display:inline-flex;gap:4px;align-items:center}
+.dots span{width:5px;height:5px;border-radius:50%;background:currentColor;animation:blink 1.2s infinite}
+.dots span:nth-child(2){animation-delay:.2s}.dots span:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1}}
+/* ── DROP ZONES ── */
+.dz{border:2px dashed #25202A;border-radius:16px;padding:36px 24px;text-align:center;transition:all .2s;cursor:pointer}
+.dz:hover,.dz.ov2{border-color:#FF9A35;background:rgba(255,154,53,.04)}
+.imgdrop{border:2px dashed #25202A;border-radius:16px;min-height:180px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;cursor:pointer;transition:all .2s;overflow:hidden}
+.imgdrop:hover,.imgdrop.ov2{border-color:#B89BFF;background:rgba(184,155,255,.04)}
+/* ── GRIDS ── */
+.g2{display:grid;gap:10px;grid-template-columns:1fr 1fr}
+.g3{display:grid;gap:10px;grid-template-columns:1fr 1fr 1fr}
+/* ── TABBAR ── */
+.tabbar{display:flex;gap:3px;background:#181519;padding:4px;border-radius:13px;width:fit-content;flex-wrap:wrap}
+.tab{padding:7px 16px;border-radius:9px;font-size:12px;font-weight:600;transition:all .18s;color:#48403A;cursor:pointer}
+.tab.on{background:#100E12;color:#F2EBE0;box-shadow:0 0 0 1px #25202A}
+.tab:hover:not(.on){color:#8A7D75}
+/* ── CHIPS ── */
+.chip{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:9px;font-size:11px;font-weight:600;background:#181519;border:1px solid #25202A;color:#8A7D75}
+.sb{background:rgba(204,255,71,.12);color:#CCFF47;border:1px solid rgba(204,255,71,.25)}
+.buy{background:rgba(0,212,170,.1);color:#00D4AA;border:1px solid rgba(0,212,170,.22)}
+.hld{background:rgba(255,184,48,.1);color:#FFB830;border:1px solid rgba(255,184,48,.22)}
+.sel{background:rgba(255,95,109,.1);color:#FF5F6D;border:1px solid rgba(255,95,109,.22)}
+/* ── MOBILE ── */
+@media(max-width:768px){
+  .hide-m{display:none!important}
+  .modal{padding:18px;width:100%;border-radius:18px;max-height:92vh}
+  .card{padding:14px}
+  .kpi-grid{grid-template-columns:1fr 1fr!important}
+  .trend-grid{grid-template-columns:1fr!important}
+  .g2,.g3{grid-template-columns:1fr!important}
+  .tbl td,.tbl th{padding:7px 9px;font-size:11px}
+  .inv-grid{grid-template-columns:1fr!important}
+  .tabbar{gap:2px}
+  .tab{padding:6px 10px;font-size:11px}
+  .btn{padding:9px 14px;font-size:12px}
+}
+@media(max-width:480px){
+  .kpi-grid{grid-template-columns:1fr!important}
+  .modal{padding:14px}
+}`;
+
+const ic={
+  // Dashboard — soft home with rounded roof
+  Grid:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12L12 4l9 8"/><path d="M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9"/></svg>,
+  // Transactions — two flowing arrows
+  Tx:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M7 16V4m0 0L3 8m4-4l4 4"/><path d="M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>,
+  // Goals — flag with organic curve
+  Target:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>,
+  // Analytics — smooth wave chart
+  Chart:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 17c2-4 4-6 6-4s3 5 5 5 4-6 7-9"/><path d="M3 21h18"/></svg>,
+  // Import — tray with arrow
+  Import:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v11m0 0l-4-4m4 4l4-4"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>,
+  // Investments — leaf with upward trend
+  Stock:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 17l4-5 4 3 4-6 4-3"/><path d="M16 6h5v5"/></svg>,
+  // Salary — coin with leaf detail
+  Salary:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5C9.5 8.1 10.6 7 12 7s2.5 1.1 2.5 2.5-1.1 2.5-2.5 2.5-2.5 1.1-2.5 2.5S10.6 17 12 17s2.5-1.1 2.5-2.5"/></svg>,
+  // Plus — rounded
+  Plus:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+  // X — rounded
+  X:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+  // Trash — minimal
+  Trash:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>,
+  // Refresh — organic circle arrow
+  Refresh:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2v6h-6"/><path d="M21 8A9 9 0 113 12"/></svg>,
+  // Bell — smooth
+  Bell:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>,
+  // Scan — corners only
+  Scan:()=><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 9V5a2 2 0 012-2h4M15 3h4a2 2 0 012 2v4M21 15v4a2 2 0 01-2 2h-4M9 21H5a2 2 0 01-2-2v-4"/><path d="M8 12h8" strokeDasharray="2 2"/></svg>,
+  // Bolt — lightning
+  Bolt:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2L4.5 13.5H12L11 22l8.5-11.5H12.5L13 2z"/></svg>,
+  // Check
+  Check:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>,
+  // Menu — rounded bars
+  Menu:()=><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="6" y1="12" x2="21" y2="12"/><line x1="9" y1="18" x2="21" y2="18"/></svg>,
+  // Trend up
+  TrendUp:()=><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>,
+  // Trend down
+  TrendDown:()=><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/></svg>,
+  // Download
+  Download:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v11m0 0l-4-4m4 4l4-4"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>,
+  // Link — chain
+  Link:()=><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>,
+};
 
 const Dots=()=><span className="dots"><span/><span/><span/></span>;
 const PH=({title,sub,right})=>(<div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24,flexWrap:"wrap",gap:10}}><div><h1 style={{fontSize:24,fontWeight:800,color:T.white,letterSpacing:"-1px"}}>{title}</h1>{sub&&<div style={{fontSize:12,color:T.muted,marginTop:4}}>{sub}</div>}</div>{right}</div>);
@@ -286,7 +428,7 @@ function useDsp({displayCurrency,usdRate}){const fmt=useCallback(a=>displayCurre
 const sigCls=s=>s==="STRONG BUY"?"sb":s==="BUY"?"buy":s==="HOLD"?"hld":"sel";
 function useIsMobile(){const [m,setM]=useState(window.innerWidth<=768);useEffect(()=>{const h=()=>setM(window.innerWidth<=768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);return m;}
 
-const insightColorMap={red:{bg:"rgba(255,77,106,.07)",border:"rgba(255,77,106,.2)",text:T.red},amber:{bg:"rgba(255,184,48,.07)",border:"rgba(255,184,48,.2)",text:T.amber},lime:{bg:"rgba(200,255,87,.07)",border:"rgba(200,255,87,.2)",text:T.lime},blue:{bg:"rgba(77,158,255,.07)",border:"rgba(77,158,255,.2)",text:T.blue}};
+const insightColorMap={red:{bg:"rgba(255,95,109,.07)",border:"rgba(255,95,109,.2)",text:T.coral},amber:{bg:"rgba(255,184,48,.07)",border:"rgba(255,184,48,.2)",text:T.amber},lime:{bg:"rgba(204,255,71,.07)",border:"rgba(204,255,71,.2)",text:T.lime},blue:{bg:"rgba(91,158,255,.07)",border:"rgba(91,158,255,.2)",text:T.blue},mango:{bg:"rgba(255,154,53,.07)",border:"rgba(255,154,53,.2)",text:T.mango}};
 
 function InsightCard({card,fmt}){
   const cm=insightColorMap[card.color]||insightColorMap.blue;
@@ -423,16 +565,16 @@ function TourGuide({setView}){
   if(!tip)return null;
   const isCharla=tip.isCharla;
   return(
-    <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:"rgba(7,8,13,.97)",border:`1px solid ${isCharla?"rgba(200,255,87,.4)":"rgba(77,158,255,.3)"}`,borderRadius:16,padding:"14px 18px",zIndex:500,maxWidth:460,width:"calc(100% - 32px)",backdropFilter:"blur(16px)",boxShadow:`0 8px 40px rgba(0,0,0,.8),0 0 0 1px ${isCharla?"rgba(200,255,87,.06)":"rgba(77,158,255,.06)"}`,display:"flex",alignItems:"center",gap:12,animation:"up .3s ease"}}>
+    <div style={{position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",background:"rgba(16,14,18,.96)",border:`1px solid ${isCharla?"rgba(204,255,71,.35)":"rgba(255,154,53,.3)"}`,borderRadius:18,padding:"14px 18px",zIndex:500,maxWidth:460,width:"calc(100% - 24px)",backdropFilter:"blur(20px)",boxShadow:`0 12px 48px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.04),inset 0 1px 0 rgba(255,255,255,.06)`,display:"flex",alignItems:"center",gap:12,animation:"up .3s ease"}}>
       <div style={{flex:1,minWidth:0}}>
-        <div style={{fontSize:9,fontWeight:700,marginBottom:4,textTransform:"uppercase",letterSpacing:".8px",display:"flex",alignItems:"center",gap:5,color:isCharla?T.lime:T.blue}}>
-          <span style={{width:6,height:6,borderRadius:"50%",background:isCharla?T.lime:T.blue,display:"inline-block",animation:isCharla?"pulse 1.2s infinite":"none"}}/>
-          {isCharla?"Charla en vivo":"Guía Mangos"}
+        <div style={{fontSize:9,fontWeight:800,marginBottom:5,textTransform:"uppercase",letterSpacing:"1px",display:"flex",alignItems:"center",gap:6,color:isCharla?T.lime:T.mango}}>
+          <span style={{width:6,height:6,borderRadius:"50%",background:isCharla?T.lime:T.mango,display:"inline-block",animation:isCharla?"pulse-glow 1.2s infinite":"none",boxShadow:`0 0 8px ${isCharla?T.lime:T.mango}`}}/>
+          {isCharla?"Charla en vivo — Live":"Guía Mangos"}
         </div>
-        <div style={{fontSize:13,color:T.white,lineHeight:1.55}}>{tip.tip}</div>
+        <div style={{fontSize:13,color:"#E8DDD4",lineHeight:1.6,fontWeight:500}}>{tip.tip}</div>
       </div>
       <div style={{display:"flex",gap:6,flexShrink:0,alignItems:"center"}}>
-        <button className="btn bl bsm" onClick={()=>{setView(tip.section);}}>{tip.btn}</button>
+        <button onClick={()=>{setView(tip.section);}} style={{background:"linear-gradient(135deg,#CCFF47,#B8E830)",color:"#09080A",padding:"7px 14px",borderRadius:"9px",fontSize:"11px",fontWeight:"700",border:"none",cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>{tip.btn}</button>
         {!isCharla&&<button className="btn bg bsm" onClick={next} style={{padding:"6px 10px",fontSize:11}}>→</button>}
         <button className="btn bg bsm" style={{padding:"6px 10px"}} onClick={dismiss}>✕</button>
       </div>
@@ -519,12 +661,12 @@ export default function App(){
   const CUR=getCUR();
   const alerts=Object.entries(state.budgets||{}).filter(([cat,lim])=>state.transactions.filter(t=>gMonth(t.date)===CUR&&t.category===cat&&t.type==="expense").reduce((s,t)=>s+t.amount,0)>lim*0.8);
 
-  const sidebar=<aside style={{width:isMobile?"100%":212,background:T.surface,borderRight:isMobile?"none":`1px solid ${T.border}`,display:"flex",flexDirection:"column",padding:"20px 12px",gap:2,flexShrink:0,...(isMobile?{position:"fixed",top:0,left:0,bottom:0,zIndex:300,width:260,transform:sideOpen?"translateX(0)":"translateX(-100%)",transition:"transform .25s cubic-bezier(.16,1,.3,1)",boxShadow:sideOpen?"8px 0 30px rgba(0,0,0,.6)":"none"}:{})}}><div style={{padding:"4px 10px 20px",display:"flex",alignItems:"center",gap:9,justifyContent:"space-between"}}><div style={{display:"flex",alignItems:"center",gap:9}}><div style={{width:30,height:30,background:T.lime,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>🥭</div><div style={{fontSize:14,fontWeight:700,letterSpacing:"-.4px"}}>Mangos</div></div>{isMobile&&<button onClick={()=>setSO(false)} style={{color:T.muted,padding:4}}><ic.X/></button>}</div>{nav.map(({id,l,I})=>(<button key={id} className={`nav${view===id?" on":""}`} onClick={()=>navTo(id)}><I/>{l}{id==="investments"&&state.savedAnalyses?.length>0&&<span style={{marginLeft:"auto",fontSize:10,background:T.raised,padding:"2px 6px",borderRadius:99,color:T.muted}}>{state.savedAnalyses.length}</span>}</button>))}<div style={{flex:1}}/>{alerts.length>0&&<div onClick={()=>navTo("transactions")} style={{background:"rgba(255,184,48,.08)",border:`1px solid rgba(255,184,48,.2)`,borderRadius:10,padding:"9px 12px",cursor:"pointer",marginBottom:8}}><div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:T.amber,fontWeight:600}}><ic.Bell/>{alerts.length} alerta{alerts.length>1?"s":""}</div></div>}
+  const sidebar=<aside style={{width:isMobile?"100%":212,background:T.surface,borderRight:isMobile?"none":`1px solid ${T.border}`,display:"flex",flexDirection:"column",padding:"20px 12px",gap:2,flexShrink:0,...(isMobile?{position:"fixed",top:0,left:0,bottom:0,zIndex:300,width:260,transform:sideOpen?"translateX(0)":"translateX(-100%)",transition:"transform .25s cubic-bezier(.16,1,.3,1)",boxShadow:sideOpen?"8px 0 30px rgba(0,0,0,.6)":"none"}:{})}}><div style={{padding:"4px 10px 20px",display:"flex",alignItems:"center",gap:9,justifyContent:"space-between"}}><div style={{display:"flex",alignItems:"center",gap:9}}><div style={{width:30,height:30,background:"linear-gradient(135deg,#FF9A35,#E07A18)",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}><svg width="18" height="18" viewBox="0 0 32 32" fill="none"><path d="M16 4C10 4 6 9 6 15c0 7 5 11 10 13 5-2 10-6 10-13 0-6-4-11-10-11z" fill="#FF9A35" opacity=".9"/><path d="M16 4c0 0 2-4 6-3" stroke="#CCFF47" strokeWidth="1.8" strokeLinecap="round"/><path d="M12 14c1-2 3-3 4-2s0 4-2 5" stroke="#09080A" strokeWidth="1.2" strokeLinecap="round" opacity=".4"/></svg></div><div style={{fontSize:14,fontWeight:800,letterSpacing:"-.5px",background:"linear-gradient(135deg,#F2EBE0,#FF9A35)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>Mangos</div></div>{isMobile&&<button onClick={()=>setSO(false)} style={{color:T.muted,padding:4}}><ic.X/></button>}</div>{nav.map(({id,l,I})=>(<button key={id} className={`nav${view===id?" on":""}`} onClick={()=>navTo(id)}><I/>{l}{id==="investments"&&state.savedAnalyses?.length>0&&<span style={{marginLeft:"auto",fontSize:10,background:T.raised,padding:"2px 6px",borderRadius:99,color:T.muted}}>{state.savedAnalyses.length}</span>}</button>))}<div style={{flex:1}}/>{alerts.length>0&&<div onClick={()=>navTo("transactions")} style={{background:"rgba(255,184,48,.08)",border:`1px solid rgba(255,184,48,.2)`,borderRadius:10,padding:"9px 12px",cursor:"pointer",marginBottom:8}}><div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:T.amber,fontWeight:600}}><ic.Bell/>{alerts.length} alerta{alerts.length>1?"s":""}</div></div>}
   
   <div style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px"}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
       <span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".7px",fontWeight:600}}>Cotización Dólar</span>
-      {usdLoading?<Dots/>:<button onClick={updateRates} style={{fontSize:10,color:T.muted,cursor:"pointer",display:"flex",alignItems:"center",gap:3}}><ic.Refresh/>Auto</button>}
+      {usdLoading?<Dots/>:<button onClick={updateRates} style={{fontSize:10,color:T.mango,cursor:"pointer",display:"flex",alignItems:"center",gap:3,fontWeight:600}}><ic.Refresh/>Auto</button>}
     </div>
     
     <div style={{display:"flex", background:T.bg, borderRadius:8, padding:3, marginBottom:12}}>
@@ -544,7 +686,7 @@ export default function App(){
   <button onClick={()=>exportData(state)} style={{display:"flex",alignItems:"center",gap:7,width:"100%",padding:"8px 12px",marginTop:8,borderRadius:9,border:`1px solid ${T.border}`,background:"none",color:T.muted,fontSize:11,cursor:"pointer",transition:"all .15s"}} onMouseEnter={e=>e.currentTarget.style.color=T.white} onMouseLeave={e=>e.currentTarget.style.color=T.muted}><ic.Download/>Exportar mis datos</button>
   </aside>;
 
-  return(<div style={{display:"flex",height:"100vh",overflow:"hidden",background:T.bg}}><style>{CSS}</style>{isMobile?<>{sideOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:299}} onClick={()=>setSO(false)}/>}{sidebar}</>:sidebar}{isMobile&&<div style={{position:"fixed",top:0,left:0,right:0,height:52,background:T.surface,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",padding:"0 14px",gap:12,zIndex:100}}><button onClick={()=>setSO(true)} style={{color:T.white,padding:4}}><ic.Menu/></button><div style={{fontSize:14,fontWeight:700}}>Mangos</div><div style={{flex:1}}/><div className="mono" style={{fontSize:11,color:T.lime}}>{state.displayCurrency==="USD"?fUSD(1):fARS(state.usdRate)}</div></div>}<main style={{flex:1,overflow:"auto",padding:isMobile?"66px 14px 20px":"28px 32px"}}>{pages[view]}</main>{toast&&<div className={`toast t${toast.type}`}>{toast.msg}</div>}<TourGuide setView={navTo}/></div>);
+  return(<div style={{display:"flex",height:"100vh",overflow:"hidden",background:T.bg}}><style>{CSS}</style>{isMobile?<>{sideOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:299}} onClick={()=>setSO(false)}/>}{sidebar}</>:sidebar}{isMobile&&<div style={{position:"fixed",top:0,left:0,right:0,height:52,background:T.surface,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",padding:"0 14px",gap:12,zIndex:100}}><button onClick={()=>setSO(true)} style={{color:T.white,padding:4}}><ic.Menu/></button><div style={{fontSize:14,fontWeight:800,letterSpacing:"-.4px",background:"linear-gradient(135deg,#F2EBE0,#FF9A35)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>Mangos</div><div style={{flex:1}}/><div className="mono" style={{fontSize:11,color:T.mango}}>{state.displayCurrency==="USD"?fUSD(1):fARS(state.usdRate)}</div></div>}<main style={{flex:1,overflow:"auto",padding:isMobile?"66px 14px 20px":"28px 32px"}}>{pages[view]}</main>{toast&&<div className={`toast t${toast.type}`}>{toast.msg}</div>}<TourGuide setView={navTo}/></div>);
 }
 
 function Onboarding({update,notify}){
@@ -566,13 +708,13 @@ function Onboarding({update,notify}){
   ];
   const finish=()=>{const rawBase=px(d.income);const base=d.incomeCurrency==="USD"?rawBase*1350:rawBase;const CUR=getCUR();const patch={onboardingDone:true,riskProfile:{risk:profile,horizon,monthlyIncome:base,incomeCurrency:d.incomeCurrency,incomeRaw:rawBase,score,answers:ans},lastSalaryBase:base,salaries:base>0?[{month:CUR,base,extras:[]}]:[]};update(patch);localStorage.setItem("mangos_charla",new URLSearchParams(window.location.search).get("charla")==="true"?"true":"false");notify("¡Todo listo! 🎉");};
   const canNext=step===0?true:step>=1&&step<=4?ans[step-1]!==null:true;
-  return(<div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:T.bg,padding:16,overflow:"auto"}}><div style={{width:480,maxWidth:"100%",background:T.surface,borderRadius:24,border:`1px solid ${T.border}`,padding:"clamp(20px,5vw,40px)"}}><div style={{fontSize:10, color:T.muted, textAlign:"center", marginTop:24, background:"rgba(255,255,255,0.02)", padding:"10px", borderRadius:8}}>⚠️ Al continuar, entendés que esta app es para organización personal y no reemplaza la consulta con un asesor idóneo o matriculado.</div>
-<div style={{display:"flex",gap:10,marginTop:16}}>{Array.from({length:STEPS}).map((_,i)=><div key={i} style={{flex:1,height:3,borderRadius:3,background:i<=step?T.lime:T.raised,transition:"background .3s"}}/>)}</div>
+  return(<div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"radial-gradient(ellipse at 20% 50%, rgba(255,154,53,.06) 0%, transparent 60%), radial-gradient(ellipse at 80% 20%, rgba(204,255,71,.04) 0%, transparent 50%), #09080A",padding:16,overflow:"auto"}}><div style={{width:480,maxWidth:"100%",background:T.surface,borderRadius:24,border:"1px solid #2A2025",boxShadow:"0 32px 80px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.04)",padding:"clamp(20px,5vw,40px)"}}><div style={{fontSize:10, color:T.muted, textAlign:"center", marginTop:24, background:"rgba(255,255,255,0.02)", padding:"10px", borderRadius:8}}>⚠️ Al continuar, entendés que esta app es para organización personal y no reemplaza la consulta con un asesor idóneo o matriculado.</div>
+<div style={{display:"flex",gap:10,marginTop:16}}>{Array.from({length:STEPS}).map((_,i)=><div key={i} style={{flex:1,height:3,borderRadius:3,background:i<=step?`linear-gradient(90deg,#CCFF47,#FF9A35)`:T.raised,transition:"background .3s"}}/>)}</div>
   {step===0&&<><div style={{fontSize:22,fontWeight:800,marginBottom:6,letterSpacing:"-.5px"}}>Bienvenido a Mangos 🥭</div><div style={{fontSize:13,color:T.muted,marginBottom:24}}>Tomá el control de tu dinero</div><div style={{display:"flex",flexDirection:"column",gap:12}}><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tu nombre (opcional)</label><input className="inp" placeholder="ej: Martín" value={d.name} onChange={e=>setD(p=>({...p,name:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Sueldo neto mensual</label><div style={{display:"flex",gap:8}}><input className="inp" style={{flex:1}} placeholder={d.incomeCurrency==="ARS"?"ej: 800000":"ej: 1200"} value={d.income} onChange={e=>setD(p=>({...p,income:e.target.value}))}/><div style={{display:"flex",borderRadius:10,overflow:"hidden",border:`1px solid ${T.border}`,flexShrink:0}}>{["ARS","USD"].map(c=><button key={c} onClick={()=>setD(p=>({...p,incomeCurrency:c}))} style={{padding:"8px 12px",fontSize:12,fontWeight:600,background:d.incomeCurrency===c?"rgba(200,255,87,.15)":T.raised,color:d.incomeCurrency===c?T.lime:T.muted,border:"none",cursor:"pointer",transition:"all .15s"}}>{c}</button>)}</div></div></div></div></>}
   {step>=1&&step<=4&&<><div style={{fontSize:28,marginBottom:6}}>{QS[step-1].icon}</div><div style={{fontSize:22,fontWeight:800,marginBottom:4,letterSpacing:"-.5px"}}>{QS[step-1].title}</div><div style={{fontSize:13,color:T.muted,marginBottom:20}}>{QS[step-1].sub}</div><div style={{display:"flex",flexDirection:"column",gap:8}}>{QS[step-1].opts.map(o=><button key={o.v} onClick={()=>pickAns(step-1,o.v)} style={{display:"block",width:"100%",padding:"13px 16px",borderRadius:12,border:`1.5px solid ${ans[step-1]===o.v?T.lime:T.border}`,background:ans[step-1]===o.v?"rgba(200,255,87,.08)":T.raised,textAlign:"left",cursor:"pointer",transition:"all .15s"}}><div style={{fontSize:13,fontWeight:600,color:ans[step-1]===o.v?T.lime:T.white}}>{o.l}</div><div style={{fontSize:11,color:T.muted,marginTop:2}}>{o.d}</div></button>)}</div></>}
   {step===5&&<><div style={{textAlign:"center",marginBottom:24}}><div style={{fontSize:48,marginBottom:8}}>{pf.emoji}</div><div style={{fontSize:24,fontWeight:800,letterSpacing:"-.5px",color:pf.color}}>{pf.label}</div><div style={{fontSize:13,color:T.muted,marginTop:6,lineHeight:1.6}}>{pf.desc}</div><div style={{display:"flex",justifyContent:"center",gap:6,marginTop:16}}>{[{l:"Renta fija",p:pf.pct[0],c:"#4D9EFF"},{l:"Mixto",p:pf.pct[1],c:"#FFB830"},{l:"Renta variable",p:pf.pct[2],c:"#FF4D6A"}].map(s=><div key={s.l} style={{background:T.raised,borderRadius:10,padding:"10px 14px",textAlign:"center",minWidth:80}}><div className="mono" style={{fontSize:18,fontWeight:700,color:s.c}}>{s.p}%</div><div style={{fontSize:10,color:T.muted,marginTop:3}}>{s.l}</div></div>)}</div><div className="mono" style={{fontSize:11,color:T.muted,marginTop:12}}>Score: {score}/12 · Horizonte: {horizon}</div></div>
   {(()=>{const isCharla=new URLSearchParams(window.location.search).get("charla")==="true";return isCharla?(<div style={{background:"rgba(200,255,87,.07)",border:"1px solid rgba(200,255,87,.25)",borderRadius:12,padding:"14px 16px",textAlign:"center"}}><div style={{fontSize:22,marginBottom:6}}>🥭</div><div style={{fontSize:14,fontWeight:700,marginBottom:4}}>¡Listo!</div><div style={{fontSize:12,color:T.mid,lineHeight:1.6}}>Seguí la presentación — te vamos a guiar dentro de la app en cada paso.</div></div>):(<div style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:12,padding:"14px 16px",textAlign:"center"}}><div style={{fontSize:14,fontWeight:700,marginBottom:4}}>¡Todo listo!</div><div style={{fontSize:12,color:T.mid,lineHeight:1.6,marginBottom:12}}>Creá tu primera meta para empezar a trackear tu progreso.</div><button className="btn bl" style={{width:"100%",justifyContent:"center"}} onClick={()=>{finish();setTimeout(()=>document.querySelector("[data-nav='goals']")?.click(),100);}}>Crear mi primera meta →</button></div>);})()}</>}
-  <div style={{display:"flex",gap:10,marginTop:28}}>{step>0&&<button className="btn bg" style={{flex:.4,justifyContent:"center"}} onClick={()=>setStep(s=>s-1)}>← Atrás</button>}<button className="btn bl" style={{flex:1,justifyContent:"center"}} disabled={!canNext} onClick={step<5?()=>setStep(s=>s+1):finish}>{step===5?"¡Empezar! →":"Continuar →"}</button></div></div></div>);
+  <div style={{display:"flex",gap:10,marginTop:28}}>{step>0&&<button className="btn bg" style={{flex:.4,justifyContent:"center"}} onClick={()=>setStep(s=>s-1)}>← Atrás</button>}<button onClick={step<5?()=>setStep(s=>s+1):finish} disabled={!canNext} style={{flex:1,justifyContent:"center",display:"flex",alignItems:"center",gap:7,padding:"11px 20px",borderRadius:12,background:!canNext?"#2A2025":"linear-gradient(135deg,#CCFF47,#B8E830)",color:"#09080A",fontWeight:700,fontSize:14,border:"none",cursor:canNext?"pointer":"not-allowed",transition:"all .18s",opacity:canNext?1:.45}}>{step===5?"¡Empezar! →":"Continuar →"}</button></div></div></div>);
 }
 
 function Dashboard({state,update,notify,setView}){
@@ -595,8 +737,8 @@ function Dashboard({state,update,notify,setView}){
   const delta=pExp>0?((exp-pExp)/pExp*100).toFixed(1):null;
   
   const {score,items}=healthScore(transactions,goals,holdings);
-  const sc=score>=70?T.lime:score>=45?T.amber:T.red;
-  const healthDesc = score >= 70 ? "¡Excelente! Tu ahorro y diversificación son sólidos." : score >= 45 ? "Buen camino. Podrías mejorar tu tasa de ahorro." : "Atención: Tus gastos están superando tu capacidad de ahorro.";
+  const sc=score>=70?"#CCFF47":score>=45?T.amber:T.coral;
+  const healthDesc = score >= 70 ? "¡Excelente! Tu ahorro y diversificación son sólidos." : score >= 45 ? "Buen camino. Podrías mejorar tu tasa de ahorro." : "Tus gastos superan tu capacidad de ahorro.";
   const {disponible,perGoal}=goalPlan(goals,salaries,transactions,holdings,marketPrices,usdRate);
   const alerts=Object.entries(budgets||{}).filter(([cat,lim])=>cur.filter(t=>t.category===cat&&t.type==="expense").reduce((s,t)=>s+t.amount,0)>lim*0.8);
   
@@ -634,7 +776,7 @@ function Dashboard({state,update,notify,setView}){
   };
 
   return(<div className="up"><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:22,flexWrap:"wrap",gap:8}}><div><div style={{fontSize:11,color:T.muted,textTransform:"uppercase",letterSpacing:".8px",marginBottom:5}}>{NOW.toLocaleDateString("es-AR",{weekday:"long",day:"numeric",month:"long"})}</div><h1 style={{fontSize:isMobile?22:28,fontWeight:800,letterSpacing:"-1px"}}>Dashboard</h1></div>{alerts.length>0&&<div style={{background:"rgba(255,184,48,.08)",border:`1px solid rgba(255,184,48,.25)`,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:8,fontSize:12,color:T.amber,cursor:"pointer"}} onClick={()=>setView("transactions")}><ic.Bell/>{alerts.length} alerta{alerts.length>1?"s":""}</div>}</div>
-  <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:14}}>{kpis.map((k,i)=>(<div key={i} className={`card csm up d${i+1}`} style={{cursor:i===0?"pointer":"default"}} onClick={i===0?()=>setView("salary"):undefined}><div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".6px",fontWeight:600}}>{k.l}</span><span style={{fontSize:18}}>{k.i}</span></div><div className="mono" title={k.v} style={{fontSize:isMobile?16:20,fontWeight:500,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div><div style={{fontSize:11,color:T.muted,marginTop:4}}>{k.sub}</div></div>))}</div>
+  <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:14}}>{kpis.map((k,i)=>(<div key={i} className={`card csm up d${i+1}${i===0?' card-glow-mango':i===3?' card-glow-lime':''}`} style={{cursor:i===0?"pointer":"default"}} onClick={i===0?()=>setView("salary"):undefined}><div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".6px",fontWeight:600}}>{k.l}</span><span style={{fontSize:18}}>{k.i}</span></div><div className="mono" title={k.v} style={{fontSize:isMobile?16:20,fontWeight:500,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div><div style={{fontSize:11,color:T.muted,marginTop:4}}>{k.sub}</div></div>))}</div>
   {perGoal.length>0&&(<div className="card up d2" style={{marginBottom:14,borderColor:"rgba(200,255,87,.18)"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}><div style={{fontSize:13,fontWeight:700}}>💡 Plan de ahorro para metas</div><div style={{fontSize:11,color:T.muted}}>Disponible: <span className="mono" style={{color:disponible>0?T.lime:T.red}}>{fmt(disponible)}</span></div></div><div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{perGoal.map(g=>(<div key={g.id} style={{flex:1,minWidth:160,background:T.raised,borderRadius:10,padding:"10px 14px",border:`1px solid ${g.feasible?T.border:"rgba(255,184,48,.25)"}`}}><div style={{fontSize:12,marginBottom:4}}>{g.icon} {g.name}</div><div className="mono" style={{fontSize:16,fontWeight:600,color:g.feasible?T.lime:T.amber}}>{fmt(g.needed)}<span style={{fontSize:11,fontWeight:400,color:T.muted}}>/mes</span></div><div style={{fontSize:10,color:T.muted,marginTop:2}}>{g.months} mes{g.months>1?"es":""} · Falta {fmt(g.rem)}</div>{!g.feasible&&<div style={{fontSize:10,color:T.amber,marginTop:3}}>⚠ Ajustá el plazo</div>}{g.couldUsePortfolio&&<div style={{fontSize:10,color:T.blue,marginTop:3}}>📊 Portfolio cubre {g.portfolioCover}% de esta meta</div>}</div>))}</div></div>)}
 
   {/* ── RESUMEN SEMANAL IA — CARDS ── */}
