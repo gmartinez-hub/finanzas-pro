@@ -341,10 +341,52 @@ function exportData(state) {
 }
 
 function TourGuide({setView}){
-  const [tip,setTip]=useState(null);
-  const [vis,setVis]=useState(false);
-  const chRef=useRef(null);
+  // Tour keys in order — matches SLIDE_MAP
+  const TOUR_KEYS=[2,3,4,5,6,"6b","6c",10,"10b","10c",11,12,13];
+  const LS_KEY="mangos_tour_step";
 
+  const [tip,setTip]=useState(null);
+  const [tourStep,setTourStep]=useState(()=>{
+    const saved=localStorage.getItem(LS_KEY);
+    return saved!==null?parseInt(saved):0;
+  });
+  const chRef=useRef(null);
+  const modeRef=useRef("local"); // "local" | "charla"
+
+  // Show tip for a given SLIDE_MAP key
+  const showKey=useCallback((key)=>{
+    const mapped=SLIDE_MAP[key]||SLIDE_MAP[String(key)];
+    if(mapped&&mapped.tip)setTip({...mapped,key});
+    else setTip(null);
+  },[]);
+
+  // Advance local tour
+  const next=useCallback(()=>{
+    if(modeRef.current!=="local")return;
+    const nextStep=tourStep+1;
+    if(nextStep>=TOUR_KEYS.length){
+      setTip(null);
+      localStorage.removeItem(LS_KEY);
+      return;
+    }
+    localStorage.setItem(LS_KEY,String(nextStep));
+    setTourStep(nextStep);
+    showKey(TOUR_KEYS[nextStep]);
+  },[tourStep,showKey]);
+
+  const dismiss=useCallback(()=>{
+    setTip(null);
+    localStorage.removeItem(LS_KEY);
+  },[]);
+
+  // Init: show first local tour tip
+  useEffect(()=>{
+    if(tourStep<TOUR_KEYS.length){
+      showKey(TOUR_KEYS[tourStep]);
+    }
+  },[]);// eslint-disable-line
+
+  // Supabase: override local tour if charla is active
   useEffect(()=>{
     if(!SUPABASE_URL||!SUPABASE_KEY)return;
     (async()=>{try{
@@ -353,28 +395,46 @@ function TourGuide({setView}){
       const ch=sb.channel("charla_live")
         .on("postgres_changes",{event:"UPDATE",schema:"public",table:"charla_state"},payload=>{
           const {slide,active:isActive}=payload.new;
-          if(!isActive){setVis(false);return;}
+          if(!isActive){
+            // Charla terminó — volver al tour local
+            modeRef.current="local";
+            if(tourStep<TOUR_KEYS.length)showKey(TOUR_KEYS[tourStep]);
+            else setTip(null);
+            return;
+          }
+          // Charla activa — override inmediato
+          modeRef.current="charla";
           const key=String(slide);
           const mapped=SLIDE_MAP[slide]||SLIDE_MAP[key];
-          if(mapped&&mapped.tip){setTip(mapped);setVis(true);}
-          else setVis(false);
+          if(mapped&&mapped.tip){
+            setTip({...mapped,key,isCharla:true});
+            // Navegar automáticamente a la sección
+            setView(mapped.section);
+          }else{
+            setTip(null);
+          }
         })
         .subscribe();
       chRef.current={sb,ch};
     }catch(e){console.warn("Supabase TourGuide error",e);}})();
     return()=>{chRef.current?.sb.removeChannel(chRef.current.ch);};
-  },[]);
+  },[]);// eslint-disable-line
 
-  if(!vis||!tip)return null;
+  if(!tip)return null;
+  const isCharla=tip.isCharla;
   return(
-    <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:"rgba(7,8,13,.96)",border:"1px solid rgba(200,255,87,.35)",borderRadius:16,padding:"14px 18px",zIndex:500,maxWidth:440,width:"calc(100% - 32px)",backdropFilter:"blur(16px)",boxShadow:"0 8px 40px rgba(0,0,0,.7),0 0 0 1px rgba(200,255,87,.08)",display:"flex",alignItems:"center",gap:12,animation:"up .3s ease"}}>
+    <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:"rgba(7,8,13,.97)",border:`1px solid ${isCharla?"rgba(200,255,87,.4)":"rgba(77,158,255,.3)"}`,borderRadius:16,padding:"14px 18px",zIndex:500,maxWidth:460,width:"calc(100% - 32px)",backdropFilter:"blur(16px)",boxShadow:`0 8px 40px rgba(0,0,0,.8),0 0 0 1px ${isCharla?"rgba(200,255,87,.06)":"rgba(77,158,255,.06)"}`,display:"flex",alignItems:"center",gap:12,animation:"up .3s ease"}}>
       <div style={{flex:1,minWidth:0}}>
-        <div style={{fontSize:10,color:T.lime,fontWeight:700,marginBottom:4,textTransform:"uppercase",letterSpacing:".7px",display:"flex",alignItems:"center",gap:5}}><span style={{width:6,height:6,borderRadius:"50%",background:T.lime,display:"inline-block",boxShadow:`0 0 6px ${T.lime}`}}/>Charla en vivo</div>
+        <div style={{fontSize:9,fontWeight:700,marginBottom:4,textTransform:"uppercase",letterSpacing:".8px",display:"flex",alignItems:"center",gap:5,color:isCharla?T.lime:T.blue}}>
+          <span style={{width:6,height:6,borderRadius:"50%",background:isCharla?T.lime:T.blue,display:"inline-block",animation:isCharla?"pulse 1.2s infinite":"none"}}/>
+          {isCharla?"Charla en vivo":"Guía Mangos"}
+        </div>
         <div style={{fontSize:13,color:T.white,lineHeight:1.55}}>{tip.tip}</div>
       </div>
-      <div style={{display:"flex",gap:6,flexShrink:0}}>
-        <button className="btn bl bsm" onClick={()=>{setView(tip.section);setVis(false);}}>{tip.btn}</button>
-        <button className="btn bg bsm" style={{padding:"6px 10px"}} onClick={()=>setVis(false)}>✕</button>
+      <div style={{display:"flex",gap:6,flexShrink:0,alignItems:"center"}}>
+        <button className="btn bl bsm" onClick={()=>{setView(tip.section);}}>{tip.btn}</button>
+        {!isCharla&&<button className="btn bg bsm" onClick={next} style={{padding:"6px 10px",fontSize:11}}>→</button>}
+        <button className="btn bg bsm" style={{padding:"6px 10px"}} onClick={dismiss}>✕</button>
       </div>
     </div>
   );
