@@ -886,7 +886,7 @@ export default function App(){
     <div className="mono" style={{fontSize:24,fontWeight:600,color:currAccent.accent,textAlign:"center"}}>{fARS(state.usdRate)}</div>
     
     <div style={{display:"flex",gap:6,marginTop:14}}>
-      {["ARS","USD"].map(c=>(<button key={c} onClick={()=>update({displayCurrency:c})} style={{flex:1,padding:"6px 0",borderRadius:8,fontSize:10,fontWeight:600,data-tour-target={c==="USD"?"toggle-usd":undefined} border:`1px solid ${state.displayCurrency===c?(c==="USD"?"rgba(91,207,184,.4)":"rgba(204,255,71,.35)"):T.border}`,background:state.displayCurrency===c?(c==="USD"?"rgba(91,207,184,.1)":"rgba(204,255,71,.08)"):T.surface,color:state.displayCurrency===c?(c==="USD"?"#5BCFB8":T.lime):T.muted,cursor:"pointer",transition:"all .2s"}}>{c}</button>))}
+      {["ARS","USD"].map(c=>(<button key={c} data-tour-target={c==="USD"?"toggle-usd":undefined} onClick={()=>update({displayCurrency:c})} style={{flex:1,padding:"6px 0",borderRadius:8,fontSize:10,fontWeight:600,border:`1px solid ${state.displayCurrency===c?(c==="USD"?"rgba(91,207,184,.4)":"rgba(204,255,71,.35)"):T.border}`,background:state.displayCurrency===c?(c==="USD"?"rgba(91,207,184,.1)":"rgba(204,255,71,.08)"):T.surface,color:state.displayCurrency===c?(c==="USD"?"#5BCFB8":T.lime):T.muted,cursor:"pointer",transition:"all .2s"}}>{c}</button>))}
     </div>
   </div>
   
