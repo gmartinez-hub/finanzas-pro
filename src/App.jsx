@@ -282,8 +282,28 @@ const healthScore=(txs,goals,holdings=[])=>{
 const CSS=`@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=DM+Mono:wght@300;400;500&display=swap');
 :root{--ac:#CCFF47;--acd:#AADC28;--ac-rgb:204,255,71;--ac-bg:rgba(204,255,71,.08);--ac-border:rgba(204,255,71,.25);transition:--ac .4s}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html,body{background:#09080A;color:#F2EBE0;font-family:'Sora',sans-serif;overflow:hidden;height:100%;transition:filter .4s}
+html,body{background:#09080A;color:#F2EBE0;font-family:'Sora',sans-serif;overflow:hidden;height:100%;transition:background .5s,color .5s}
+body.usd-mode{background:#060A0F}
+body.usd-mode .card{border-color:#1A2335;background:#0C1018}
+body.usd-mode .inp{background:#0E1520;border-color:#1C2A3D}
+body.usd-mode .inp:focus{border-color:var(--ac);box-shadow:0 0 0 3px rgba(91,207,184,.14)}
+body.usd-mode .modal{background:#0C1018;border-color:#1A2335}
+body.usd-mode .nav:hover{background:rgba(91,207,184,.07)}
+body.usd-mode .nav.on{background:rgba(91,207,184,.08)}
+body.usd-mode .tabbar,.usd-mode .tab{background:#0E1520}
+body.usd-mode .tab.on{background:#0C1018;box-shadow:0 0 0 1px rgba(91,207,184,.3)}
+body.usd-mode .tbl tr:hover td{background:rgba(91,207,184,.04)}
 ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#48403A;border-radius:99px}
+[data-currency="USD"] body::before{background:radial-gradient(ellipse 60% 50% at 15% 50%,rgba(0,180,160,.07) 0%,transparent 70%),radial-gradient(ellipse 50% 45% at 85% 25%,rgba(91,207,184,.05) 0%,transparent 65%)}
+[data-currency="USD"] body::after{background-image:linear-gradient(rgba(0,212,170,.022) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,170,.022) 1px,transparent 1px)}
+[data-currency="USD"] ::-webkit-scrollbar-thumb{background:rgba(91,207,184,.35)}
+[data-currency="USD"] .card{border-color:#1B2A2E;transition:border-color .4s}
+[data-currency="USD"] .inp:not(:focus){border-color:#1B2A2E;transition:border-color .4s}
+[data-currency="USD"] .tabbar{background:rgba(0,200,180,.07);transition:background .4s}
+[data-currency="USD"] .tab.on{color:#5BCFB8;box-shadow:0 0 0 1px rgba(91,207,184,.3)}
+[data-currency="USD"] .chip{border-color:#1B2A2E}
+[data-currency="USD"] .nav:hover{background:rgba(0,200,180,.07)}
+
 input,select,textarea,button{font-family:inherit}button{cursor:pointer;border:none;background:none}
 .mono{font-family:'DM Mono',monospace}
 .up{animation:up .35s cubic-bezier(.16,1,.3,1) both}
@@ -529,52 +549,57 @@ function exportData(state) {
 }
 
 function TourGuide({setView}){
-  // Tour keys in order — matches SLIDE_MAP
   const TOUR_KEYS=[2,3,4,5,6,"6b","6c",10,"10b","10c",11,12,13];
   const LS_KEY="mangos_tour_step";
-
   const [tip,setTip]=useState(null);
-  const [tourStep,setTourStep]=useState(()=>{
-    const saved=localStorage.getItem(LS_KEY);
-    return saved!==null?parseInt(saved):0;
-  });
+  const [pos,setPos]=useState(null); // {x,y,side} for contextual positioning
+  const [tourStep,setTourStep]=useState(()=>{const s=localStorage.getItem(LS_KEY);return s!==null?parseInt(s):0;});
   const chRef=useRef(null);
-  const modeRef=useRef("local"); // "local" | "charla"
+  const modeRef=useRef("local");
 
-  // Show tip for a given SLIDE_MAP key
+  // Find anchor element for a section and return its bounding rect
+  const getAnchor=(section)=>{
+    const el=document.querySelector(`[data-tour-target="${section}"]`);
+    if(!el)return null;
+    const r=el.getBoundingClientRect();
+    const vw=window.innerWidth;
+    const vh=window.innerHeight;
+    // Decide positioning: if element is in sidebar (left side), position to the right of it
+    if(r.right<320){
+      return{x:r.right+12,y:Math.min(r.top+r.height/2,vh-120),side:"right",rect:r};
+    }
+    // Element is in main area — position above it
+    if(r.top>120){
+      return{x:Math.min(r.left,vw-360),y:r.top-8,side:"above",rect:r};
+    }
+    return null;
+  };
+
   const showKey=useCallback((key)=>{
     const mapped=SLIDE_MAP[key]||SLIDE_MAP[String(key)];
-    if(mapped&&mapped.tip)setTip({...mapped,key});
-    else setTip(null);
+    if(mapped&&mapped.tip){
+      setTip({...mapped,key});
+      // Compute anchor position after paint
+      requestAnimationFrame(()=>{
+        const p=getAnchor(mapped.section);
+        setPos(p);
+      });
+    }else setTip(null);
   },[]);
 
-  // Advance local tour
   const next=useCallback(()=>{
     if(modeRef.current!=="local")return;
-    const nextStep=tourStep+1;
-    if(nextStep>=TOUR_KEYS.length){
-      setTip(null);
-      localStorage.removeItem(LS_KEY);
-      return;
-    }
-    localStorage.setItem(LS_KEY,String(nextStep));
-    setTourStep(nextStep);
-    showKey(TOUR_KEYS[nextStep]);
+    const n=tourStep+1;
+    if(n>=TOUR_KEYS.length){setTip(null);localStorage.removeItem(LS_KEY);return;}
+    localStorage.setItem(LS_KEY,String(n));
+    setTourStep(n);
+    showKey(TOUR_KEYS[n]);
   },[tourStep,showKey]);
 
-  const dismiss=useCallback(()=>{
-    setTip(null);
-    localStorage.removeItem(LS_KEY);
-  },[]);
+  const dismiss=useCallback(()=>{setTip(null);localStorage.removeItem(LS_KEY);},[]);
 
-  // Init: show first local tour tip
-  useEffect(()=>{
-    if(tourStep<TOUR_KEYS.length){
-      showKey(TOUR_KEYS[tourStep]);
-    }
-  },[]);// eslint-disable-line
+  useEffect(()=>{if(tourStep<TOUR_KEYS.length)showKey(TOUR_KEYS[tourStep]);},[]);// eslint-disable-line
 
-  // Supabase: override local tour if charla is active
   useEffect(()=>{
     if(!SUPABASE_URL||!SUPABASE_KEY)return;
     (async()=>{try{
@@ -583,24 +608,14 @@ function TourGuide({setView}){
       const ch=sb.channel("charla_live")
         .on("postgres_changes",{event:"UPDATE",schema:"public",table:"charla_state"},payload=>{
           const {slide,active:isActive}=payload.new;
-          if(!isActive){
-            // Charla terminó — volver al tour local
-            modeRef.current="local";
-            if(tourStep<TOUR_KEYS.length)showKey(TOUR_KEYS[tourStep]);
-            else setTip(null);
-            return;
-          }
-          // Charla activa — override inmediato
+          if(!isActive){modeRef.current="local";if(tourStep<TOUR_KEYS.length)showKey(TOUR_KEYS[tourStep]);else setTip(null);return;}
           modeRef.current="charla";
-          const key=String(slide);
-          const mapped=SLIDE_MAP[slide]||SLIDE_MAP[key];
+          const mapped=SLIDE_MAP[slide]||SLIDE_MAP[String(slide)];
           if(mapped&&mapped.tip){
-            setTip({...mapped,key,isCharla:true});
-            // Navegar automáticamente a la sección
+            setTip({...mapped,isCharla:true});
             setView(mapped.section);
-          }else{
-            setTip(null);
-          }
+            requestAnimationFrame(()=>setPos(getAnchor(mapped.section)));
+          }else setTip(null);
         })
         .subscribe();
       chRef.current={sb,ch};
@@ -610,19 +625,55 @@ function TourGuide({setView}){
 
   if(!tip)return null;
   const isCharla=tip.isCharla;
+  const ac=isCharla?"rgba(204,255,71,.35)":"rgba(255,154,53,.3)";
+  const acText=isCharla?T.lime:T.mango;
+
+  // Contextual positioning: near the anchor element, fallback to bottom center
+  let tooltipStyle={};
+  let arrowStyle=null;
+
+  if(pos){
+    if(pos.side==="right"){
+      // Appear to the right of sidebar nav item
+      tooltipStyle={position:"fixed",left:pos.x,top:Math.max(8,pos.y-40),transform:"none",width:280};
+      arrowStyle={position:"absolute",left:-7,top:40,width:0,height:0,
+        borderTop:"7px solid transparent",borderBottom:"7px solid transparent",
+        borderRight:`7px solid rgba(16,14,18,.97)`};
+    } else if(pos.side==="above"){
+      tooltipStyle={position:"fixed",left:Math.min(pos.x,window.innerWidth-320),
+        bottom:window.innerHeight-pos.y+8,transform:"none",width:300};
+    }
+  } else {
+    // Fallback: bottom center
+    tooltipStyle={position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",maxWidth:460,width:"calc(100% - 24px)"};
+  }
+
   return(
-    <div style={{position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",background:"rgba(16,14,18,.96)",border:`1px solid ${isCharla?"rgba(204,255,71,.35)":"rgba(255,154,53,.3)"}`,borderRadius:18,padding:"14px 18px",zIndex:500,maxWidth:460,width:"calc(100% - 24px)",backdropFilter:"blur(20px)",boxShadow:`0 12px 48px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.04),inset 0 1px 0 rgba(255,255,255,.06)`,display:"flex",alignItems:"center",gap:12,animation:"up .3s ease"}}>
+    <div style={{...tooltipStyle,background:"rgba(16,14,18,.97)",border:`1px solid ${ac}`,
+      borderRadius:16,padding:"13px 16px",zIndex:500,
+      backdropFilter:"blur(20px)",
+      boxShadow:`0 12px 48px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.04),inset 0 1px 0 rgba(255,255,255,.06)`,
+      display:"flex",alignItems:"center",gap:11,animation:"up .3s ease",position:"fixed"}}>
+      {arrowStyle&&<div style={arrowStyle}/>}
       <div style={{flex:1,minWidth:0}}>
-        <div style={{fontSize:9,fontWeight:800,marginBottom:5,textTransform:"uppercase",letterSpacing:"1px",display:"flex",alignItems:"center",gap:6,color:isCharla?T.lime:T.mango}}>
-          <span style={{width:6,height:6,borderRadius:"50%",background:isCharla?T.lime:T.mango,display:"inline-block",animation:isCharla?"pulse-glow 1.2s infinite":"none",boxShadow:`0 0 8px ${isCharla?T.lime:T.mango}`}}/>
-          {isCharla?"Charla en vivo — Live":"Guía Mangos"}
+        <div style={{fontSize:9,fontWeight:800,marginBottom:5,textTransform:"uppercase",letterSpacing:"1px",
+          display:"flex",alignItems:"center",gap:6,color:acText}}>
+          <span style={{width:6,height:6,borderRadius:"50%",background:acText,display:"inline-block",
+            animation:isCharla?"pulse-glow 1.2s infinite":"none",
+            boxShadow:`0 0 8px ${acText}`}}/>
+          {isCharla?"Charla en vivo":"Guía Mangos"}
         </div>
-        <div style={{fontSize:13,color:"#E8DDD4",lineHeight:1.6,fontWeight:500}}>{tip.tip}</div>
+        <div style={{fontSize:12,color:"#E8DDD4",lineHeight:1.6,fontWeight:500}}>{tip.tip}</div>
       </div>
-      <div style={{display:"flex",gap:6,flexShrink:0,alignItems:"center"}}>
-        <button onClick={()=>{setView(tip.section);}} style={{background:"linear-gradient(135deg,#CCFF47,#B8E830)",color:"#09080A",padding:"7px 14px",borderRadius:"9px",fontSize:"11px",fontWeight:"700",border:"none",cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>{tip.btn}</button>
-        {!isCharla&&<button className="btn bg bsm" onClick={next} style={{padding:"6px 10px",fontSize:11}}>→</button>}
-        <button className="btn bg bsm" style={{padding:"6px 10px"}} onClick={dismiss}>✕</button>
+      <div style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0,alignItems:"stretch"}}>
+        <button onClick={()=>{setView(tip.section);requestAnimationFrame(()=>setPos(getAnchor?.(tip.section)));}}
+          style={{background:`linear-gradient(135deg,var(--ac),var(--acd))`,color:"#09080A",
+          padding:"6px 12px",borderRadius:"8px",fontSize:"11px",fontWeight:"700",
+          border:"none",cursor:"pointer",whiteSpace:"nowrap",textAlign:"center"}}>{tip.btn}</button>
+        <div style={{display:"flex",gap:4}}>
+          {!isCharla&&<button className="btn bg bsm" onClick={next} style={{flex:1,justifyContent:"center",fontSize:11,padding:"4px 8px"}}>→</button>}
+          <button className="btn bg bsm" style={{flex:1,justifyContent:"center",padding:"4px 8px",fontSize:11}} onClick={dismiss}>✕</button>
+        </div>
       </div>
     </div>
   );
@@ -696,7 +747,7 @@ export default function App(){
 
   useEffect(()=>{ if(ready) updateRates(); },[ready, updateRates]);
 
-  // ── USD/ARS temperature theming via CSS custom properties ──────────────
+  // ── USD/ARS temperature theming ─────────────────────────────────────────
   useEffect(()=>{
     const root=document.documentElement;
     const usd=state.displayCurrency==="USD";
@@ -705,6 +756,8 @@ export default function App(){
     root.style.setProperty("--ac-rgb", usd?"91,207,184":"204,255,71");
     root.style.setProperty("--ac-bg", usd?"rgba(91,207,184,.08)":"rgba(204,255,71,.08)");
     root.style.setProperty("--ac-border", usd?"rgba(91,207,184,.25)":"rgba(204,255,71,.25)");
+    // Deep theming
+    document.documentElement.setAttribute("data-currency", usd?"USD":"ARS");
   },[state.displayCurrency]);
 
   const notify=(msg,type="ok")=>{setToast({msg,type});setTimeout(()=>setToast(null),4000);};
@@ -719,11 +772,11 @@ export default function App(){
   const CUR=getCUR();
   const alerts=Object.entries(state.budgets||{}).filter(([cat,lim])=>state.transactions.filter(t=>gMonth(t.date)===CUR&&t.category===cat&&t.type==="expense").reduce((s,t)=>s+t.amount,0)>lim*0.8);
 
-  const sidebar=<aside style={{width:isMobile?"100%":212,background:T.surface,borderRight:isMobile?"none":`1px solid ${T.border}`,display:"flex",flexDirection:"column",padding:"20px 12px",gap:2,flexShrink:0,...(isMobile?{position:"fixed",top:0,left:0,bottom:0,zIndex:300,width:260,transform:sideOpen?"translateX(0)":"translateX(-100%)",transition:"transform .25s cubic-bezier(.16,1,.3,1)",boxShadow:sideOpen?"8px 0 30px rgba(0,0,0,.6)":"none"}:{})}}><div style={{padding:"4px 10px 20px",display:"flex",alignItems:"center",gap:9,justifyContent:"space-between"}}><div style={{display:"flex",alignItems:"center",gap:9}}><div style={{width:30,height:30,background:"linear-gradient(135deg,rgba(255,154,53,.15),rgba(224,122,24,.1))",borderRadius:12,border:"1px solid rgba(255,154,53,.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}><svg width="22" height="22" viewBox="0 0 28 28" fill="none"><path d="M14 4C9 4 6 8 6 13c0 6 4.5 9.5 8 11 3.5-1.5 8-5 8-11 0-5-3-9-8-9z" fill="#FF9A35"/><path d="M14 4C14 4 14 1 17.5 1.5" stroke="#CCFF47" strokeWidth="1.8" strokeLinecap="round"/><ellipse cx="11.5" cy="13" rx="2" ry="3.5" fill="#E07A18" opacity=".4" transform="rotate(-15 11.5 13)"/></svg></div><div style={{fontSize:14,fontWeight:800,letterSpacing:"-.5px",background:"linear-gradient(135deg,#F2EBE0,#FF9A35)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>Mangos</div></div>{isMobile&&<button onClick={()=>setSO(false)} style={{color:T.muted,padding:4}}><ic.X/></button>}</div>{nav.map(({id,l,I})=>(<button key={id} className={`nav${view===id?" on":""}`} onClick={()=>navTo(id)}><I/>{l}{id==="investments"&&state.savedAnalyses?.length>0&&<span style={{marginLeft:"auto",fontSize:10,background:T.raised,padding:"2px 6px",borderRadius:99,color:T.muted}}>{state.savedAnalyses.length}</span>}</button>))}<div style={{flex:1}}/>{alerts.length>0&&<div onClick={()=>navTo("transactions")} style={{background:"rgba(255,184,48,.08)",border:`1px solid rgba(255,184,48,.2)`,borderRadius:10,padding:"9px 12px",cursor:"pointer",marginBottom:8}}><div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:T.amber,fontWeight:600}}><ic.Bell/>{alerts.length} alerta{alerts.length>1?"s":""}</div></div>}
+  const sidebar=<aside style={{width:isMobile?"100%":212,background:state.displayCurrency==="USD"?"#0C1018":T.surface,borderRight:isMobile?"none":`1px solid ${state.displayCurrency==="USD"?"#1A2335":T.border}`,transition:"background .4s,border-color .4s",display:"flex",flexDirection:"column",padding:"20px 12px",gap:2,flexShrink:0,...(isMobile?{position:"fixed",top:0,left:0,bottom:0,zIndex:300,width:260,transform:sideOpen?"translateX(0)":"translateX(-100%)",transition:"transform .25s cubic-bezier(.16,1,.3,1)",boxShadow:sideOpen?"8px 0 30px rgba(0,0,0,.6)":"none"}:{})}}><div style={{padding:"4px 10px 20px",display:"flex",alignItems:"center",gap:9,justifyContent:"space-between"}}><div style={{display:"flex",alignItems:"center",gap:9}}><div style={{width:30,height:30,background:"linear-gradient(135deg,rgba(255,154,53,.15),rgba(224,122,24,.1))",borderRadius:12,border:"1px solid rgba(255,154,53,.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}><svg width="22" height="22" viewBox="0 0 28 28" fill="none"><path d="M14 4C9 4 6 8 6 13c0 6 4.5 9.5 8 11 3.5-1.5 8-5 8-11 0-5-3-9-8-9z" fill="#FF9A35"/><path d="M14 4C14 4 14 1 17.5 1.5" stroke="#CCFF47" strokeWidth="1.8" strokeLinecap="round"/><ellipse cx="11.5" cy="13" rx="2" ry="3.5" fill="#E07A18" opacity=".4" transform="rotate(-15 11.5 13)"/></svg></div><div style={{fontSize:14,fontWeight:800,letterSpacing:"-.5px",background:"linear-gradient(135deg,#F2EBE0,#FF9A35)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>Mangos</div></div>{isMobile&&<button onClick={()=>setSO(false)} style={{color:T.muted,padding:4}}><ic.X/></button>}</div>{nav.map(({id,l,I})=>(<button key={id} data-tour-target={id} className={`nav${view===id?" on":""}`} onClick={()=>navTo(id)}><I/>{l}{id==="investments"&&state.savedAnalyses?.length>0&&<span style={{marginLeft:"auto",fontSize:10,background:T.raised,padding:"2px 6px",borderRadius:99,color:T.muted}}>{state.savedAnalyses.length}</span>}</button>))}<div style={{flex:1}}/>{alerts.length>0&&<div onClick={()=>navTo("transactions")} style={{background:"rgba(255,184,48,.08)",border:`1px solid rgba(255,184,48,.2)`,borderRadius:10,padding:"9px 12px",cursor:"pointer",marginBottom:8}}><div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:T.amber,fontWeight:600}}><ic.Bell/>{alerts.length} alerta{alerts.length>1?"s":""}</div></div>}
   
   <div style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px"}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-      <span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".7px",fontWeight:600}}>Cotización Dólar</span>
+      <span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".7px",fontWeight:600}}>Cotización Dólar</span>{state.displayCurrency==="USD"&&<span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,background:"rgba(91,207,184,.15)",color:"#5BCFB8",border:"1px solid rgba(91,207,184,.25)",letterSpacing:.5}}>ACTIVO</span>}
       {usdLoading?<Dots/>:<button onClick={updateRates} style={{fontSize:10,color:T.mango,cursor:"pointer",display:"flex",alignItems:"center",gap:3,fontWeight:600}}><ic.Refresh/>Auto</button>}
     </div>
     
@@ -766,10 +819,10 @@ function Onboarding({update,notify}){
   ];
   const finish=()=>{const rawBase=px(d.income);const base=d.incomeCurrency==="USD"?rawBase*1350:rawBase;const CUR=getCUR();const patch={onboardingDone:true,riskProfile:{risk:profile,horizon,monthlyIncome:base,incomeCurrency:d.incomeCurrency,incomeRaw:rawBase,score,answers:ans},lastSalaryBase:base,salaries:base>0?[{month:CUR,base,extras:[]}]:[]};update(patch);localStorage.setItem("mangos_charla",new URLSearchParams(window.location.search).get("charla")==="true"?"true":"false");notify("¡Todo listo! 🎉");};
   const canNext=step===0?true:step>=1&&step<=4?ans[step-1]!==null:true;
-  return(<div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"radial-gradient(ellipse at 20% 50%, rgba(255,154,53,.06) 0%, transparent 60%), radial-gradient(ellipse at 80% 20%, rgba(204,255,71,.04) 0%, transparent 50%), #09080A",padding:16,overflow:"auto"}}><div style={{width:480,maxWidth:"100%",background:T.surface,borderRadius:24,border:"1px solid #2A2025",boxShadow:"0 32px 80px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.04)",padding:"clamp(20px,5vw,40px)"}}><div style={{fontSize:10, color:T.muted, textAlign:"center", marginTop:24, background:"rgba(255,255,255,0.02)", padding:"10px", borderRadius:8}}>⚠️ Al continuar, entendés que esta app es para organización personal y no reemplaza la consulta con un asesor idóneo o matriculado.</div>
-<div style={{display:"flex",gap:10,marginTop:16}}>{Array.from({length:STEPS}).map((_,i)=><div key={i} style={{flex:1,height:3,borderRadius:3,background:i<=step?`linear-gradient(90deg,var(--ac),${T.mango})`:T.raised,transition:"background .3s"}}/>)}</div>
+  return(<div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"radial-gradient(ellipse at 20% 50%, rgba(255,154,53,.06) 0%, transparent 60%), radial-gradient(ellipse at 80% 20%, rgba(204,255,71,.04) 0%, transparent 50%), #09080A",padding:16,overflow:"auto"}}><div style={{width:480,maxWidth:"100%",background:T.surface,borderRadius:24,border:"1px solid #2A2025",boxShadow:"0 32px 80px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.04)",padding:"clamp(20px,5vw,40px)"}}><div style={{fontSize:10, color:T.muted, textAlign:"center", marginTop:16, background:"rgba(255,255,255,0.02)", padding:"10px 12px", borderRadius:8, lineHeight:1.5}}>⚠️ Al continuar, entendés que esta app es para organización personal y no reemplaza la consulta con un asesor idóneo o matriculado.</div>
+<div style={{display:"flex",gap:8,marginTop:20}}>{Array.from({length:STEPS}).map((_,i)=><div key={i} style={{flex:1,height:3,borderRadius:3,background:i<=step?`linear-gradient(90deg,var(--ac),${T.mango})`:T.raised,transition:"background .3s"}}/>)}</div>
   {step===0&&<><div style={{fontSize:22,fontWeight:800,marginBottom:6,letterSpacing:"-.5px"}}>Bienvenido a Mangos 🥭</div><div style={{fontSize:13,color:T.muted,marginBottom:24}}>Tomá el control de tu dinero</div><div style={{display:"flex",flexDirection:"column",gap:12}}><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tu nombre (opcional)</label><input className="inp" placeholder="ej: Martín" value={d.name} onChange={e=>setD(p=>({...p,name:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Sueldo neto mensual</label><div style={{display:"flex",gap:8}}><input className="inp" style={{flex:1}} placeholder={d.incomeCurrency==="ARS"?"ej: 800000":"ej: 1200"} value={d.income} onChange={e=>setD(p=>({...p,income:e.target.value}))}/><div style={{display:"flex",borderRadius:10,overflow:"hidden",border:`1px solid ${T.border}`,flexShrink:0}}>{["ARS","USD"].map(c=><button key={c} onClick={()=>setD(p=>({...p,incomeCurrency:c}))} style={{padding:"8px 12px",fontSize:12,fontWeight:600,background:d.incomeCurrency===c?"rgba(200,255,87,.15)":T.raised,color:d.incomeCurrency===c?T.lime:T.muted,border:"none",cursor:"pointer",transition:"all .15s"}}>{c}</button>)}</div></div></div></div></>}
-  {step>=1&&step<=4&&<><div style={{width:44,height:44,borderRadius:14,background:"rgba(255,154,53,.1)",border:"1px solid rgba(255,154,53,.2)",display:"flex",alignItems:"center",justifyContent:"center",color:T.mango,marginBottom:12}}>{QS[step-1].icon}</div><div style={{fontSize:22,fontWeight:800,marginBottom:4,letterSpacing:"-.5px"}}>{QS[step-1].title}</div><div style={{fontSize:13,color:T.muted,marginBottom:20}}>{QS[step-1].sub}</div><div style={{display:"flex",flexDirection:"column",gap:8}}>{QS[step-1].opts.map(o=><button key={o.v} onClick={()=>pickAns(step-1,o.v)} style={{display:"block",width:"100%",padding:"13px 16px",borderRadius:12,border:`1.5px solid ${ans[step-1]===o.v?T.lime:T.border}`,background:ans[step-1]===o.v?"rgba(200,255,87,.08)":T.raised,textAlign:"left",cursor:"pointer",transition:"all .15s"}}><div style={{fontSize:13,fontWeight:600,color:ans[step-1]===o.v?T.lime:T.white}}>{o.l}</div><div style={{fontSize:11,color:T.muted,marginTop:2}}>{o.d}</div></button>)}</div></>}
+  {step>=1&&step<=4&&<><div style={{width:44,height:44,borderRadius:14,background:"rgba(255,154,53,.1)",border:"1px solid rgba(255,154,53,.2)",display:"flex",alignItems:"center",justifyContent:"center",color:T.mango,marginBottom:22,marginTop:12}}>{QS[step-1].icon}</div><div style={{fontSize:22,fontWeight:800,marginBottom:4,letterSpacing:"-.5px"}}>{QS[step-1].title}</div><div style={{fontSize:13,color:T.muted,marginBottom:20}}>{QS[step-1].sub}</div><div style={{display:"flex",flexDirection:"column",gap:8}}>{QS[step-1].opts.map(o=><button key={o.v} onClick={()=>pickAns(step-1,o.v)} style={{display:"block",width:"100%",padding:"13px 16px",borderRadius:12,border:`1.5px solid ${ans[step-1]===o.v?T.lime:T.border}`,background:ans[step-1]===o.v?"rgba(200,255,87,.08)":T.raised,textAlign:"left",cursor:"pointer",transition:"all .15s"}}><div style={{fontSize:13,fontWeight:600,color:ans[step-1]===o.v?T.lime:T.white}}>{o.l}</div><div style={{fontSize:11,color:T.muted,marginTop:2}}>{o.d}</div></button>)}</div></>}
   {step===5&&<><div style={{textAlign:"center",marginBottom:24}}><div style={{width:72,height:72,borderRadius:22,background:`${pf.color}18`,border:`1px solid ${pf.color}35`,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 20px"}}>{pf.emoji}</div><div style={{fontSize:24,fontWeight:800,letterSpacing:"-.5px",color:pf.color}}>{pf.label}</div><div style={{fontSize:13,color:T.muted,marginTop:6,lineHeight:1.6}}>{pf.desc}</div><div style={{display:"flex",justifyContent:"center",gap:6,marginTop:16}}>{[{l:"Renta fija",p:pf.pct[0],c:"#4D9EFF"},{l:"Mixto",p:pf.pct[1],c:"#FFB830"},{l:"Renta variable",p:pf.pct[2],c:"#FF4D6A"}].map(s=><div key={s.l} style={{background:T.raised,borderRadius:10,padding:"10px 14px",textAlign:"center",minWidth:80}}><div className="mono" style={{fontSize:18,fontWeight:700,color:s.c}}>{s.p}%</div><div style={{fontSize:10,color:T.muted,marginTop:3}}>{s.l}</div></div>)}</div><div className="mono" style={{fontSize:11,color:T.muted,marginTop:12}}>Score: {score}/12 · Horizonte: {horizon}</div></div>
   {(()=>{const isCharla=new URLSearchParams(window.location.search).get("charla")==="true";return isCharla?(<div style={{background:"rgba(200,255,87,.07)",border:"1px solid rgba(200,255,87,.25)",borderRadius:12,padding:"14px 16px",textAlign:"center"}}><div style={{fontSize:22,marginBottom:6}}>🥭</div><div style={{fontSize:14,fontWeight:700,marginBottom:4}}>¡Listo!</div><div style={{fontSize:12,color:T.mid,lineHeight:1.6}}>Seguí la presentación — te vamos a guiar dentro de la app en cada paso.</div></div>):(<div style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:12,padding:"14px 16px",textAlign:"center"}}><div style={{fontSize:14,fontWeight:700,marginBottom:4}}>¡Todo listo!</div><div style={{fontSize:12,color:T.mid,lineHeight:1.6,marginBottom:12}}>Creá tu primera meta para empezar a trackear tu progreso.</div><button className="btn bl" style={{width:"100%",justifyContent:"center"}} onClick={()=>{finish();setTimeout(()=>document.querySelector("[data-nav='goals']")?.click(),100);}}>Crear mi primera meta →</button></div>);})()}</>}
   <div style={{display:"flex",gap:10,marginTop:28}}>{step>0&&<button className="btn bg" style={{flex:.4,justifyContent:"center"}} onClick={()=>setStep(s=>s-1)}>← Atrás</button>}<button onClick={step<5?()=>setStep(s=>s+1):finish} disabled={!canNext} style={{flex:1,justifyContent:"center",display:"flex",alignItems:"center",gap:7,padding:"11px 20px",borderRadius:12,background:!canNext?"#2A2025":"linear-gradient(135deg,var(--ac),var(--acd))",color:"#09080A",fontWeight:700,fontSize:14,border:"none",cursor:canNext?"pointer":"not-allowed",transition:"all .18s",opacity:canNext?1:.45}}>{step===5?"¡Empezar! →":"Continuar →"}</button></div></div></div>);
