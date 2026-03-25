@@ -566,7 +566,7 @@ function exportData(state) {
 }
 
 function TourGuide({setView}){
-  const TOUR_KEYS=[2,3,4,5,6,"6b","6c",10,"10b","10c",11,12,13];
+  const TOUR_KEYS=TOUR_SEQUENCE;
   const LS_KEY="mangos_tour_step";
   const [tip,setTip]=useState(null);
   const [pos,setPos]=useState(null); // {x,y,side} for contextual positioning
@@ -780,24 +780,23 @@ function TourGuide({setView}){
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://ghfnscswtsgnylumcxyp.supabase.co";
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdoZm5zY3N3dHNnbnlsdW1jeHlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNzUxOTgsImV4cCI6MjA4OTk1MTE5OH0.dq2Xhy7c7X_kZvGtln5Ko8hl5woYsHGq5hXLSfJQoic";
 
+// SLIDE_MAP: keys = charla slide numbers (0-23, all integers — matches Supabase INT column)
 const SLIDE_MAP = {
-  2:   { section:"goals",        target:"new-goal-btn",      tip:"Tocá acá para crear tu primera meta — nombre, monto y fecha límite.", btn:"Crear meta" },
-  3:   { section:"dashboard",    target:"plan-ahorro-card",  tip:"Este es tu plan de ahorro calculado con tu sueldo real.", btn:"Ver plan" },
-  4:   { section:"dashboard",    target:"kpi-balance",       tip:"Tu balance libre es el número que manda todas las decisiones del mes.", btn:"Ver balance" },
-  5:   { section:"transactions", target:"presupuestos-btn",  tip:"Fijá un límite por categoría. La app te avisa antes de que te pases.", btn:"Ver presupuestos" },
-  6:   { section:"transactions", target:"recurrentes-btn",   tip:"Tus recurrentes activos están acá. Podés pausar los que no usás.", btn:"Ver recurrentes" },
-  "6b":{ section:"import",       target:"import-image-tab",  tip:"Subí un screenshot o CSV de tu banco aquí. de tu banco.", btn:"Importar" },
-  "6c":{ section:"dashboard",    target:"generar-resumen",   tip:"Generá tu resumen semanal — 4 cards con el análisis de tu semana.", btn:"Generar resumen" },
-  7:   { section:"dashboard",    target:null,                tip:null },
-  8:   { section:"dashboard",    target:null,                tip:null },
-  9:   { section:"dashboard",    target:null,                tip:null },
-  10:  { section:"investments",  target:"add-holding-btn",   tip:"Tocá acá para cargar tu FCI o plazo fijo.", btn:"Agregar inversión" },
-  "10b":{ section:"dashboard",  target:"currency-usd",      tip:"Cambiá a USD — todos los números se convierten automáticamente. — todos los números se convierten automáticamente.", btn:"Ver toggle" },
-  "10c":{ section:"goals",       target:"vincular-inv-btn",  tip:"Vincular una inversión a tu meta hace que su valor cuente en el progreso.", btn:"Ir a Metas", fallbackTarget:"add-holding-btn", fallbackSection:"investments" },
-  11:  { section:"analytics",    target:"score-card",        tip:"Tu Score Financiero resume tu situación en un número. Tocá cada barra.", btn:"Ver score" },
-  12:  { section:"investments",  target:"scanner-tab",       tip:"El Scanner IA encuentra oportunidades adaptadas a tu perfil.", btn:"Ver scanner" },
-  13:  { section:"dashboard",    target:null,                tip:"Ya tenés el sistema armado. Ahora es consistencia.", btn:"Ver dashboard" },
+  4:  { section:"goals",        target:"new-goal-btn",     tip:"Tocá acá para crear tu primera meta — nombre, monto y fecha límite.", btn:"Crear meta" },
+  6:  { section:"dashboard",    target:"plan-ahorro-card", tip:"Este es tu plan de ahorro calculado con tu sueldo real.", btn:"Ver plan" },
+  8:  { section:"dashboard",    target:"kpi-balance",      tip:"Tu balance libre es el número que manda todas las decisiones del mes.", btn:"Ver balance" },
+  9:  { section:"transactions", target:"presupuestos-btn", tip:"Fijá un límite por categoría. La app te avisa antes de que te pases.", btn:"Presupuestos" },
+  10: { section:"transactions", target:"recurrentes-btn",  tip:"Tus recurrentes activos están acá. Pausá las que no usás.", btn:"Recurrentes" },
+  11: { section:"import",       target:"import-image-tab", tip:"Subí un screenshot o CSV de tu banco aquí.", btn:"Importar" },
+  12: { section:"dashboard",    target:"generar-resumen",  tip:"Generá tu resumen semanal — 4 cards con el análisis de tu semana.", btn:"Generar" },
+  18: { section:"investments",  target:"add-holding-btn",  tip:"Cargá tu FCI o plazo fijo acá.", btn:"Agregar inversión" },
+  19: { section:"dashboard",    target:"toggle-usd",       tip:"Cambiá a USD — todos los números se convierten automáticamente.", btn:"Activar USD" },
+  20: { section:"goals",        target:"vincular-inv-btn", tip:"Vincular una inversión a tu meta hace que su valor cuente en el progreso.", btn:"Vincular", fallbackTarget:"add-holding-btn", fallbackSection:"investments" },
+  21: { section:"analytics",    target:"score-card",       tip:"Tu Score Financiero resume tu situación en un número.", btn:"Ver score" },
+  23: { section:"investments",  target:"scanner-tab",      tip:"El Scanner IA encuentra oportunidades adaptadas a tu perfil.", btn:"Ver scanner" },
 };
+// Tour local: same entries in presentation order
+const TOUR_SEQUENCE=[4,6,8,9,10,11,12,18,19,20,21,23];
 
 
 export default function App(){
