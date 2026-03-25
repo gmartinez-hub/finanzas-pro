@@ -283,16 +283,30 @@ const CSS=`@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;4
 :root{--ac:#CCFF47;--acd:#AADC28;--ac-rgb:204,255,71;--ac-bg:rgba(204,255,71,.08);--ac-border:rgba(204,255,71,.25);transition:--ac .4s}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{background:#09080A;color:#F2EBE0;font-family:'Sora',sans-serif;overflow:hidden;height:100%;transition:background .5s,color .5s}
-body.usd-mode{background:#060A0F}
-body.usd-mode .card{border-color:#1A2335;background:#0C1018}
-body.usd-mode .inp{background:#0E1520;border-color:#1C2A3D}
-body.usd-mode .inp:focus{border-color:var(--ac);box-shadow:0 0 0 3px rgba(91,207,184,.14)}
-body.usd-mode .modal{background:#0C1018;border-color:#1A2335}
-body.usd-mode .nav:hover{background:rgba(91,207,184,.07)}
-body.usd-mode .nav.on{background:rgba(91,207,184,.08)}
-body.usd-mode .tabbar,.usd-mode .tab{background:#0E1520}
-body.usd-mode .tab.on{background:#0C1018;box-shadow:0 0 0 1px rgba(91,207,184,.3)}
+body.usd-mode{background:#040810}
+body.usd-mode .card{border-color:#152030;background:rgba(9,18,32,.9)}
+body.usd-mode .card.lime{border-color:rgba(91,207,184,.2);background:rgba(91,207,184,.04)}
+body.usd-mode .inp{background:#0A1422;border-color:#1C2A3D;color:#DCF0F0}
+body.usd-mode .inp:focus{border-color:var(--ac);box-shadow:0 0 0 3px rgba(91,207,184,.15)}
+body.usd-mode .modal{background:#081020;border-color:#152030;box-shadow:0 32px 80px rgba(0,8,20,.85)}
+body.usd-mode .nav{color:#3A5568}
+body.usd-mode .nav:hover{background:rgba(91,207,184,.07);color:#DCF0F0}
+body.usd-mode .nav.on{background:rgba(91,207,184,.09);color:var(--ac)}
+body.usd-mode .tabbar{background:#0A1422}
+body.usd-mode .tab{color:#3A5568}
+body.usd-mode .tab.on{background:#081020;color:var(--ac);box-shadow:0 0 0 1px rgba(91,207,184,.3)}
+body.usd-mode .tbl th{color:#3A5568}
+body.usd-mode .tbl td{border-color:#0F1E2F}
 body.usd-mode .tbl tr:hover td{background:rgba(91,207,184,.04)}
+body.usd-mode .btn.bg{background:#0A1422;border-color:#152030;color:#5C7A8A}
+body.usd-mode .btn.bg:hover{background:#152030;color:#DCF0F0}
+body.usd-mode .prog{background:rgba(91,207,184,.06)}
+body.usd-mode .dz{border-color:#152030}
+body.usd-mode .dz:hover{border-color:var(--ac);background:rgba(91,207,184,.03)}
+body.usd-mode ::-webkit-scrollbar-thumb{background:#1C3040}
+body.usd-mode .mono{color:#9ECFCC}
+body.usd-mode main{background:linear-gradient(180deg,rgba(9,20,40,.4) 0%,transparent 40%)}
+body.usd-mode h1,body.usd-mode h2{color:#D8EEF0}
 ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#48403A;border-radius:99px}
 [data-currency="USD"] body::before{background:radial-gradient(ellipse 60% 50% at 15% 50%,rgba(0,180,160,.07) 0%,transparent 70%),radial-gradient(ellipse 50% 45% at 85% 25%,rgba(91,207,184,.05) 0%,transparent 65%)}
 [data-currency="USD"] body::after{background-image:linear-gradient(rgba(0,212,170,.022) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,170,.022) 1px,transparent 1px)}
@@ -557,31 +571,46 @@ function TourGuide({setView}){
   const chRef=useRef(null);
   const modeRef=useRef("local");
 
-  // Find anchor element for a section and return its bounding rect
-  const getAnchor=(section)=>{
-    const el=document.querySelector(`[data-tour-target="${section}"]`);
+  // Find anchor element and compute best tooltip position
+  const getAnchor=(targetId)=>{
+    if(!targetId)return null;
+    const el=document.querySelector(`[data-tour-target="${targetId}"]`);
     if(!el)return null;
     const r=el.getBoundingClientRect();
     const vw=window.innerWidth;
     const vh=window.innerHeight;
-    // Decide positioning: if element is in sidebar (left side), position to the right of it
-    if(r.right<320){
-      return{x:r.right+12,y:Math.min(r.top+r.height/2,vh-120),side:"right",rect:r};
+    // Off screen = fall back
+    if(r.top<0||r.bottom>vh||r.right<0||r.left>vw)return null;
+    const TW=300; // tooltip width
+    const TH=130; // tooltip height estimate
+
+    // Sidebar nav item → appear to the right
+    if(r.right<260&&r.width<200){
+      return{x:r.right+14,y:Math.max(8,Math.min(r.top+r.height/2-TH/2,vh-TH-8)),side:"right",rect:r};
     }
-    // Element is in main area — position above it
-    if(r.top>120){
-      return{x:Math.min(r.left,vw-360),y:r.top-8,side:"above",rect:r};
+    // Button or small element → appear above
+    if(r.height<60){
+      const x=Math.max(8,Math.min(r.left+r.width/2-TW/2,vw-TW-8));
+      const spaceAbove=r.top-8;
+      if(spaceAbove>TH+20){
+        return{x,y:null,bottom:vh-r.top+8,side:"above",rect:r};
+      }
+      return{x,y:r.bottom+8,side:"below",rect:r};
     }
-    return null;
+    // Card/large element → appear at top-left corner of element
+    const x=Math.max(8,Math.min(r.left+8,vw-TW-8));
+    const y=Math.max(8,r.top+8);
+    return{x,y,side:"inside",rect:r};
   };
 
   const showKey=useCallback((key)=>{
     const mapped=SLIDE_MAP[key]||SLIDE_MAP[String(key)];
     if(mapped&&mapped.tip){
       setTip({...mapped,key});
-      // Compute anchor position after paint
+      // Use specific target element, fall back to section nav
       requestAnimationFrame(()=>{
-        const p=getAnchor(mapped.section);
+        const anchorId=mapped.target||mapped.section;
+        const p=getAnchor(anchorId);
         setPos(p);
       });
     }else setTip(null);
@@ -614,7 +643,7 @@ function TourGuide({setView}){
           if(mapped&&mapped.tip){
             setTip({...mapped,isCharla:true});
             setView(mapped.section);
-            requestAnimationFrame(()=>setPos(getAnchor(mapped.section)));
+            requestAnimationFrame(()=>setPos(getAnchor(mapped.target||mapped.section)));
           }else setTip(null);
         })
         .subscribe();
@@ -633,18 +662,27 @@ function TourGuide({setView}){
   let arrowStyle=null;
 
   if(pos){
+    const W=pos.side==="right"?280:300;
     if(pos.side==="right"){
-      // Appear to the right of sidebar nav item
-      tooltipStyle={position:"fixed",left:pos.x,top:Math.max(8,pos.y-40),transform:"none",width:280};
-      arrowStyle={position:"absolute",left:-7,top:40,width:0,height:0,
+      tooltipStyle={position:"fixed",left:pos.x,top:pos.y,width:W};
+      arrowStyle={position:"absolute",left:-7,top:"50%",marginTop:-7,width:0,height:0,
         borderTop:"7px solid transparent",borderBottom:"7px solid transparent",
         borderRight:`7px solid rgba(16,14,18,.97)`};
     } else if(pos.side==="above"){
-      tooltipStyle={position:"fixed",left:Math.min(pos.x,window.innerWidth-320),
-        bottom:window.innerHeight-pos.y+8,transform:"none",width:300};
+      tooltipStyle={position:"fixed",left:pos.x,bottom:pos.bottom,width:W};
+      arrowStyle={position:"absolute",bottom:-7,left:Math.min(20,W/2-7),width:0,height:0,
+        borderLeft:"7px solid transparent",borderRight:"7px solid transparent",
+        borderTop:`7px solid rgba(16,14,18,.97)`};
+    } else if(pos.side==="below"){
+      tooltipStyle={position:"fixed",left:pos.x,top:pos.y,width:W};
+      arrowStyle={position:"absolute",top:-7,left:Math.min(20,W/2-7),width:0,height:0,
+        borderLeft:"7px solid transparent",borderRight:"7px solid transparent",
+        borderBottom:`7px solid rgba(16,14,18,.97)`};
+    } else {
+      // inside card
+      tooltipStyle={position:"fixed",left:pos.x,top:pos.y,width:W};
     }
   } else {
-    // Fallback: bottom center
     tooltipStyle={position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",maxWidth:460,width:"calc(100% - 24px)"};
   }
 
@@ -666,7 +704,7 @@ function TourGuide({setView}){
         <div style={{fontSize:12,color:"#E8DDD4",lineHeight:1.6,fontWeight:500}}>{tip.tip}</div>
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0,alignItems:"stretch"}}>
-        <button onClick={()=>{setView(tip.section);requestAnimationFrame(()=>setPos(getAnchor?.(tip.section)));}}
+        <button onClick={()=>{setView(tip.section);requestAnimationFrame(()=>{setTimeout(()=>setPos(getAnchor(tip.target||tip.section)),120);});}}
           style={{background:`linear-gradient(135deg,var(--ac),var(--acd))`,color:"#09080A",
           padding:"6px 12px",borderRadius:"8px",fontSize:"11px",fontWeight:"700",
           border:"none",cursor:"pointer",whiteSpace:"nowrap",textAlign:"center"}}>{tip.btn}</button>
@@ -684,22 +722,22 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://ghfnscswtsgny
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdoZm5zY3N3dHNnbnlsdW1jeHlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNzUxOTgsImV4cCI6MjA4OTk1MTE5OH0.dq2Xhy7c7X_kZvGtln5Ko8hl5woYsHGq5hXLSfJQoic";
 
 const SLIDE_MAP = {
-  2:   { section:"goals",        tip:"Creá tu primera meta — nombre, monto y fecha límite.", btn:"Ir a Metas" },
-  3:   { section:"dashboard",    tip:"Este es tu plan de ahorro con tus números reales. ¿Cuánto por mes necesitás?", btn:"Ver plan" },
-  4:   { section:"dashboard",    tip:"Tu balance libre es el número que manda todas las decisiones del mes.", btn:"Ver dashboard" },
-  5:   { section:"transactions", tip:"Fijá límites por categoría. La app te avisa antes de que te pases.", btn:"Ver presupuestos" },
-  6:   { section:"transactions", tip:"Tus recurrentes activos están acá. Podés pausar los que no usás.", btn:"Ver recurrentes" },
-  "6b":{ section:"import",       tip:"Subí un screenshot o CSV de tu banco. La IA detecta y categoriza todo.", btn:"Importar" },
-  "6c":{ section:"dashboard",    tip:"Generá tu resumen semanal — 4 cards con el análisis de tu semana.", btn:"Ver resumen" },
-  7:   { section:"dashboard",    tip:null },
-  8:   { section:"dashboard",    tip:null },
-  9:   { section:"dashboard",    tip:null },
-  10:  { section:"investments",  tip:"Cargá tu FCI o plazo fijo. La app calcula el rendimiento automáticamente.", btn:"Ir a Inversiones" },
-  "10b":{ section:"dashboard",  tip:"Cambiá entre ARS y USD para ver tu patrimonio en la moneda que preferís.", btn:"Ver dashboard" },
-  "10c":{ section:"goals",       tip:"Vincular una inversión a tu meta hace que su valor cuente en el progreso.", btn:"Ir a Metas" },
-  11:  { section:"analytics",    tip:"Tu Score Financiero resume tu situación en un número. Tocá cada barra para ver cómo mejorar.", btn:"Ver analíticas" },
-  12:  { section:"investments",  tip:"El Scanner IA encuentra oportunidades adaptadas a tu perfil inversor.", btn:"Ver inversiones" },
-  13:  { section:"dashboard",    tip:"Ya tenés el sistema armado. Ahora es consistencia.", btn:"Ver dashboard" },
+  2:   { section:"goals",        target:"new-goal-btn",      tip:"Tocá acá para crear tu primera meta — nombre, monto y fecha límite.", btn:"Crear meta" },
+  3:   { section:"dashboard",    target:"plan-ahorro-card",  tip:"Este es tu plan de ahorro calculado con tu sueldo real.", btn:"Ver plan" },
+  4:   { section:"dashboard",    target:"kpi-balance",       tip:"Tu balance libre es el número que manda todas las decisiones del mes.", btn:"Ver balance" },
+  5:   { section:"transactions", target:"presupuestos-btn",  tip:"Fijá un límite por categoría. La app te avisa antes de que te pases.", btn:"Ver presupuestos" },
+  6:   { section:"transactions", target:"recurrentes-btn",   tip:"Tus recurrentes activos están acá. Podés pausar los que no usás.", btn:"Ver recurrentes" },
+  "6b":{ section:"import",       target:"import-drop",       tip:"Subí acá un screenshot o CSV de tu banco.", btn:"Importar" },
+  "6c":{ section:"dashboard",    target:"resumen-ia",        tip:"Generá tu resumen semanal — 4 cards con el análisis de tu semana.", btn:"Generar resumen" },
+  7:   { section:"dashboard",    target:null,                tip:null },
+  8:   { section:"dashboard",    target:null,                tip:null },
+  9:   { section:"dashboard",    target:null,                tip:null },
+  10:  { section:"investments",  target:"add-holding-btn",   tip:"Tocá acá para cargar tu FCI o plazo fijo.", btn:"Agregar inversión" },
+  "10b":{ section:"dashboard",  target:"currency-toggle",   tip:"Cambiá entre ARS y USD — todos los números se convierten automáticamente.", btn:"Ver toggle" },
+  "10c":{ section:"goals",       target:"vincular-inv-btn",  tip:"Vincular una inversión a tu meta hace que su valor cuente en el progreso.", btn:"Ir a Metas" },
+  11:  { section:"analytics",    target:"score-card",        tip:"Tu Score Financiero resume tu situación en un número. Tocá cada barra.", btn:"Ver score" },
+  12:  { section:"investments",  target:"scanner-tab",       tip:"El Scanner IA encuentra oportunidades adaptadas a tu perfil.", btn:"Ver scanner" },
+  13:  { section:"dashboard",    target:null,                tip:"Ya tenés el sistema armado. Ahora es consistencia.", btn:"Ver dashboard" },
 };
 
 
@@ -780,7 +818,7 @@ export default function App(){
       {usdLoading?<Dots/>:<button onClick={updateRates} style={{fontSize:10,color:T.mango,cursor:"pointer",display:"flex",alignItems:"center",gap:3,fontWeight:600}}><ic.Refresh/>Auto</button>}
     </div>
     
-    <div style={{display:"flex", background:T.bg, borderRadius:8, padding:3, marginBottom:12}}>
+    <div data-tour-target="currency-toggle" style={{display:"flex", background:T.bg, borderRadius:8, padding:3, marginBottom:12}}>
       {[{id:"oficial",l:"Oficial"},{id:"mep",l:"MEP"},{id:"blue",l:"Blue"}].map(t=>(
         <button key={t.id} onClick={()=>{update({usdType: t.id, usdRate: state.usdRates?.[t.id] || state.usdRate});}} style={{flex:1, padding:"6px 0", fontSize:10, fontWeight:600, color:state.usdType===t.id?"#09080A":T.muted, background:state.usdType===t.id?T.lime:"transparent", borderRadius:6, transition:"all .2s"}}>{t.l}</button>
       ))}
@@ -797,7 +835,7 @@ export default function App(){
   <button onClick={()=>exportData(state)} style={{display:"flex",alignItems:"center",gap:7,width:"100%",padding:"8px 12px",marginTop:8,borderRadius:9,border:`1px solid ${T.border}`,background:"none",color:T.muted,fontSize:11,cursor:"pointer",transition:"all .15s"}} onMouseEnter={e=>e.currentTarget.style.color=T.white} onMouseLeave={e=>e.currentTarget.style.color=T.muted}><ic.Download/>Exportar mis datos</button>
   </aside>;
 
-  return(<div style={{display:"flex",height:"100vh",overflow:"hidden",background:T.bg}}><style>{CSS}</style>{isMobile?<>{sideOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:299}} onClick={()=>setSO(false)}/>}{sidebar}</>:sidebar}{isMobile&&<div style={{position:"fixed",top:0,left:0,right:0,height:52,background:T.surface,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",padding:"0 14px",gap:12,zIndex:100}}><button onClick={()=>setSO(true)} style={{color:T.white,padding:4}}><ic.Menu/></button><div style={{fontSize:14,fontWeight:800,letterSpacing:"-.4px",background:"linear-gradient(135deg,#F2EBE0,#FF9A35)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>Mangos</div><div style={{flex:1}}/><div className="mono" style={{fontSize:11,color:"var(--ac)"}}>{state.displayCurrency==="USD"?fUSD(1):fARS(state.usdRate)}</div></div>}<main style={{flex:1,overflow:"auto",padding:isMobile?"66px 14px 20px":"28px 32px"}}>{pages[view]}</main>{toast&&<div className={`toast t${toast.type}`}>{toast.msg}</div>}<TourGuide setView={navTo}/></div>);
+  return(<div style={{display:"flex",height:"100vh",overflow:"hidden",background:T.bg}}><style>{CSS}</style>{isMobile?<>{sideOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:299}} onClick={()=>setSO(false)}/>}{sidebar}</>:sidebar}{isMobile&&<div style={{position:"fixed",top:0,left:0,right:0,height:52,background:T.surface,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",padding:"0 14px",gap:12,zIndex:100}}><button onClick={()=>setSO(true)} style={{color:T.white,padding:4}}><ic.Menu/></button><div style={{fontSize:14,fontWeight:800,letterSpacing:"-.4px",background:"linear-gradient(135deg,#F2EBE0,#FF9A35)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>Mangos</div><div style={{flex:1}}/><div className="mono" style={{fontSize:11,color:"var(--ac)"}}>{state.displayCurrency==="USD"?fUSD(1):fARS(state.usdRate)}</div></div>}<main style={{flex:1,overflow:"auto",padding:isMobile?"66px 14px 20px":"28px 32px",transition:"background .4s"}}>{pages[view]}</main>{toast&&<div className={`toast t${toast.type}`}>{toast.msg}</div>}<TourGuide setView={navTo}/></div>);
 }
 
 function Onboarding({update,notify}){
@@ -887,11 +925,11 @@ function Dashboard({state,update,notify,setView}){
   };
 
   return(<div className="up"><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:22,flexWrap:"wrap",gap:8}}><div><div style={{fontSize:11,color:T.muted,textTransform:"uppercase",letterSpacing:".8px",marginBottom:5}}>{NOW.toLocaleDateString("es-AR",{weekday:"long",day:"numeric",month:"long"})}</div><h1 style={{fontSize:isMobile?22:28,fontWeight:800,letterSpacing:"-1px"}}>Dashboard</h1></div>{alerts.length>0&&<div style={{background:"rgba(255,184,48,.08)",border:`1px solid rgba(255,184,48,.25)`,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:8,fontSize:12,color:T.amber,cursor:"pointer"}} onClick={()=>setView("transactions")}><ic.Bell/>{alerts.length} alerta{alerts.length>1?"s":""}</div>}</div>
-  <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:14}}>{kpis.map((k,i)=>(<div key={i} className={`card csm up d${i+1}${i===0?' card-glow-mango':i===3?' card-glow-lime':''}`} style={{cursor:i===0?"pointer":"default"}} onClick={i===0?()=>setView("salary"):undefined}><div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".6px",fontWeight:600}}>{k.l}</span><span style={{color:k.c,opacity:.8,display:"flex",alignItems:"center"}}>{k.i}</span></div><div className="mono" title={k.v} style={{fontSize:isMobile?16:20,fontWeight:500,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div><div style={{fontSize:11,color:T.muted,marginTop:4}}>{k.sub}</div></div>))}</div>
-  {perGoal.length>0&&(<div className="card up d2" style={{marginBottom:14,borderColor:"rgba(200,255,87,.18)"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}><div style={{fontSize:13,fontWeight:700}}>Plan de ahorro para metas</div><div style={{fontSize:11,color:T.muted}}>Disponible: <span className="mono" style={{color:disponible>0?T.lime:T.red}}>{fmt(disponible)}</span></div></div><div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{perGoal.map(g=>(<div key={g.id} style={{flex:1,minWidth:160,background:T.raised,borderRadius:10,padding:"10px 14px",border:`1px solid ${g.feasible?T.border:"rgba(255,184,48,.25)"}`}}><div style={{fontSize:12,marginBottom:4}}>{g.icon} {g.name}</div><div className="mono" style={{fontSize:16,fontWeight:600,color:g.feasible?T.lime:T.amber}}>{fmt(g.needed)}<span style={{fontSize:11,fontWeight:400,color:T.muted}}>/mes</span></div><div style={{fontSize:10,color:T.muted,marginTop:2}}>{g.months} mes{g.months>1?"es":""} · Falta {fmt(g.rem)}</div>{!g.feasible&&<div style={{fontSize:10,color:T.amber,marginTop:3}}>Ajustá el plazo</div>}{g.couldUsePortfolio&&<div style={{fontSize:10,color:T.blue,marginTop:3}}><span style={{display:"inline-flex",color:T.blue,marginRight:4,verticalAlign:"middle"}}><IcPortfolio/></span>Portfolio cubre {g.portfolioCover}% de esta meta</div>}</div>))}</div></div>)}
+  <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:14}}>{kpis.map((k,i)=>(<div key={i} className={`card csm up d${i+1}${i===0?' card-glow-mango':i===3?' card-glow-lime':''}`} data-tour-target={i===3?"kpi-balance":undefined} style={{cursor:i===0?"pointer":"default"}} onClick={i===0?()=>setView("salary"):undefined}><div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".6px",fontWeight:600}}>{k.l}</span><span style={{color:k.c,opacity:.8,display:"flex",alignItems:"center"}}>{k.i}</span></div><div className="mono" title={k.v} style={{fontSize:isMobile?16:20,fontWeight:500,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div><div style={{fontSize:11,color:T.muted,marginTop:4}}>{k.sub}</div></div>))}</div>
+  {perGoal.length>0&&(<div data-tour-target="plan-ahorro-card" className="card up d2" style={{marginBottom:14,borderColor:"rgba(200,255,87,.18)"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}><div style={{fontSize:13,fontWeight:700}}>Plan de ahorro para metas</div><div style={{fontSize:11,color:T.muted}}>Disponible: <span className="mono" style={{color:disponible>0?T.lime:T.red}}>{fmt(disponible)}</span></div></div><div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{perGoal.map(g=>(<div key={g.id} style={{flex:1,minWidth:160,background:T.raised,borderRadius:10,padding:"10px 14px",border:`1px solid ${g.feasible?T.border:"rgba(255,184,48,.25)"}`}}><div style={{fontSize:12,marginBottom:4}}>{g.icon} {g.name}</div><div className="mono" style={{fontSize:16,fontWeight:600,color:g.feasible?T.lime:T.amber}}>{fmt(g.needed)}<span style={{fontSize:11,fontWeight:400,color:T.muted}}>/mes</span></div><div style={{fontSize:10,color:T.muted,marginTop:2}}>{g.months} mes{g.months>1?"es":""} · Falta {fmt(g.rem)}</div>{!g.feasible&&<div style={{fontSize:10,color:T.amber,marginTop:3}}>Ajustá el plazo</div>}{g.couldUsePortfolio&&<div style={{fontSize:10,color:T.blue,marginTop:3}}><span style={{display:"inline-flex",color:T.blue,marginRight:4,verticalAlign:"middle"}}><IcPortfolio/></span>Portfolio cubre {g.portfolioCover}% de esta meta</div>}</div>))}</div></div>)}
 
   {/* ── RESUMEN SEMANAL IA — CARDS ── */}
-  <div className="card up d2" style={{marginBottom:14,borderColor:weeklyInsight?"rgba(200,255,87,.12)":T.border}}>
+  <div data-tour-target="resumen-ia" className="card up d2" style={{marginBottom:14,borderColor:weeklyInsight?"rgba(200,255,87,.12)":T.border}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom: weeklyInsight ? 14 : 0}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
         <div style={{width:30,height:30,background:"rgba(167,139,250,.1)",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center"}}><ic.Bolt/></div>
@@ -920,7 +958,7 @@ function Dashboard({state,update,notify,setView}){
     )}
   </div>
 
-  <div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1.8fr .8fr",gap:14,marginBottom:14}}><div className="card up d2"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Últimos 6 meses</div><div style={{width:"100%",minWidth:0,overflow:"hidden"}}><ResponsiveContainer width="100%" height={175}><AreaChart data={trend}><defs><linearGradient id="gi" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={T.teal} stopOpacity={.25}/><stop offset="95%" stopColor={T.teal} stopOpacity={0}/></linearGradient><linearGradient id="ge" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={T.red} stopOpacity={.25}/><stop offset="95%" stopColor={T.red} stopOpacity={0}/></linearGradient></defs><CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" tick={{fill:T.muted,fontSize:10}} axisLine={false} tickLine={false}/><YAxis tick={{fill:T.muted,fontSize:9}} axisLine={false} tickLine={false} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:v}/><Tooltip content={<CTip dc={state.displayCurrency}/>}/><Area type="monotone" dataKey="Ingresos" stroke={T.teal} fill="url(#gi)" strokeWidth={2}/><Area type="monotone" dataKey="Gastos" stroke={T.red} fill="url(#ge)" strokeWidth={2}/></AreaChart></ResponsiveContainer></div></div><div className="card up d3" style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12}}><div style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".8px",fontWeight:600}}>Score financiero</div><svg width={100} height={100} viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke={T.raised} strokeWidth="7"/><circle cx="50" cy="50" r="40" fill="none" stroke={sc} strokeWidth="7" strokeDasharray={`${(score/100)*251} 251`} strokeDashoffset="63" strokeLinecap="round" style={{transition:"stroke-dasharray .8s",filter:score>=70?`drop-shadow(0 0 8px rgba(var(--ac-rgb),.4))`:undefined}}/><text x="50" y="46" textAnchor="middle" fill={sc} fontSize="26" fontWeight="700" fontFamily="'DM Mono',monospace">{score}</text><text x="50" y="60" textAnchor="middle" fill={T.muted} fontSize="9" fontFamily="Sora">/100</text></svg>{items.map((it,i)=>{const pct=it.m>0?it.v/it.m:0;const barCol=pct>=0.8?T.lime:pct>=0.4?T.amber:T.red;return(<div key={i} style={{width:"100%"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:T.muted,marginBottom:3}}><span>{it.l}</span><span className="mono">{it.v.toFixed(0)}/{it.m}</span></div><div className="prog"><div className="progf" style={{width:`${pct*100}%`,background:barCol}}/></div></div>);})}</div></div>
+  <div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1.8fr .8fr",gap:14,marginBottom:14}}><div className="card up d2"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Últimos 6 meses</div><div style={{width:"100%",minWidth:0,overflow:"hidden"}}><ResponsiveContainer width="100%" height={175}><AreaChart data={trend}><defs><linearGradient id="gi" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={T.teal} stopOpacity={.25}/><stop offset="95%" stopColor={T.teal} stopOpacity={0}/></linearGradient><linearGradient id="ge" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={T.red} stopOpacity={.25}/><stop offset="95%" stopColor={T.red} stopOpacity={0}/></linearGradient></defs><CartesianGrid stroke={T.border} strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" tick={{fill:T.muted,fontSize:10}} axisLine={false} tickLine={false}/><YAxis tick={{fill:T.muted,fontSize:9}} axisLine={false} tickLine={false} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:v}/><Tooltip content={<CTip dc={state.displayCurrency}/>}/><Area type="monotone" dataKey="Ingresos" stroke={T.teal} fill="url(#gi)" strokeWidth={2}/><Area type="monotone" dataKey="Gastos" stroke={T.red} fill="url(#ge)" strokeWidth={2}/></AreaChart></ResponsiveContainer></div></div><div data-tour-target="score-card" className="card up d3" style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12}}><div style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".8px",fontWeight:600}}>Score financiero</div><svg width={100} height={100} viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke={T.raised} strokeWidth="7"/><circle cx="50" cy="50" r="40" fill="none" stroke={sc} strokeWidth="7" strokeDasharray={`${(score/100)*251} 251`} strokeDashoffset="63" strokeLinecap="round" style={{transition:"stroke-dasharray .8s",filter:score>=70?`drop-shadow(0 0 8px rgba(var(--ac-rgb),.4))`:undefined}}/><text x="50" y="46" textAnchor="middle" fill={sc} fontSize="26" fontWeight="700" fontFamily="'DM Mono',monospace">{score}</text><text x="50" y="60" textAnchor="middle" fill={T.muted} fontSize="9" fontFamily="Sora">/100</text></svg>{items.map((it,i)=>{const pct=it.m>0?it.v/it.m:0;const barCol=pct>=0.8?T.lime:pct>=0.4?T.amber:T.red;return(<div key={i} style={{width:"100%"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:T.muted,marginBottom:3}}><span>{it.l}</span><span className="mono">{it.v.toFixed(0)}/{it.m}</span></div><div className="prog"><div className="progf" style={{width:`${pct*100}%`,background:barCol}}/></div></div>);})}</div></div>
   <div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}><div className="card up d3"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Últimos movimientos</div>{recent.length===0?<div style={{color:T.muted,fontSize:13,textAlign:"center",padding:"20px 0"}}>Sin movimientos aún</div>:recent.map(t=>(<div key={t.id} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.ink}`}}><div style={{width:32,height:32,borderRadius:9,background:T.raised,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>{t.category?.split(" ")[0]||"💵"}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</div><div style={{fontSize:10,color:T.muted,marginTop:1}}>{t.date}</div></div><div className="mono" style={{fontSize:12,fontWeight:500,color:t.type==="income"?T.teal:T.red,flexShrink:0}}>{t.type==="income"?"+":"-"}{fmt(t.amount)}</div></div>))}</div><div style={{display:"flex",flexDirection:"column",gap:12}}><div className="card csm up d4"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><div style={{fontSize:12,fontWeight:600,color:T.mid}}>Metas activas</div><button className="btn bg bsm" style={{fontSize:10,padding:"4px 10px"}} onClick={()=>setView("goals")}>Ver →</button></div>{goals.filter(g=>g.saved<g.target).length===0?<div style={{color:T.muted,fontSize:12,textAlign:"center",padding:"10px 0"}}>Sin metas — <button onClick={()=>setView("goals")} style={{color:T.lime,background:"none",border:"none",cursor:"pointer",fontSize:12}}>Crear →</button></div>:
     
   /* FIX 3: La barra de Metas en el Dashboard ahora suma las inversiones vinculadas */
@@ -1099,7 +1137,7 @@ function Transactions({state,update,notify}){
   };
 
   return(<div className="up">
-    <PH title="Movimientos" sub={`${rows.length} registros`} right={<div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button className="btn bg" onClick={()=>setSRec(true)}><ic.Refresh/> Recurrentes</button><button className="btn bg" onClick={()=>setSB(true)}><ic.Bell/> Presupuestos</button><button className="btn bl" onClick={()=>{setETx(null);setForm({date:todayISO(),description:"",amount:"",type:"expense",category:"❓ Otros",currency:"ARS",isRecurring:false});setSA(true);}}><ic.Plus/> Nuevo</button></div>}/>
+    <PH title="Movimientos" sub={`${rows.length} registros`} right={<div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button data-tour-target="recurrentes-btn" className="btn bg" onClick={()=>setSRec(true)}><ic.Refresh/> Recurrentes</button><button data-tour-target="presupuestos-btn" className="btn bg" onClick={()=>setSB(true)}><ic.Bell/> Presupuestos</button><button className="btn bl" onClick={()=>{setETx(null);setForm({date:todayISO(),description:"",amount:"",type:"expense",category:"❓ Otros",currency:"ARS",isRecurring:false});setSA(true);}}><ic.Plus/> Nuevo</button></div>}/>
     
     {Object.keys(budgets||{}).length>0&&(<div style={{display:"flex",gap:10,marginBottom:14,overflowX:"auto",paddingBottom:4}}>{Object.entries(budgets).map(([cat,lim])=>{const spent=cur.filter(t=>t.category===cat&&t.type==="expense").reduce((s,t)=>s+t.amount,0);const pct=clamp(spent/lim*100,0,200);return<div key={cat} style={{background:T.raised,border:`1px solid ${pct>=100?T.red:pct>=80?T.amber:T.border}`,borderRadius:10,padding:"10px 14px",minWidth:150,flexShrink:0}}><div style={{fontSize:10,color:T.muted,marginBottom:4}}>{cat}</div><div className="mono" style={{fontSize:13,color:pct>=100?T.red:pct>=80?T.amber:T.white}}>{fmt(spent)}/{fmt(lim)}</div><div className="prog" style={{marginTop:6}}><div className="progf" style={{width:`${clamp(pct,0,100)}%`,background:pct>=100?T.red:pct>=80?T.amber:T.teal}}/></div></div>;})}</div>)}
     <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}><select className="inp" style={{width:"auto",minWidth:100}} value={filter.month} onChange={e=>setFilter(f=>({...f,month:e.target.value}))}><option value="">Todos los meses</option>{months.map(m=><option key={m}>{m}</option>)}</select><select className="inp" style={{width:"auto"}} value={filter.type} onChange={e=>setFilter(f=>({...f,type:e.target.value}))}><option value="">Todos</option><option value="expense">Gastos</option><option value="income">Ingresos</option></select><select className="inp" style={{width:"auto",minWidth:100}} value={filter.cat} onChange={e=>setFilter(f=>({...f,cat:e.target.value}))}><option value="">Categorías</option>{CATS.map(c=><option key={c}>{c}</option>)}</select>{(filter.month||filter.type||filter.cat)&&<button className="btn bg bsm" onClick={()=>setFilter({month:"",type:"",cat:""})}>Limpiar</button>}</div>
@@ -1147,7 +1185,7 @@ function Goals({state,update,notify}){
   const addSav=g=>{const a=Math.abs(px(addAmt))*(addCur==="USD"?usdRate:1);if(!a)return notify("Ingresá un monto","err");update({goals:goals.map(gl=>gl.id===g.id?{...gl,saved:gl.saved+a}:gl),transactions:[...transactions,{id:`s_${uid()}`,date:todayISO(),description:`Ahorro: ${g.name}`,amount:a,type:"expense",category:"💰 Ahorro",currency:"ARS",source:"manual"}]});setAT(null);setAA("");setAC("ARS");notify(`+${fmt(a)} sumado ✓`);};
   const liquidar=(g,linkedHoldings,investedValue)=>{if(!window.confirm(`¿Liquidar "${g.name}"? Se venderán las inversiones vinculadas y se registrará el gasto.`))return;const newTxs=[...transactions];if(investedValue>0)newTxs.push({id:`liq_i_${uid()}`,date:todayISO(),description:`Venta activos por meta: ${g.name}`,amount:investedValue,type:"income",category:"💰 Ahorro",currency:"ARS"});newTxs.push({id:`liq_e_${uid()}`,date:todayISO(),description:`Meta cumplida: ${g.name}`,amount:g.target,type:"expense",category:"🎬 Ocio",currency:"ARS"});const holdingIds=linkedHoldings.map(h=>h.id);const newHoldings=holdings.filter(h=>!holdingIds.includes(h.id));const newGoals=goals.map(x=>x.id===g.id?{...x,saved:x.target}:x);update({transactions:newTxs,holdings:newHoldings,goals:newGoals});notify(`¡Meta "${g.name}" alcanzada! 🎉`);};
 
-  return(<div className="up"><PH title="Metas" sub={`${goals.filter(g=>g.saved<g.target).length} activas`} right={<button className="btn bl" onClick={()=>setSF(true)}><ic.Plus/> Nueva meta</button>}/>
+  return(<div className="up"><PH title="Metas" sub={`${goals.filter(g=>g.saved<g.target).length} activas`} right={<button data-tour-target="new-goal-btn" className="btn bl" onClick={()=>setSF(true)}><ic.Plus/> Nueva meta</button>}/>
   {disponible>0&&perGoal.length>0&&(<div className="card" style={{marginBottom:16,borderColor:"rgba(200,255,87,.18)"}}><div style={{fontSize:13,fontWeight:700,marginBottom:10}}>Plan de ahorro recomendado</div><div style={{fontSize:12,color:T.mid,marginBottom:12}}>Tenés <span className="mono" style={{color:T.lime}}>{fmt(disponible)}</span> disponibles este mes. Distribución sugerida:</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:10}}>{perGoal.map(g=>(<div key={g.id} style={{background:T.raised,borderRadius:10,padding:"12px 14px",border:`1px solid ${g.feasible?T.border:"rgba(255,184,48,.3)"}`}}><div style={{fontSize:12,marginBottom:6}}>{g.icon} {g.name}</div><div className="mono" style={{fontSize:18,fontWeight:600,color:g.feasible?T.lime:T.amber}}>{fmt(g.needed)}<span style={{fontSize:11,fontWeight:400,color:T.muted}}>/mes</span></div><div style={{fontSize:10,color:T.muted,marginTop:3}}>{g.months} mes{g.months>1?"es":""} · Falta {fmt(g.rem)}</div>{!g.feasible&&<div style={{fontSize:10,color:T.amber,marginTop:4}}>Ajustá el plazo o el monto</div>}</div>))}</div></div>)}
   {goals.length===0?<div className="card" style={{textAlign:"center",padding:"64px 32px"}}><div style={{width:64,height:64,margin:"0 auto 16px",background:"rgba(204,255,71,.08)",borderRadius:20,display:"flex",alignItems:"center",justifyContent:"center",color:T.lime}}><svg width="32" height="32" viewBox="0 0 20 20" fill="none"><path d="M10 3C7 3 5 5.5 5 8.5c0 4 3.5 6.5 5 8 1.5-1.5 5-4 5-8C15 5.5 13 3 10 3z" stroke="currentColor" strokeWidth="1.4"/><path d="M10 3V1M10 1l1.5 1H10m0 0H8.5L10 1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/><circle cx="10" cy="8" r="1.5" fill="currentColor" opacity=".5"/></svg></div><div style={{fontSize:20,fontWeight:700,marginBottom:8}}>Sin metas todavía</div><div style={{fontSize:13,color:T.muted,marginBottom:20}}>Creá una meta y empezá a trackear tu progreso</div><button className="btn bl" onClick={()=>setSF(true)}><ic.Plus/> Crear meta</button></div>:
   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:14}}>{goals.map(g=>{
@@ -1157,7 +1195,7 @@ function Goals({state,update,notify}){
     const pct=clamp((realSaved/g.target)*100,0,100);
     const rem=g.target-realSaved;
     const days=g.deadline?Math.ceil((new Date(g.deadline)-NOW)/864e5):null;const months=days&&days>0?Math.ceil(days/30):null;const needed=months?rem/months:null;const pc=pct>=100?T.lime:pct>=60?T.blue:T.amber;
-    return<div key={g.id} className="card up"><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}><div style={{display:"flex",gap:10,alignItems:"center"}}><span style={{fontSize:28}}>{g.icon}</span><div><div style={{fontSize:14,fontWeight:700}}>{g.name}</div>{g.deadline&&<div style={{fontSize:10,color:T.muted,marginTop:2}}><span style={{display:"inline-flex",color:T.muted,verticalAlign:"middle",marginRight:3}}><IcCalendar/></span>{g.deadline}{days!==null&&` · ${days>0?days+"d":"¡Hoy!"}`}</div>}</div></div><button className="btn bd bsm" onClick={()=>{update({goals:goals.filter(x=>x.id!==g.id)});notify("Eliminado","err");}}><ic.Trash/></button></div><div className="g2" style={{marginBottom:12}}><div style={{background:T.raised,borderRadius:10,padding:"10px 12px"}}><div style={{fontSize:10,color:T.muted,marginBottom:3}}>Ahorrado {investedValue>0?"+ Inv.":""}</div><div className="mono" style={{fontSize:15,color:pc}}>{fmt(realSaved)}</div></div><div style={{background:T.raised,borderRadius:10,padding:"10px 12px"}}><div style={{fontSize:10,color:T.muted,marginBottom:3}}>Objetivo</div><div className="mono" style={{fontSize:15}}>{fmt(g.target)}</div></div></div><div style={{marginBottom:12}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{fontSize:11,color:T.muted}}>Progreso</span><span className="mono" style={{fontSize:11,color:pc,fontWeight:600}}>{pct.toFixed(1)}%</span></div><div className="prog" style={{height:8}}><div className="progf" style={{width:`${pct}%`,background:pct>=100?`linear-gradient(90deg,${T.lime},${T.teal})`:pct>=60?T.blue:T.amber}}/></div></div>{needed&&needed>0&&<div style={{background:"rgba(77,158,255,.07)",border:`1px solid rgba(77,158,255,.15)`,borderRadius:8,padding:"8px 10px",fontSize:11,color:T.blue,marginBottom:12}}><span style={{display:"inline-flex",color:T.blue,marginRight:4,verticalAlign:"middle"}}><ic.Bolt/></span>Guardá <span className="mono">{fmt(needed)}</span>/mes para llegar en {months} mes{months>1?"es":""}</div>}{pct>=100?<div style={{display:"flex",gap:8}}><div style={{flex:1,background:"rgba(200,255,87,.08)",border:`1px solid rgba(200,255,87,.25)`,borderRadius:10,padding:10,textAlign:"center",fontSize:13,color:T.lime,fontWeight:600}}>Alcanzada ✓</div>{g.saved<g.target&&<button className="btn bl" onClick={()=>liquidar(g,linkedHoldings,investedValue)}>Liquidar</button>}</div>:addTo===g.id?<div style={{display:"flex",gap:8,flexWrap:"wrap"}}><input className="inp" style={{flex:1,fontSize:12,minWidth:80}} placeholder="Monto" value={addAmt} onChange={e=>setAA(e.target.value)} autoFocus onKeyDown={e=>e.key==="Enter"&&addSav(g)}/><select className="inp" style={{width:70,fontSize:12,padding:"10px 6px"}} value={addCur} onChange={e=>setAC(e.target.value)}><option>ARS</option><option>USD</option></select><button className="btn bl bsm" onClick={()=>addSav(g)}>+</button><button className="btn bg bsm" onClick={()=>{setAT(null);setAA("");}}>✕</button></div>:<div style={{display:"flex",gap:8,flexDirection:"column"}}><button className="btn bg" style={{width:"100%",justifyContent:"center"}} onClick={()=>setAT(g.id)}><ic.Plus/> Agregar ahorro</button>{holdings.length>0&&<button className="btn bg" style={{width:"100%",justifyContent:"center",color:T.blue,borderColor:"rgba(77,158,255,.3)"}} onClick={()=>setLG(g.id)}><ic.Link/> Vincular inversión</button>}</div>}</div>;})}
+    return<div key={g.id} className="card up"><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}><div style={{display:"flex",gap:10,alignItems:"center"}}><span style={{fontSize:28}}>{g.icon}</span><div><div style={{fontSize:14,fontWeight:700}}>{g.name}</div>{g.deadline&&<div style={{fontSize:10,color:T.muted,marginTop:2}}><span style={{display:"inline-flex",color:T.muted,verticalAlign:"middle",marginRight:3}}><IcCalendar/></span>{g.deadline}{days!==null&&` · ${days>0?days+"d":"¡Hoy!"}`}</div>}</div></div><button className="btn bd bsm" onClick={()=>{update({goals:goals.filter(x=>x.id!==g.id)});notify("Eliminado","err");}}><ic.Trash/></button></div><div className="g2" style={{marginBottom:12}}><div style={{background:T.raised,borderRadius:10,padding:"10px 12px"}}><div style={{fontSize:10,color:T.muted,marginBottom:3}}>Ahorrado {investedValue>0?"+ Inv.":""}</div><div className="mono" style={{fontSize:15,color:pc}}>{fmt(realSaved)}</div></div><div style={{background:T.raised,borderRadius:10,padding:"10px 12px"}}><div style={{fontSize:10,color:T.muted,marginBottom:3}}>Objetivo</div><div className="mono" style={{fontSize:15}}>{fmt(g.target)}</div></div></div><div style={{marginBottom:12}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{fontSize:11,color:T.muted}}>Progreso</span><span className="mono" style={{fontSize:11,color:pc,fontWeight:600}}>{pct.toFixed(1)}%</span></div><div className="prog" style={{height:8}}><div className="progf" style={{width:`${pct}%`,background:pct>=100?`linear-gradient(90deg,${T.lime},${T.teal})`:pct>=60?T.blue:T.amber}}/></div></div>{needed&&needed>0&&<div style={{background:"rgba(77,158,255,.07)",border:`1px solid rgba(77,158,255,.15)`,borderRadius:8,padding:"8px 10px",fontSize:11,color:T.blue,marginBottom:12}}><span style={{display:"inline-flex",color:T.blue,marginRight:4,verticalAlign:"middle"}}><ic.Bolt/></span>Guardá <span className="mono">{fmt(needed)}</span>/mes para llegar en {months} mes{months>1?"es":""}</div>}{pct>=100?<div style={{display:"flex",gap:8}}><div style={{flex:1,background:"rgba(200,255,87,.08)",border:`1px solid rgba(200,255,87,.25)`,borderRadius:10,padding:10,textAlign:"center",fontSize:13,color:T.lime,fontWeight:600}}>Alcanzada ✓</div>{g.saved<g.target&&<button className="btn bl" onClick={()=>liquidar(g,linkedHoldings,investedValue)}>Liquidar</button>}</div>:addTo===g.id?<div style={{display:"flex",gap:8,flexWrap:"wrap"}}><input className="inp" style={{flex:1,fontSize:12,minWidth:80}} placeholder="Monto" value={addAmt} onChange={e=>setAA(e.target.value)} autoFocus onKeyDown={e=>e.key==="Enter"&&addSav(g)}/><select className="inp" style={{width:70,fontSize:12,padding:"10px 6px"}} value={addCur} onChange={e=>setAC(e.target.value)}><option>ARS</option><option>USD</option></select><button className="btn bl bsm" onClick={()=>addSav(g)}>+</button><button className="btn bg bsm" onClick={()=>{setAT(null);setAA("");}}>✕</button></div>:<div style={{display:"flex",gap:8,flexDirection:"column"}}><button className="btn bg" style={{width:"100%",justifyContent:"center"}} onClick={()=>setAT(g.id)}><ic.Plus/> Agregar ahorro</button>{holdings.length>0&&<button className="btn bg" style={{width:"100%",justifyContent:"center",color:T.blue,borderColor:"rgba(77,158,255,.3)"}} data-tour-target="vincular-inv-btn" onClick={()=>setLG(g.id)}><ic.Link/> Vincular inversión</button>}</div>}</div>;})}
   </div>}
   {linkGoal&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setLG(null)}><div className="modal" style={{width:420}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}><h2 style={{fontSize:17,fontWeight:700}}>🔗 Vincular inversión a meta</h2><button className="btn bg bsm" onClick={()=>setLG(null)}><ic.X/></button></div><div style={{fontSize:12,color:T.mid,marginBottom:14}}>Seleccioná una inversión para asociarla a esta meta. Su valor de mercado contará hacia el progreso.</div>{holdings.filter(h=>!h.goalId).length===0?(<div style={{color:T.muted,fontSize:12,textAlign:"center",padding:"20px 0"}}>No hay inversiones disponibles</div>):(holdings.filter(h=>!h.goalId).map(h=>(<div key={h.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:T.raised,borderRadius:10,padding:"12px 14px",marginBottom:8,border:`1px solid ${T.border}`}}><div><div style={{fontSize:13,fontWeight:600}}>{h.ticker||h.name} <span style={{fontSize:10,color:T.muted}}>{h.type}</span></div><div className="mono" style={{fontSize:11,color:T.blue,marginTop:2}}>{fmt(calcHoldingValueArs(h,marketPrices,usdRate).curArs)}</div></div><button className="btn bl bsm" onClick={()=>{update({holdings:holdings.map(x=>x.id===h.id?{...x,goalId:linkGoal}:x)});setLG(null);notify("Inversión vinculada ✓");}}>Vincular</button></div>)))}</div></div>}
     {sf&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setSF(false)}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h2 style={{fontSize:18,fontWeight:700}}>Nueva meta</h2><button className="btn bg bsm" onClick={()=>setSF(false)}><ic.X/></button></div><div style={{display:"flex",flexDirection:"column",gap:12}}><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:7}}>Ícono</label><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{ICONS.map(ic2=><button key={ic2} onClick={()=>setForm(f=>({...f,icon:ic2}))} style={{width:36,height:36,fontSize:18,borderRadius:8,border:`1.5px solid ${form.icon===ic2?T.lime:T.border}`,background:form.icon===ic2?"rgba(200,255,87,.1)":T.raised,cursor:"pointer"}}>{ic2}</button>)}</div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Nombre</label><input className="inp" placeholder="ej: Viaje a Europa" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))}/></div><div className="g3"><div style={{gridColumn:"1/3"}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Monto objetivo</label><input className="inp" placeholder="500000" value={form.target} onChange={e=>setForm(f=>({...f,target:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda</label><select className="inp" value={form.currency} onChange={e=>setForm(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select></div></div><div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Ya tengo</label><input className="inp" placeholder="0" value={form.saved} onChange={e=>setForm(f=>({...f,saved:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha límite</label><input type="date" className="inp" value={form.deadline} onChange={e=>setForm(f=>({...f,deadline:e.target.value}))}/></div></div><button className="btn bl" style={{justifyContent:"center"}} onClick={addG}>Crear meta</button></div></div></div>}</div>);
@@ -1346,12 +1384,12 @@ function Investments({state,update,notify}){
   return(
   <div className="up">
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:8}}><div><h1 style={{fontSize:24,fontWeight:800,letterSpacing:"-1px"}}>Inteligencia de Inversiones</h1><div style={{fontSize:12,color:T.muted,marginTop:4}}>Perfil: <span style={{color:T.lime,fontWeight:600}}>{riskProfile?.risk||"no configurado"}</span></div></div></div>
-    <div className="tabbar" style={{marginBottom:18}}>{[{id:"portfolio",l:<><IcPortfolio/> Portfolio ({holdings.length})</>},{id:"scanner",l:<><IcScanner/> Scanner IA</>},{id:"manual",l:<><IcSearch/> Buscar Activo</>},{id:"comparador",l:<><IcCompare/> Comparador</>},{id:"saved",l:<><IcSaved/> Guardados</>}].map(t=>(<button key={t.id} className={`tab${tab===t.id?" on":""}`} onClick={()=>setTab(t.id)}>{t.l}</button>))}</div>
+    <div className="tabbar" style={{marginBottom:18}}>{[{id:"portfolio",l:<><IcPortfolio/> Portfolio ({holdings.length})</>},{id:"scanner",l:<><IcScanner/> Scanner IA</>},{id:"manual",l:<><IcSearch/> Buscar Activo</>},{id:"comparador",l:<><IcCompare/> Comparador</>},{id:"saved",l:<><IcSaved/> Guardados</>}].map(t=>(<button key={t.id} data-tour-target={t.target||undefined} className={`tab${tab===t.id?" on":""}`} onClick={()=>setTab(t.id)}>{t.l}</button>))}</div>
 
     {tab==="portfolio"&&<div>
       <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>{[{l:"Invertido",v:fmt(portfolioData.gInvArs),c:T.blue,i:<IcInvested/>},{l:"Valor Actual",v:fmt(portfolioData.gCurArs),c:T.lime,i:<IcPortfolio/>},{l:"P&L Total",v:`${portfolioData.gPnlArs>=0?"+":""}${fmt(portfolioData.gPnlArs)}`,c:portfolioData.gPnlArs>=0?T.teal:T.coral,i:<IcBalance/>}].map((k,i)=><div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase"}}>{k.l}</span><span>{k.i}</span></div><div className="mono" style={{fontSize:16,fontWeight:600,color:k.c}}>{k.v}</div></div>)}</div>
       <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
-        <button className="btn bl" onClick={()=>setSHF(true)}><ic.Plus/> Agregar inversión</button>
+        <button data-tour-target="add-holding-btn" className="btn bl" onClick={()=>setSHF(true)}><ic.Plus/> Agregar inversión</button>
         <button className="btn bg" onClick={refreshPortfolio} disabled={refreshingId==="all"}>{refreshingId==="all"?<><Dots/> Sincronizando...</>:<><ic.Refresh/> Sincronizar Activos</>}</button>
       </div>
       
@@ -1788,7 +1826,7 @@ function Import({ state, update, notify }) {
   return (<div className="up"><PH title="Importar datos" sub="Imagen · PDF · CSV · Texto pegado" />
     <div className="tabbar" style={{ marginBottom: 18 }}>{[{ id: "image", l: <><IcImage/> Imagen</> }, { id: "pdf", l: <><IcPdf/> PDF</> }, { id: "csv", l: <><IcCsv/> CSV</> }, { id: "paste", l: <><IcText/> Texto</> }, { id: "guide", l: <><IcGuide/> Guía</> }].map(t => (<button key={t.id} className={`tab${tab === t.id ? " on" : ""}`} onClick={() => setTab(t.id)}>{t.l}</button>))}</div>
 
-    {tab === "image" && <div><div style={{ background: "rgba(167,139,250,.06)", border: `1px solid rgba(167,139,250,.2)`, borderRadius: 12, padding: "12px 16px", marginBottom: 14, fontSize: 12, color: T.purple }}><span style={{display:"flex",color:T.purple,marginRight:4}}><ic.Bolt/></span> Subí un screenshot de Mercado Pago, tu banco, o resumen de tarjeta de crédito. La IA detectará fechas y montos automáticamente.</div><div className={`imgdrop${over ? " ov2" : ""}`} onDragOver={e => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={e => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files[0]; if (f) handleImgFile(f); }} onClick={() => imgRef.current?.click()}>{imgSrc ? <img src={imgSrc} alt="preview" style={{ maxWidth: "100%", maxHeight: 300, borderRadius: 8, objectFit: "contain" }} /> : <><div style={{width:52,height:52,borderRadius:16,background:"rgba(184,155,255,.1)",border:"1px solid rgba(184,155,255,.2)",display:"flex",alignItems:"center",justifyContent:"center",color:"#B89BFF",marginBottom:4}}><IcImage/></div><div style={{ fontSize: 15, fontWeight: 600, color: T.mid }}>Arrastrá o hacé clic para subir</div><div style={{ fontSize: 12, color: T.muted }}>Screenshots de tu banco, billetera virtual o resumen de tarjeta</div></>}<input ref={imgRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => e.target.files[0] && handleImgFile(e.target.files[0])} /></div>{imgSrc && <div style={{ display: "flex", gap: 8, marginTop: 10 }}><button className="btn bl" style={{ flex: 1, justifyContent: "center" }} onClick={extractImg} disabled={extracting === "loading"}>{extracting === "loading" ? <><Dots /> Extrayendo...</> : <><IcScanner/> Extraer con IA</>}</button><button className="btn bg" onClick={() => { setImgSrc(null); setExt(null); setEE(null); }}>Cambiar</button></div>}{extractErr && <div style={{ marginTop: 10, background: "rgba(255,77,106,.08)", border: `1px solid rgba(255,77,106,.25)`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: T.red }}>{extractErr}</div>}</div>}
+    {tab === "image" && <div><div style={{ background: "rgba(167,139,250,.06)", border: `1px solid rgba(167,139,250,.2)`, borderRadius: 12, padding: "12px 16px", marginBottom: 14, fontSize: 12, color: T.purple }}><span style={{display:"flex",color:T.purple,marginRight:4}}><ic.Bolt/></span> Subí un screenshot de Mercado Pago, tu banco, o resumen de tarjeta de crédito. La IA detectará fechas y montos automáticamente.</div><div data-tour-target="import-drop" className={`imgdrop${over ? " ov2" : ""}`} onDragOver={e => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={e => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files[0]; if (f) handleImgFile(f); }} onClick={() => imgRef.current?.click()}>{imgSrc ? <img src={imgSrc} alt="preview" style={{ maxWidth: "100%", maxHeight: 300, borderRadius: 8, objectFit: "contain" }} /> : <><div style={{width:52,height:52,borderRadius:16,background:"rgba(184,155,255,.1)",border:"1px solid rgba(184,155,255,.2)",display:"flex",alignItems:"center",justifyContent:"center",color:"#B89BFF",marginBottom:4}}><IcImage/></div><div style={{ fontSize: 15, fontWeight: 600, color: T.mid }}>Arrastrá o hacé clic para subir</div><div style={{ fontSize: 12, color: T.muted }}>Screenshots de tu banco, billetera virtual o resumen de tarjeta</div></>}<input ref={imgRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => e.target.files[0] && handleImgFile(e.target.files[0])} /></div>{imgSrc && <div style={{ display: "flex", gap: 8, marginTop: 10 }}><button className="btn bl" style={{ flex: 1, justifyContent: "center" }} onClick={extractImg} disabled={extracting === "loading"}>{extracting === "loading" ? <><Dots /> Extrayendo...</> : <><IcScanner/> Extraer con IA</>}</button><button className="btn bg" onClick={() => { setImgSrc(null); setExt(null); setEE(null); }}>Cambiar</button></div>}{extractErr && <div style={{ marginTop: 10, background: "rgba(255,77,106,.08)", border: `1px solid rgba(255,77,106,.25)`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: T.red }}>{extractErr}</div>}</div>}
 
     {tab === "pdf" && <div>
       <div style={{ background: "rgba(77,158,255,.06)", border: `1px solid rgba(77,158,255,.2)`, borderRadius: 12, padding: "12px 16px", marginBottom: 14, fontSize: 12, color: T.blue }}>📄 Subí el extracto bancario o resumen de tarjeta en PDF. La IA procesa cada página automáticamente.</div>
