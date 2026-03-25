@@ -632,30 +632,43 @@ function TourGuide({setView}){
   const dismiss=useCallback(()=>{setTip(null);localStorage.removeItem(LS_KEY);},[]);
 
   // Animate a pulse ring on the target element, then click it if it's a button
-  const triggerTarget=useCallback((targetId,sectionId)=>{
-    const el=document.querySelector(`[data-tour-target="${targetId}"]`);
+  const triggerTarget=useCallback((targetId,sectionId,fallbackTarget,fallbackSection)=>{
+    // Try specific target, then fallback target, then section nav item
+    let el=document.querySelector(`[data-tour-target="${targetId}"]`);
+    if(!el&&fallbackTarget){
+      el=document.querySelector(`[data-tour-target="${fallbackTarget}"]`);
+      // If fallback is in a different section, navigate there first
+      if(el&&fallbackSection&&fallbackSection!==sectionId){
+        setView(fallbackSection);
+        setTimeout(()=>{
+          const el2=document.querySelector(`[data-tour-target="${fallbackTarget}"]`);
+          if(el2)doTrigger(el2);
+        },200);
+        return;
+      }
+    }
+    if(!el) el=document.querySelector(`[data-tour-target="${sectionId}"]`);
     if(!el)return;
+    doTrigger(el);
+  },[]);
+
+  const doTrigger=useCallback((el)=>{
     const r=el.getBoundingClientRect();
-    // Create pulse ring overlay
     const ring=document.createElement("div");
     ring.className="tour-pulse";
     ring.style.cssText=`left:${r.left-4}px;top:${r.top-4}px;width:${r.width+8}px;height:${r.height+8}px;`
-      +`border:2px solid var(--ac);border-radius:${getComputedStyle(el).borderRadius||"12px"};`
-      +`box-shadow:0 0 0 0 rgba(var(--ac-rgb),.6)`;
+      +`border:2px solid var(--ac);border-radius:${getComputedStyle(el).borderRadius||"12px"}`;
     document.body.appendChild(ring);
     setTimeout(()=>ring.remove(), 800);
-    // Scroll element into view
     el.scrollIntoView({behavior:"smooth",block:"nearest"});
-    // If it's interactive, click it after the animation
     const tag=el.tagName.toLowerCase();
     const isClickable=tag==="button"||tag==="a"||el.getAttribute("role")==="button";
     if(isClickable){
       setTimeout(()=>el.click(), 400);
     } else {
-      // For cards/sections, just add a brief highlight
       const prev=el.style.outline;
       el.style.outline=`2px solid var(--ac)`;
-      el.style.outlineOffset="2px";
+      el.style.outlineOffset="3px";
       setTimeout(()=>{el.style.outline=prev;el.style.outlineOffset="";},900);
     }
   },[]);
@@ -680,7 +693,7 @@ function TourGuide({setView}){
               const targetId=mapped.target||mapped.section;
               const p=getAnchor(targetId);
               setPos(p);
-              if(mapped.target) triggerTarget(mapped.target, mapped.section);
+              if(mapped.target) triggerTarget(mapped.target, mapped.section, mapped.fallbackTarget, mapped.fallbackSection);
             }, 180);
           }else setTip(null);
         })
@@ -744,12 +757,11 @@ function TourGuide({setView}){
       <div style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0,alignItems:"stretch"}}>
         <button onClick={()=>{
   setView(tip.section);
-  // Wait for section to render, then anchor tooltip and trigger target
   setTimeout(()=>{
     const targetId=tip.target||tip.section;
     const p=getAnchor(targetId);
     setPos(p);
-    if(tip.target) triggerTarget(tip.target, tip.section);
+    if(tip.target) triggerTarget(tip.target, tip.section, tip.fallbackTarget, tip.fallbackSection);
   }, 180);
 }}
           style={{background:`linear-gradient(135deg,var(--ac),var(--acd))`,color:"#09080A",
@@ -774,14 +786,14 @@ const SLIDE_MAP = {
   4:   { section:"dashboard",    target:"kpi-balance",       tip:"Tu balance libre es el número que manda todas las decisiones del mes.", btn:"Ver balance" },
   5:   { section:"transactions", target:"presupuestos-btn",  tip:"Fijá un límite por categoría. La app te avisa antes de que te pases.", btn:"Ver presupuestos" },
   6:   { section:"transactions", target:"recurrentes-btn",   tip:"Tus recurrentes activos están acá. Podés pausar los que no usás.", btn:"Ver recurrentes" },
-  "6b":{ section:"import",       target:"import-drop",       tip:"Subí acá un screenshot o CSV de tu banco.", btn:"Importar" },
-  "6c":{ section:"dashboard",    target:"resumen-ia",        tip:"Generá tu resumen semanal — 4 cards con el análisis de tu semana.", btn:"Generar resumen" },
+  "6b":{ section:"import",       target:"import-image-tab",  tip:"Subí un screenshot o CSV de tu banco aquí. de tu banco.", btn:"Importar" },
+  "6c":{ section:"dashboard",    target:"generar-resumen",   tip:"Generá tu resumen semanal — 4 cards con el análisis de tu semana.", btn:"Generar resumen" },
   7:   { section:"dashboard",    target:null,                tip:null },
   8:   { section:"dashboard",    target:null,                tip:null },
   9:   { section:"dashboard",    target:null,                tip:null },
   10:  { section:"investments",  target:"add-holding-btn",   tip:"Tocá acá para cargar tu FCI o plazo fijo.", btn:"Agregar inversión" },
-  "10b":{ section:"dashboard",  target:"currency-toggle",   tip:"Cambiá entre ARS y USD — todos los números se convierten automáticamente.", btn:"Ver toggle" },
-  "10c":{ section:"goals",       target:"vincular-inv-btn",  tip:"Vincular una inversión a tu meta hace que su valor cuente en el progreso.", btn:"Ir a Metas" },
+  "10b":{ section:"dashboard",  target:"currency-usd",      tip:"Cambiá a USD — todos los números se convierten automáticamente. — todos los números se convierten automáticamente.", btn:"Ver toggle" },
+  "10c":{ section:"goals",       target:"vincular-inv-btn",  tip:"Vincular una inversión a tu meta hace que su valor cuente en el progreso.", btn:"Ir a Metas", fallbackTarget:"add-holding-btn", fallbackSection:"investments" },
   11:  { section:"analytics",    target:"score-card",        tip:"Tu Score Financiero resume tu situación en un número. Tocá cada barra.", btn:"Ver score" },
   12:  { section:"investments",  target:"scanner-tab",       tip:"El Scanner IA encuentra oportunidades adaptadas a tu perfil.", btn:"Ver scanner" },
   13:  { section:"dashboard",    target:null,                tip:"Ya tenés el sistema armado. Ahora es consistencia.", btn:"Ver dashboard" },
@@ -867,14 +879,14 @@ export default function App(){
     
     <div data-tour-target="currency-toggle" style={{display:"flex", background:T.bg, borderRadius:8, padding:3, marginBottom:12}}>
       {[{id:"oficial",l:"Oficial"},{id:"mep",l:"MEP"},{id:"blue",l:"Blue"}].map(t=>(
-        <button key={t.id} onClick={()=>{update({usdType: t.id, usdRate: state.usdRates?.[t.id] || state.usdRate});}} style={{flex:1, padding:"6px 0", fontSize:10, fontWeight:600, color:state.usdType===t.id?"#09080A":T.muted, background:state.usdType===t.id?T.lime:"transparent", borderRadius:6, transition:"all .2s"}}>{t.l}</button>
+        <button key={t.id} onClick={()=>{update({usdType: t.id, usdRate: state.usdRates?.[t.id] || state.usdRate});}} data-tour-target={t.id==="mep"?"currency-usd":undefined} style={{flex:1, padding:"6px 0", fontSize:10, fontWeight:600, color:state.usdType===t.id?"#09080A":T.muted, background:state.usdType===t.id?T.lime:"transparent", borderRadius:6, transition:"all .2s"}}>{t.l}</button>
       ))}
     </div>
 
     <div className="mono" style={{fontSize:24,fontWeight:600,color:currAccent.accent,textAlign:"center"}}>{fARS(state.usdRate)}</div>
     
     <div style={{display:"flex",gap:6,marginTop:14}}>
-      {["ARS","USD"].map(c=>(<button key={c} onClick={()=>update({displayCurrency:c})} style={{flex:1,padding:"6px 0",borderRadius:8,fontSize:10,fontWeight:600,border:`1px solid ${state.displayCurrency===c?(c==="USD"?"rgba(91,207,184,.4)":"rgba(204,255,71,.35)"):T.border}`,background:state.displayCurrency===c?(c==="USD"?"rgba(91,207,184,.1)":"rgba(204,255,71,.08)"):T.surface,color:state.displayCurrency===c?(c==="USD"?"#5BCFB8":T.lime):T.muted,cursor:"pointer",transition:"all .2s"}}>{c}</button>))}
+      {["ARS","USD"].map(c=>(<button key={c} onClick={()=>update({displayCurrency:c})} style={{flex:1,padding:"6px 0",borderRadius:8,fontSize:10,fontWeight:600,data-tour-target={c==="USD"?"toggle-usd":undefined} border:`1px solid ${state.displayCurrency===c?(c==="USD"?"rgba(91,207,184,.4)":"rgba(204,255,71,.35)"):T.border}`,background:state.displayCurrency===c?(c==="USD"?"rgba(91,207,184,.1)":"rgba(204,255,71,.08)"):T.surface,color:state.displayCurrency===c?(c==="USD"?"#5BCFB8":T.lime):T.muted,cursor:"pointer",transition:"all .2s"}}>{c}</button>))}
     </div>
   </div>
   
@@ -985,7 +997,7 @@ function Dashboard({state,update,notify,setView}){
           {weeklyInsightDate&&<div style={{fontSize:10,color:T.muted}}>{weeklyInsightDate}</div>}
         </div>
       </div>
-      <button className="btn bg bsm" onClick={refreshInsight} disabled={loadingIns}>
+      <button data-tour-target="generar-resumen" className="btn bg bsm" onClick={refreshInsight} disabled={loadingIns}>
         {loadingIns?<Dots/>:<><ic.Refresh/>{weeklyInsight?"Actualizar":"Generar"}</>}
       </button>
     </div>
@@ -1871,7 +1883,7 @@ function Import({ state, update, notify }) {
   };
 
   return (<div className="up"><PH title="Importar datos" sub="Imagen · PDF · CSV · Texto pegado" />
-    <div className="tabbar" style={{ marginBottom: 18 }}>{[{ id: "image", l: <><IcImage/> Imagen</>, target:"import-drop" }, { id: "pdf", l: <><IcPdf/> PDF</> }, { id: "csv", l: <><IcCsv/> CSV</> }, { id: "paste", l: <><IcText/> Texto</> }, { id: "guide", l: <><IcGuide/> Guía</> }].map(t => (<button key={t.id} className={`tab${tab === t.id ? " on" : ""}`} onClick={() => setTab(t.id)}>{t.l}</button>))}</div>
+    <div className="tabbar" style={{ marginBottom: 18 }}>{[{ id: "image", l: <><IcImage/> Imagen</>, target:"import-image-tab" }, { id: "pdf", l: <><IcPdf/> PDF</> }, { id: "csv", l: <><IcCsv/> CSV</> }, { id: "paste", l: <><IcText/> Texto</> }, { id: "guide", l: <><IcGuide/> Guía</> }].map(t => (<button key={t.id} data-tour-target={t.target||undefined} className={`tab${tab === t.id ? " on" : ""}`} onClick={() => setTab(t.id)}>{t.l}</button>))}</div>
 
     {tab === "image" && <div><div style={{ background: "rgba(167,139,250,.06)", border: `1px solid rgba(167,139,250,.2)`, borderRadius: 12, padding: "12px 16px", marginBottom: 14, fontSize: 12, color: T.purple }}><span style={{display:"flex",color:T.purple,marginRight:4}}><ic.Bolt/></span> Subí un screenshot de Mercado Pago, tu banco, o resumen de tarjeta de crédito. La IA detectará fechas y montos automáticamente.</div><div data-tour-target="import-drop" className={`imgdrop${over ? " ov2" : ""}`} onDragOver={e => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={e => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files[0]; if (f) handleImgFile(f); }} onClick={() => imgRef.current?.click()}>{imgSrc ? <img src={imgSrc} alt="preview" style={{ maxWidth: "100%", maxHeight: 300, borderRadius: 8, objectFit: "contain" }} /> : <><div style={{width:52,height:52,borderRadius:16,background:"rgba(184,155,255,.1)",border:"1px solid rgba(184,155,255,.2)",display:"flex",alignItems:"center",justifyContent:"center",color:"#B89BFF",marginBottom:4}}><IcImage/></div><div style={{ fontSize: 15, fontWeight: 600, color: T.mid }}>Arrastrá o hacé clic para subir</div><div style={{ fontSize: 12, color: T.muted }}>Screenshots de tu banco, billetera virtual o resumen de tarjeta</div></>}<input ref={imgRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => e.target.files[0] && handleImgFile(e.target.files[0])} /></div>{imgSrc && <div style={{ display: "flex", gap: 8, marginTop: 10 }}><button className="btn bl" style={{ flex: 1, justifyContent: "center" }} onClick={extractImg} disabled={extracting === "loading"}>{extracting === "loading" ? <><Dots /> Extrayendo...</> : <><IcScanner/> Extraer con IA</>}</button><button className="btn bg" onClick={() => { setImgSrc(null); setExt(null); setEE(null); }}>Cambiar</button></div>}{extractErr && <div style={{ marginTop: 10, background: "rgba(255,77,106,.08)", border: `1px solid rgba(255,77,106,.25)`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: T.red }}>{extractErr}</div>}</div>}
 
@@ -1884,7 +1896,7 @@ function Import({ state, update, notify }) {
       {extractErr && <div style={{ marginTop: 10, background: "rgba(255,77,106,.08)", border: `1px solid rgba(255,77,106,.25)`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: T.red }}>{extractErr}</div>}
     </div>}
 
-    {tab === "csv" && <div><div className={`dz${over ? " ov2" : ""}`} onDragOver={e => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={e => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files[0]; if (f) handleCSV(f); }} onClick={() => csvRef.current?.click()}><div style={{width:52,height:52,borderRadius:16,background:"rgba(255,154,53,.08)",border:"1px solid rgba(255,154,53,.18)",display:"flex",alignItems:"center",justifyContent:"center",color:T.mango,marginBottom:8}}><IcCsv/></div><div style={{ fontSize: 15, fontWeight: 600, color: T.mid }}>Arrastrá un CSV</div><div style={{ fontSize: 12, color: T.muted }}>Compatible con Mercado Pago, bancos argentinos y exportaciones estándar</div><input ref={csvRef} type="file" accept=".csv,.txt" style={{ display: "none" }} onChange={e => e.target.files[0] && handleCSV(e.target.files[0])} /></div></div>}
+    {tab === "csv" && <div><div data-tour-target="import-csv-tab" className={`dz${over ? " ov2" : ""}`} onDragOver={e => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={e => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files[0]; if (f) handleCSV(f); }} onClick={() => csvRef.current?.click()}><div style={{width:52,height:52,borderRadius:16,background:"rgba(255,154,53,.08)",border:"1px solid rgba(255,154,53,.18)",display:"flex",alignItems:"center",justifyContent:"center",color:T.mango,marginBottom:8}}><IcCsv/></div><div style={{ fontSize: 15, fontWeight: 600, color: T.mid }}>Arrastrá un CSV</div><div style={{ fontSize: 12, color: T.muted }}>Compatible con Mercado Pago, bancos argentinos y exportaciones estándar</div><input ref={csvRef} type="file" accept=".csv,.txt" style={{ display: "none" }} onChange={e => e.target.files[0] && handleCSV(e.target.files[0])} /></div></div>}
 
     {tab === "paste" && <div><textarea className="inp" style={{ minHeight: 150 }} placeholder="Pegá acá el texto de tu app..." value={paste} onChange={e => setPaste(e.target.value)} /><button className="btn bl" style={{ marginTop: 10 }} onClick={doPaste} disabled={!paste.trim()}>Analizar texto</button></div>}
 
