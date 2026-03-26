@@ -231,6 +231,9 @@ const calcHoldingValueArs=(h,marketPrices={},usdRate=1)=>{
   return{invArs,curArs};
 };
 
+// Helper: total cash committed to a goal (deposits + named payments)
+const goalCash=g=>(g.saved||0)+(g.payments||g.milestones||[]).reduce((s,p)=>s+p.amount,0);
+
 const goalPlan=(goals,salaries,transactions,holdings=[],marketPrices={},usdRate=1)=>{
   const CUR=getCUR();const NOW=getNow();const salary=getSalaryTotal(salaries);
   const spent=transactions.filter(t=>gMonth(t.date)===CUR&&t.type==="expense").reduce((s,t)=>s+t.amount,0);
@@ -246,9 +249,6 @@ const goalPlan=(goals,salaries,transactions,holdings=[],marketPrices={},usdRate=
     return{id:g.id,name:g.name,icon:g.icon,needed,months,rem,feasible:needed<=disponible/Math.max(active.length,1)*1.2,couldUsePortfolio,portfolioCover:portfolioValue>0?Math.min(100,Math.round(portfolioValue/rem*100)):0};
   })};
 };
-
-// Helper: total cash committed to a goal (deposits + named payments)
-const goalCash=g=>(g.saved||0)+(g.payments||g.milestones||[]).reduce((s,p)=>s+p.amount,0);
 
 const healthScore=(txs,goals,holdings=[],salaries=[])=>{
   const CUR=getCUR();
@@ -1193,7 +1193,7 @@ function Dashboard({state,update,notify,setView}){
     </div>
   </div>);
 })()}</div></div>
-  <div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}><div className="card up d3"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Últimos movimientos</div>{recent.length===0?<div style={{color:T.muted,fontSize:13,textAlign:"center",padding:"20px 0"}}>Sin movimientos aún</div>:recent.map(t=>(<div key={t.id} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.ink}`}}><div style={{width:32,height:32,borderRadius:9,background:T.raised,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>{t.category?.split(" ")[0]||"💵"}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</div><div style={{fontSize:10,color:T.muted,marginTop:1}}>{t.date}</div></div><div className="mono" style={{fontSize:12,fontWeight:500,color:t.type==="income"?T.teal:T.red,flexShrink:0}}>{t.type==="income"?"+":"-"}{fmt(t.amount)}</div></div>))}</div><div style={{display:"flex",flexDirection:"column",gap:12}}><div className="card csm up d4"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><div style={{fontSize:12,fontWeight:600,color:T.mid}}>Metas activas</div><button className="btn bg bsm" style={{fontSize:10,padding:"4px 10px"}} onClick={()=>setView("goals")}>Ver →</button></div>{goals.filter(g=>g.saved<g.target).length===0?<div style={{color:T.muted,fontSize:12,textAlign:"center",padding:"10px 0"}}>Sin metas — <button onClick={()=>setView("goals")} style={{color:T.lime,background:"none",border:"none",cursor:"pointer",fontSize:12}}>Crear →</button></div>:
+  <div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}><div className="card up d3"><div style={{fontSize:12,fontWeight:600,color:T.mid,marginBottom:12}}>Últimos movimientos</div>{recent.length===0?<div style={{color:T.muted,fontSize:13,textAlign:"center",padding:"20px 0"}}>Sin movimientos aún</div>:recent.map(t=>(<div key={t.id} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.ink}`}}><div style={{width:32,height:32,borderRadius:9,background:T.raised,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>{t.category?.split(" ")[0]||"💵"}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</div><div style={{fontSize:10,color:T.muted,marginTop:1}}>{t.date}</div></div><div className="mono" style={{fontSize:12,fontWeight:500,color:t.type==="income"?T.teal:T.red,flexShrink:0}}>{t.type==="income"?"+":"-"}{fmt(t.amount)}</div></div>))}</div><div style={{display:"flex",flexDirection:"column",gap:12}}><div className="card csm up d4"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><div style={{fontSize:12,fontWeight:600,color:T.mid}}>Metas activas</div><button className="btn bg bsm" style={{fontSize:10,padding:"4px 10px"}} onClick={()=>setView("goals")}>Ver →</button></div>{goals.filter(g=>goalCash(g)<g.target).length===0?<div style={{color:T.muted,fontSize:12,textAlign:"center",padding:"10px 0"}}>Sin metas — <button onClick={()=>setView("goals")} style={{color:T.lime,background:"none",border:"none",cursor:"pointer",fontSize:12}}>Crear →</button></div>:
     
   /* FIX 3: La barra de Metas en el Dashboard ahora suma las inversiones vinculadas */
   goals.filter(g=>goalCash(g)<g.target).slice(0,4).map(g=>{
@@ -1892,7 +1892,7 @@ function Investments({state,update,notify}){
             <div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha Inicial *</label><input type="date" className="inp" value={hForm.buyDate} onChange={e=>setHF(f=>({...f,buyDate:e.target.value}))}/></div>
             {["plazo_fijo","bono"].includes(hForm.type)&&<div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha Vencimiento *</label><input type="date" className="inp" value={hForm.maturityDate} onChange={e=>setHF(f=>({...f,maturityDate:e.target.value}))}/></div>}
           </div>
-          <div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Vincular a Meta</label><select className="inp" value={hForm.goalId} onChange={e=>setHF(f=>({...f,goalId:e.target.value}))}><option value="">Ninguna</option>{goals.filter(g=>g.saved<g.target).map(g=><option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}</select></div>
+          <div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Vincular a Meta</label><select className="inp" value={hForm.goalId} onChange={e=>setHF(f=>({...f,goalId:e.target.value}))}><option value="">Ninguna</option>{goals.filter(g=>goalCash(g)<g.target).map(g=><option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}</select></div>
           <button className="btn bl" style={{justifyContent:"center",marginTop:10,width:"100%"}} onClick={addHolding}>✓ Guardar Inversión</button>
         </div></div>}
 
