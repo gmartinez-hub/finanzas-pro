@@ -129,17 +129,23 @@ async function autoCat(desc){const raw=await ai(`Transaction: "${desc}". Return 
 async function genWeeklyInsight(transactions, usdRate, portfolioValueArs=0, portfolioInvestedArs=0, holdings=[]){
   const now=Date.now();
   const w1=transactions.filter(t=>(now-new Date(t.date))<=7*864e5);
-  if(!w1.length)return null;
+  
+  // Eliminamos la línea: if(!w1.length)return null;
+  // Ahora la IA generará el resumen igual, felicitándote por no tener gastos recientes o enfocándose en tu portfolio/ahorro.
+
   const e1=w1.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
   const w2=transactions.filter(t=>{const d=now-new Date(t.date);return d>7*864e5&&d<=14*864e5;});
   const e2=w2.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
+  
   const cm={};
   w1.filter(t=>t.type==="expense").forEach(t=>{cm[t.category]=(cm[t.category]||0)+t.amount;});
   const topCat=Object.entries(cm).sort((a,b)=>b[1]-a[1])[0];
   const top3=Object.entries(cm).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([c,v])=>`${c}:${fARS(v)}`).join(", ");
+  
   const pnlArs=portfolioValueArs-portfolioInvestedArs;
   const pnlPct=portfolioInvestedArs>0?((pnlArs/portfolioInvestedArs)*100).toFixed(1):"0";
   const holdingsSummary=holdings.slice(0,3).map(h=>`${h.ticker||h.name}`).join(", ");
+  
   const raw=await ai(
     `Argentina personal finance coach. Data: last7d_expenses=${fARS(e1)}, prior_week=${fARS(e2)}, top_categories=[${top3}], top_cat_name="${topCat?topCat[0]:"N/A"}", top_cat_amount=${fARS(topCat?topCat[1]:0)}, portfolio_value=${fARS(portfolioValueArs)}, portfolio_invested=${fARS(portfolioInvestedArs)}, portfolio_pnl=${fARS(pnlArs)}, portfolio_pnl_pct=${pnlPct}%, holdings="${holdingsSummary}", usd_rate=${usdRate}, date=${todayISO()}.
 Generate EXACTLY 4 insight cards in Spanish. Return ONLY valid JSON:
@@ -152,6 +158,7 @@ Generate EXACTLY 4 insight cards in Spanish. Return ONLY valid JSON:
 Rules: be motivating not judgmental. Use real numbers from the data. If no portfolio data, make investment card about saving opportunity.`,
     "Friendly Argentine financial coach. Respond ONLY with valid JSON."
   );
+  
   if(!raw)return null;
   try{return JSON.parse(cleanJSON(raw));}catch{return null;}
 }
