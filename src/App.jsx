@@ -467,6 +467,10 @@ function Transactions({state,update,notify}){
   const [form,setForm]=useState({date:todayISO(),description:"",amount:"",type:"expense",category:"❓ Otros",currency:"ARS",isRecurring:false});
   const [editCat,setEC]=useState(null);
   const [bf,setBF]=useState({category:CATS[0],limit:""});
+  // ── TRANSFER DETECTION STATE ──
+  const [transferPairs,setTransferPairs]=useState([]);
+  const [showTransferModal,setSTM]=useState(false);
+  const [rejectedPairs,setRejectedPairs]=useState(new Set());
 
   const rows=useMemo(()=>transactions.filter(t=>{
     if(t.type==="transfer"&&!showTransfers)return false;
@@ -479,6 +483,17 @@ function Transactions({state,update,notify}){
   const cur=transactions.filter(t=>gMonth(t.date)===CUR);
   const months=[...new Set(transactions.map(t=>gMonth(t.date)))].sort().reverse();
   const transferCount=transactions.filter(t=>t.type==="transfer").length;
+
+  // ── DETECCIÓN SOBRE EXISTENTES ──
+  const runDetection=()=>{
+    const income=transactions.filter(t=>t.type==="income");
+    const expense=transactions.filter(t=>t.type==="expense");
+    const pairs=detectTransfers(income,expense);
+    if(!pairs.length)return notify("No se detectaron transferencias internas","info");
+    setTransferPairs(pairs);
+    setRejectedPairs(new Set());
+    setSTM(true);
+  };
 
   useEffect(()=>{
     const pending=recurring.filter(r=>r.lastMonth<CUR&&!r.paused);
@@ -517,7 +532,14 @@ function Transactions({state,update,notify}){
   };
 
   return(<div className="up">
-    <PH title="Movimientos" sub={`${rows.length} registros`} right={<div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button data-tour-target="recurrentes-btn" className="btn bg" onClick={()=>setSRec(true)}><ic.Refresh/> Recurrentes</button><button data-tour-target="presupuestos-btn" className="btn bg" onClick={()=>setSB(true)}><ic.Bell/> Presupuestos</button><button className="btn bl" onClick={()=>{setETx(null);setForm({date:todayISO(),description:"",amount:"",type:"expense",category:"❓ Otros",currency:"ARS",isRecurring:false});setSA(true);}}><ic.Plus/> Nuevo</button></div>}/>
+    <PH title="Movimientos" sub={`${rows.length} registros`} right={
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <button className="btn bg" onClick={runDetection}>🔄 Conciliar</button>
+        <button data-tour-target="recurrentes-btn" className="btn bg" onClick={()=>setSRec(true)}><ic.Refresh/> Recurrentes</button>
+        <button data-tour-target="presupuestos-btn" className="btn bg" onClick={()=>setSB(true)}><ic.Bell/> Presupuestos</button>
+        <button className="btn bl" onClick={()=>{setETx(null);setForm({date:todayISO(),description:"",amount:"",type:"expense",category:"❓ Otros",currency:"ARS",isRecurring:false});setSA(true);}}><ic.Plus/> Nuevo</button>
+      </div>
+    }/>
 
     {Object.keys(budgets||{}).length>0&&(<div style={{display:"flex",gap:10,marginBottom:14,overflowX:"auto",paddingBottom:4}}>{Object.entries(budgets).map(([cat,lim])=>{const spent=cur.filter(t=>t.category===cat&&t.type==="expense").reduce((s,t)=>s+t.amount,0);const pct=clamp(spent/lim*100,0,200);return<div key={cat} style={{background:T.raised,border:`1px solid ${pct>=100?T.red:pct>=80?T.amber:T.border}`,borderRadius:10,padding:"10px 14px",minWidth:150,flexShrink:0}}><div style={{fontSize:10,color:T.muted,marginBottom:4}}>{cat}</div><div className="mono" style={{fontSize:13,color:pct>=100?T.red:pct>=80?T.amber:T.white}}>{fmt(spent)}/{fmt(lim)}</div><div className="prog" style={{marginTop:6}}><div className="progf" style={{width:`${clamp(pct,0,100)}%`,background:pct>=100?T.red:pct>=80?T.amber:T.teal}}/></div></div>;})}</div>)}
 
@@ -540,8 +562,14 @@ function Transactions({state,update,notify}){
         <td className="mono hide-m" style={{color:T.muted,fontSize:11}}>{t.date}</td>
         <td style={{maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td>
         <td><button onClick={()=>t.type!=="transfer"&&setEC({id:t.id,cat:t.category})} style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:6,padding:"3px 9px",fontSize:11,color:T.mid,cursor:t.type==="transfer"?"default":"pointer"}}>{t.type==="transfer"?"🔄 Transferencia interna":t.category}</button></td>
-        <td className="hide-m"><span className={`tag ${t.type==="income"?"ti":t.type==="transfer"?"tt":t.category==="💰 Ahorro"?"ts":"te"}`}>{t.type==="income"?"Ingreso":t.type==="transfer"?"🔄 Transferencia":t.category==="💰 Ahorro"?"Ahorro":"Gasto"}</span></td>
-        <td className="mono" style={{color:t.type==="income"?T.teal:t.type==="transfer"?T.muted:T.red,fontWeight:500}}>{t.type==="income"?"+":t.type==="transfer"?"↔":"-"}{fmt(t.amount)}</td>
+        <td className="hide-m">
+          <span className={`tag ${t.type==="income"?"ti":t.type==="transfer"?"tt":t.category==="💰 Ahorro"?"ts":"te"}`}>
+            {t.type==="income"?"Ingreso":t.type==="transfer"?"🔄 Transferencia":t.category==="💰 Ahorro"?"Ahorro":"Gasto"}
+          </span>
+        </td>
+        <td className="mono" style={{color:t.type==="income"?T.teal:t.type==="transfer"?T.muted:T.red,fontWeight:500}}>
+          {t.type==="income"?"+":t.type==="transfer"?"↔":"-"}{fmt(t.amount)}
+        </td>
         <td style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
           {t.type!=="transfer"&&<button className="btn bg bsm" style={{padding:"4px 8px"}} onClick={()=>{setForm({date:t.date,description:t.description.replace("🔁 ",""),amount:t.amount,type:t.type,category:t.category,currency:"ARS",isRecurring:false});setETx(t.id);setSA(true);}}>✎</button>}
           <button className="btn bd bsm" style={{padding:"4px 8px"}} onClick={()=>{update({transactions:transactions.filter(x=>x.id!==t.id)});notify("Eliminado","err");}}><ic.Trash/></button>
@@ -549,12 +577,17 @@ function Transactions({state,update,notify}){
       </tr>
     ))}</tbody></table></div>
 
+    {/* ── MODAL NUEVO MOVIMIENTO ── */}
     {showAdd&&<div className="ov" onClick={e=>{if(e.target===e.currentTarget){setSA(false);setETx(null);}}}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h2 style={{fontSize:18,fontWeight:700}}>{editTx?"Editar movimiento":"Nuevo movimiento"}</h2><button className="btn bg bsm" onClick={()=>{setSA(false);setETx(null);}}><ic.X/></button></div><div style={{display:"flex",flexDirection:"column",gap:12}}><div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha</label><input type="date" className="inp" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tipo</label><select className="inp" value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))}><option value="expense">💸 Gasto</option><option value="income">💵 Ingreso</option></select></div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Descripción</label><input className="inp" placeholder="ej: Alquiler / Netflix" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/></div><div className="g3"><div style={{gridColumn:"1/3"}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Monto (positivo siempre)</label><input className="inp" placeholder="15000" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda</label><select className="inp" value={form.currency} onChange={e=>setForm(f=>({...f,currency:e.target.value}))}><option>ARS</option><option>USD</option></select></div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Categoría</label><select className="inp" value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select></div>{!editTx&&(<label style={{display:"flex",alignItems:"center",gap:10,fontSize:12,color:form.isRecurring?T.lime:T.white,marginTop:4,background:form.isRecurring?"rgba(200,255,87,.08)":T.raised,padding:"12px 14px",borderRadius:10,border:`1px solid ${form.isRecurring?"rgba(200,255,87,.3)":T.border}`,cursor:"pointer",transition:"all .2s"}}><input type="checkbox" checked={form.isRecurring} onChange={e=>setForm(f=>({...f,isRecurring:e.target.checked}))} style={{accentColor:T.lime,width:16,height:16}}/><div><div style={{fontWeight:600}}>🔁 Repetir todos los meses</div><div style={{fontSize:10,color:T.muted,marginTop:2,fontWeight:400}}>La app lo cargará automáticamente el día 1 de cada mes.</div></div></label>)}{form.currency==="USD"&&px(form.amount)>0&&<div style={{background:"rgba(77,158,255,.08)",border:`1px solid rgba(77,158,255,.2)`,borderRadius:8,padding:"8px 12px",fontSize:11,color:T.blue}}>💡 = {fARS(Math.abs(px(form.amount))*usdRate)} ARS al tipo oficial actual</div>}<button className="btn bl" style={{justifyContent:"center",marginTop:8}} onClick={saveTx}>{editTx?"Guardar cambios":"Agregar Movimiento"}</button></div></div></div>}
 
-    {showRec&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setSRec(false)}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}><h2 style={{fontSize:18,fontWeight:700}}>Suscripciones y Recurrentes</h2><button className="btn bg bsm" onClick={()=>setSRec(false)}><ic.X/></button></div><div style={{fontSize:12,color:T.mid,marginBottom:16}}>Acá ves los gastos que se inyectan automáticamente cada mes.</div>
+    {/* ── MODAL RECURRENTES ── */}
+    {showRec&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setSRec(false)}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}><h2 style={{fontSize:18,fontWeight:700}}>Suscripciones y Recurrentes</h2><button className="btn bg bsm" onClick={()=>setSRec(false)}><ic.X/></button></div><div style={{fontSize:12,color:T.mid,marginBottom:16}}>Acá ves los gastos que se inyectan automáticamente cada mes. Si eliminás uno, no afectará a los meses anteriores.</div>
     {recurring.length===0?<div style={{color:T.muted,fontSize:12,textAlign:"center",padding:20,background:T.raised,borderRadius:12}}>No tenés gastos recurrentes configurados.</div>:recurring.map(r=>(
       <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:T.raised,borderRadius:10,padding:"12px 14px",marginBottom:8,border:`1px solid ${T.border}`,opacity:r.paused?0.5:1}}>
-        <div><div style={{fontSize:13,fontWeight:600,color:r.paused?T.muted:T.white}}>{r.paused&&"⏸️ "}{r.description}</div><div style={{fontSize:10,color:T.muted,marginTop:3}}>{r.category} · Último cobro: {r.lastMonth}</div></div>
+        <div>
+          <div style={{fontSize:13,fontWeight:600,color:r.paused?T.muted:T.white}}>{r.paused&&"⏸️ "}{r.description}</div>
+          <div style={{fontSize:10,color:T.muted,marginTop:3}}>{r.category} · Último cobro: {r.lastMonth}</div>
+        </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <span className="mono" style={{fontSize:14,color:r.paused?T.muted:(r.type==="income"?T.teal:T.red),fontWeight:500,marginRight:4}}>{fmt(r.amount)}</span>
           <button className="btn bg bsm" style={{padding:"4px 8px"}} title={r.paused?"Reanudar":"Pausar"} onClick={()=>update({recurring:recurring.map(x=>x.id===r.id?{...x,paused:!x.paused}:x)})}>{r.paused?"▶️":"⏸️"}</button>
@@ -563,9 +596,63 @@ function Transactions({state,update,notify}){
       </div>
     ))}</div></div>}
 
+    {/* ── MODAL CAMBIAR CATEGORÍA ── */}
     {editCat&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setEC(null)}><div className="modal" style={{width:320}}><h2 style={{fontSize:16,fontWeight:700,marginBottom:14}}>Cambiar categoría</h2><select className="inp" style={{marginBottom:14}} value={editCat.cat} onChange={e=>setEC(c=>({...c,cat:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select><div style={{display:"flex",gap:8}}><button className="btn bl" style={{flex:1,justifyContent:"center"}} onClick={()=>{update({transactions:transactions.map(t=>t.id===editCat.id?{...t,category:editCat.cat}:t)});setEC(null);notify("Guardado ✓");}}>Guardar</button><button className="btn bg" onClick={()=>setEC(null)}>Cancelar</button></div></div></div>}
 
+    {/* ── MODAL PRESUPUESTOS ── */}
     {showBud&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setSB(false)}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}><h2 style={{fontSize:18,fontWeight:700}}>Presupuestos</h2><button className="btn bg bsm" onClick={()=>setSB(false)}><ic.X/></button></div><div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}><select className="inp" style={{flex:1.5,minWidth:120}} value={bf.category} onChange={e=>setBF(f=>({...f,category:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select><input className="inp" style={{flex:1,minWidth:100}} placeholder="Límite ARS" value={bf.limit} onChange={e=>setBF(f=>({...f,limit:e.target.value}))}/><button className="btn bl" onClick={()=>{if(!bf.limit)return;update({budgets:{...budgets,[bf.category]:px(bf.limit)}});setSB(false);notify("Guardado ✓");}}><ic.Plus/></button></div>{Object.entries(budgets||{}).map(([cat,lim])=>(<div key={cat} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:T.raised,borderRadius:10,padding:"10px 14px",marginBottom:7,flexWrap:"wrap",gap:6}}><span style={{fontSize:13}}>{cat}</span><div style={{display:"flex",alignItems:"center",gap:10}}><span className="mono" style={{fontSize:12,color:T.mid}}>{fmt(lim)}/mes</span><button className="btn bd bsm" onClick={()=>{const b={...budgets};delete b[cat];update({budgets:b});}}>✕</button></div></div>))}</div></div>}
+
+    {/* ── MODAL TRANSFERENCIAS INTERNAS ── */}
+    {showTransferModal&&(
+      <div className="ov" onClick={e=>e.target===e.currentTarget&&setSTM(false)}>
+        <div className="modal">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+            <h2 style={{fontSize:17,fontWeight:700}}>🔄 Transferencias internas detectadas</h2>
+            <button className="btn bg bsm" onClick={()=>setSTM(false)}><ic.X/></button>
+          </div>
+          <div style={{fontSize:12,color:T.mid,marginBottom:16}}>
+            Estos movimientos parecen ser transferencias entre tus propias cuentas. Si los confirmás, quedan excluidos de tus ingresos y gastos.
+          </div>
+          {transferPairs.filter(p=>!rejectedPairs.has(p.a.id+p.b.id)).map((pair,i)=>{
+            const inc=pair.a.type==="income"?pair.a:pair.b;
+            const exp=pair.a.type==="expense"?pair.a:pair.b;
+            return(
+              <div key={i} style={{background:T.raised,borderRadius:12,padding:"14px 16px",marginBottom:10,border:`1px solid ${T.border}`}}>
+                <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between"}}>
+                    <span style={{fontSize:12,color:T.teal}}>↑ {inc.description}</span>
+                    <span className="mono" style={{fontSize:12,color:T.teal}}>+{fmt(inc.amount)}</span>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}>
+                    <span style={{fontSize:12,color:T.coral}}>↓ {exp.description}</span>
+                    <span className="mono" style={{fontSize:12,color:T.coral}}>-{fmt(exp.amount)}</span>
+                  </div>
+                  <div style={{fontSize:10,color:T.muted}}>{inc.date} · {exp.date}</div>
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button className="btn bl bsm" style={{flex:1,justifyContent:"center"}} onClick={()=>{
+                    update({transactions:transactions.map(t=>
+                      t.id===pair.a.id||t.id===pair.b.id
+                        ?{...t,type:"transfer",category:"🔄 Transferencia interna"}:t
+                    )});
+                    setRejectedPairs(r=>new Set([...r,pair.a.id+pair.b.id]));
+                    notify("Transferencia interna marcada ✓");
+                  }}>✓ Sí, es una transferencia</button>
+                  <button className="btn bg bsm" style={{flex:1,justifyContent:"center"}} onClick={()=>
+                    setRejectedPairs(r=>new Set([...r,pair.a.id+pair.b.id]))
+                  }>No, son distintos ✗</button>
+                </div>
+              </div>
+            );
+          })}
+          {transferPairs.filter(p=>!rejectedPairs.has(p.a.id+p.b.id)).length===0&&(
+            <div style={{textAlign:"center",padding:"16px 0",color:T.muted,fontSize:13}}>✓ Todo revisado</div>
+          )}
+          <button className="btn bg" style={{width:"100%",justifyContent:"center",marginTop:8}}
+            onClick={()=>{setSTM(false);setRejectedPairs(new Set());}}>Cerrar</button>
+        </div>
+      </div>
+    )}
   </div>);
 }
 
