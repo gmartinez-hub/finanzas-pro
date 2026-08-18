@@ -1144,7 +1144,7 @@ function Import({state,update,notify}){
     notify("Analizando imagen con IA...","info");
     const b64=imgSrc.split(",")[1];
     try{const result=await extractFromImage(b64,imgMime);
-      if(!result.transactions?.length){setExt("error");setEE("No se detectaron transacciones.");notify("Sin transacciones detectadas","err");return;}
+      if(!result.transactions?.length){const fallback=result.outcome==="unreadable_image"?"La captura no se pudo leer. Probá recortarla y subir una versión más nítida.":result.outcome==="not_financial_document"?"La imagen no parece ser un historial de movimientos.":"La pantalla no muestra movimientos con importes legibles.";const reason=result.warnings?.[0]||fallback;setExt("error");setEE(reason);notify(reason,"err");return;}
       setPreview(result.transactions.map((t,i)=>({...t,id:`img_${uid()}_${i}`,currency:result.currency||"ARS",source:"image"})));
       setExt("done");notify(`${result.transactions.length} transacciones extraídas ✓`);
     }catch(e){setExt("error");setEE(e.message||"No se pudo analizar la imagen.");notify(e.message||"Error al analizar la imagen","err");}

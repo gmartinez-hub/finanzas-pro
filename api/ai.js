@@ -101,6 +101,12 @@ const RequestSchema = z.discriminatedUnion("task", [
 ]);
 
 const ExtractionOutput = z.object({
+  outcome: z.enum([
+    "transactions_found",
+    "no_visible_transactions",
+    "unreadable_image",
+    "not_financial_document",
+  ]),
   transactions: z.array(z.object({
     date: IsoDate,
     description: z.string().min(1).max(180),
@@ -110,7 +116,7 @@ const ExtractionOutput = z.object({
   }).strict()).max(100),
   currency: z.enum(["ARS", "USD"]),
   appDetected: z.string().max(80).nullable(),
-  warnings: z.array(z.string().min(1).max(180)).max(6),
+  warnings: z.array(z.string().min(1).max(180)).max(8),
 }).strict();
 
 const CategorizationOutput = z.object({
@@ -151,6 +157,24 @@ const Opportunity = z.object({
   bearRisk: z.string().min(1).max(240),
   confidenceScore: z.number().int().min(0).max(100),
   profileFit: z.number().int().min(0).max(100),
+}).strict();
+
+const ProviderText = z.string().trim().min(1);
+const ProviderOpportunity = Opportunity.extend({
+  ticker: ProviderText,
+  name: ProviderText,
+  moat: ProviderText,
+  thesis: ProviderText,
+  catalysts: z.array(ProviderText),
+  bearRisk: ProviderText,
+  confidenceScore: z.number().finite(),
+  profileFit: z.number().finite(),
+});
+
+const ScanProviderOutput = z.object({
+  opportunities: z.array(ProviderOpportunity).length(3),
+  marketContext: ProviderText,
+  topPick: ProviderText,
 }).strict();
 
 const ScanOutput = z.object({
@@ -213,14 +237,16 @@ const TASKS = Object.freeze({
   extract_transactions: {
     model: MODELS.terra,
     format: zodTextFormat(ExtractionOutput, "mangos_extract_transactions"),
-    maxOutputTokens: 2_500,
+    maxOutputTokens: 5_000,
+    reasoningEffort: "low",
+    verbosity: "low",
     instructions: `${BASE_INSTRUCTIONS}
-Extraé todas las transacciones claramente legibles de una captura bancaria, billetera o tarjeta argentina. Ignorá saldos, totales, límites, números de cuenta y filas que no sean movimientos. Los importes deben ser positivos; inferí income o expense por el sentido del movimiento. Usá la fecha indicada solo si la de una fila es ilegible y explicalo en warnings. Si aparecen monedas mezcladas, elegí la predominante y advertí qué requiere revisión.`,
+Recorré la imagen de arriba abajo y extraé cada fila de movimiento visible, uniendo descripciones partidas en varias líneas. Una fila con concepto o comercio e importe puede ser una transacción aunque la fecha diga Hoy/Ayer, no muestre el año o use solo el día. Interpretá 1.234,56 como 1234.56 en contexto ARS; usá formato estadounidense solo cuando el contexto indique USD. Inferí expense por signos negativos, débito/debe, compra o cargo, e income por signos positivos, crédito/haber o acreditación. Los importes deben ser positivos. Resolvé dd/mm, dd-mm, Hoy y Ayer con la fecha de referencia; si falta el año, usá el año más reciente compatible y advertílo. Ignorá saldos, totales, límites, vencimientos, números de cuenta y movimientos rechazados o pendientes. No inventes importes ni dirección del movimiento. Usá transactions_found si encontraste al menos una fila; unreadable_image si parecen existir filas pero el texto no alcanza para leerlas; no_visible_transactions solo para una pantalla que realmente no muestra movimientos; not_financial_document si la imagen no corresponde. Todo resultado sin transacciones debe incluir al menos un warning concreto para ayudar a corregir la captura. Si aparecen monedas mezcladas, elegí la predominante y advertí qué requiere revisión.`,
     buildInput: ({ imageBase64, mime, today }) => [{
       role: "user",
       content: [
         { type: "input_text", text: `Fecha de referencia: ${today}. Categorías permitidas: ${CATEGORIES.join(", ")}.` },
-        { type: "input_image", image_url: `data:${mime};base64,${imageBase64}`, detail: "high" },
+        { type: "input_image", image_url: `data:${mime};base64,${imageBase64}`, detail: "original" },
       ],
     }],
   },
@@ -242,11 +268,15 @@ Generá exactamente cuatro tarjetas, una y solo una de cada tipo: spending, top_
   },
   scan_investments: {
     model: MODELS.terra,
-    format: zodTextFormat(ScanOutput, "mangos_scan_investments"),
+    format: zodTextFormat(ScanProviderOutput, "mangos_scan_investments"),
     maxOutputTokens: 3_200,
+    reasoningEffort: "low",
+    verbosity: "low",
+    searchContextSize: "low",
+    maxToolCalls: 3,
     web: true,
     instructions: `${WEB_INSTRUCTIONS}
-Buscá tres instrumentos líquidos y verificables relevantes para un inversor argentino y el perfil recibido. Separá encaje con el perfil de certeza factual. Sustentá contexto, precio aproximado, múltiplos y catalizadores con fuentes actuales; usá null si no podés verificar. topPick debe coincidir exactamente con un ticker devuelto.`,
+Buscá tres instrumentos líquidos y verificables relevantes para un inversor argentino y el perfil recibido. Usá como máximo tres búsquedas compactas. Separá encaje con el perfil de certeza factual. Sustentá contexto, precio aproximado, múltiplos y catalizadores con fuentes actuales; usá null si no podés verificar. Cada thesis debe ser una oración de hasta 300 caracteres; moat y bearRisk, una oración de hasta 160; incluí como máximo tres catalizadores de hasta 100 caracteres; marketContext debe tener hasta 240 caracteres. No repitas información entre campos. topPick debe coincidir exactamente con un ticker devuelto.`,
     buildInput: (input) => `Perfil y contexto validados (JSON de datos):\n${JSON.stringify(input)}`,
   },
   analyze_stock: {
@@ -426,6 +456,65 @@ function usageMeta(usage) {
   };
 }
 
+function clipText(value, max) {
+  const clean = String(value || "").trim().replace(/\s+/g, " ");
+  if (clean.length <= max) return clean;
+  return `${clean.slice(0, Math.max(1, max - 1)).trimEnd()}…`;
+}
+
+function clampScore(value) {
+  return Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+}
+
+function normalizeExtractionOutput(data) {
+  const hasTransactions = data.transactions.length > 0;
+  let outcome = hasTransactions ? "transactions_found" : data.outcome;
+  if (!hasTransactions && outcome === "transactions_found") outcome = "unreadable_image";
+
+  let warnings = data.warnings;
+  if (!hasTransactions && !warnings.length) {
+    const fallback = {
+      unreadable_image: "La captura parece tener movimientos, pero el texto no se pudo leer. Probá con un recorte más cercano y nítido.",
+      not_financial_document: "La imagen no parece ser un historial bancario, de billetera o de tarjeta.",
+      no_visible_transactions: "La pantalla no muestra filas de movimientos con importes legibles.",
+    };
+    warnings = [fallback[outcome] || fallback.unreadable_image];
+  }
+  return ExtractionOutput.parse({ ...data, outcome, warnings });
+}
+
+function normalizeScanOutput(data, input) {
+  const opportunities = data.opportunities.map((item) => ({
+    ...item,
+    ticker: clipText(item.ticker, 16).toUpperCase(),
+    name: clipText(item.name, 100),
+    moat: clipText(item.moat, 240),
+    thesis: clipText(item.thesis, 420),
+    catalysts: item.catalysts.slice(0, 4).map((value) => clipText(value, 160)),
+    bearRisk: clipText(item.bearRisk, 240),
+    confidenceScore: clampScore(item.confidenceScore),
+    profileFit: clampScore(item.profileFit),
+  }));
+  const requestedTopPick = clipText(data.topPick, 16).toUpperCase();
+  const matchedTopPick = opportunities.find((item) => item.ticker === requestedTopPick);
+  const fallbackTopPick = [...opportunities].sort(
+    (a, b) => b.profileFit - a.profileFit || b.confidenceScore - a.confidenceScore,
+  )[0];
+
+  return ScanOutput.parse({
+    opportunities,
+    marketContext: clipText(data.marketContext, 420),
+    topPick: matchedTopPick?.ticker || fallbackTopPick.ticker,
+    scanDate: input.date,
+  });
+}
+
+function normalizeTaskOutput(task, input, data) {
+  if (task === "extract_transactions") return normalizeExtractionOutput(data);
+  if (task === "scan_investments") return normalizeScanOutput(data, input);
+  return data;
+}
+
 function validateSemanticOutput(task, input, data) {
   if (task === "categorize_transactions") {
     const expected = new Set(input.items.map((item) => item.id));
@@ -475,7 +564,10 @@ async function runTask(client, task, input, requestId) {
     model: definition.model,
     instructions: definition.instructions,
     input: definition.buildInput(input),
-    text: { format: definition.format },
+    text: {
+      format: definition.format,
+      ...(definition.verbosity ? { verbosity: definition.verbosity } : {}),
+    },
     max_output_tokens: definition.maxOutputTokens,
     store: false,
     metadata: { app: "mangos", task, request_id: requestId },
@@ -486,7 +578,7 @@ async function runTask(client, task, input, requestId) {
   if (definition.web) {
     request.tools = [{
       type: "web_search",
-      search_context_size: "medium",
+      search_context_size: definition.searchContextSize || "medium",
       user_location: {
         type: "approximate",
         country: "AR",
@@ -495,7 +587,7 @@ async function runTask(client, task, input, requestId) {
       },
     }];
     request.tool_choice = "required";
-    request.max_tool_calls = 4;
+    request.max_tool_calls = definition.maxToolCalls || 4;
     request.include = ["web_search_call.action.sources"];
   }
 
@@ -518,18 +610,22 @@ async function runTask(client, task, input, requestId) {
     }
     throw new SafeHttpError(502, "EMPTY_AI_OUTPUT", "La IA no pudo completar esta solicitud. Probá nuevamente.");
   }
-  validateSemanticOutput(task, input, response.output_parsed);
+  const parsed = normalizeTaskOutput(task, input, response.output_parsed);
+  validateSemanticOutput(task, input, parsed);
   const sources = definition.web ? collectWebSources(response) : [];
   if (definition.web && !sources.length) {
     throw new SafeHttpError(502, "UNGROUNDED_AI_OUTPUT", "No se encontraron fuentes verificables. Probá nuevamente.");
   }
-  return { data: finalizeData(task, input, response.output_parsed, sources), response, sources };
+  return { data: finalizeData(task, input, parsed, sources), response, sources };
 }
 
 function classifyProviderError(error) {
   if (error instanceof SafeHttpError) return error;
   if (error instanceof z.ZodError) {
     return new SafeHttpError(502, "INVALID_AI_OUTPUT", "La IA devolvió un resultado incompleto. Probá nuevamente.");
+  }
+  if (error instanceof SyntaxError) {
+    return new SafeHttpError(502, "INVALID_AI_OUTPUT", "La IA devolvió un formato incompleto. Probá nuevamente.");
   }
   const status = Number(error?.status || 0);
   const name = String(error?.name || "");
@@ -565,6 +661,34 @@ function sendError(res, error, requestId) {
   });
 }
 
+function resultSummary(task, input, data) {
+  if (task === "extract_transactions") {
+    return {
+      imageBytes: Math.floor((input.imageBase64.length * 3) / 4),
+      mime: input.mime,
+      outcome: data.outcome,
+      transactionCount: data.transactions.length,
+      warningCount: data.warnings.length,
+      empty: data.transactions.length === 0,
+    };
+  }
+  if (task === "categorize_transactions") {
+    return { inputCount: input.items.length, itemCount: data.items.length };
+  }
+  if (task === "weekly_insight") return { cardCount: data.cards.length };
+  if (task === "scan_investments") {
+    const nullMetricCount = data.opportunities.reduce(
+      (count, item) => count + [item.upside, item.currentEstimate, item.peRatio, item.revenueGrowth]
+        .filter((value) => value == null).length,
+      0,
+    );
+    return { opportunityCount: data.opportunities.length, nullMetricCount };
+  }
+  if (task === "analyze_stock") return { sourceCount: data.sources.length, hasTarget: data.priceTarget12m != null };
+  if (task === "compare_instruments") return { instrumentCount: data.instruments.length };
+  return {};
+}
+
 export default async function handler(req, res) {
   const requestId = randomUUID();
   const startedAt = Date.now();
@@ -590,29 +714,53 @@ export default async function handler(req, res) {
     const client = new OpenAI({ apiKey, timeout: REQUEST_TIMEOUT_MS, maxRetries: 0 });
     const result = await runTask(client, task, request.input, requestId);
 
+    const durationMs = Date.now() - startedAt;
+    const usage = usageMeta(result.response.usage);
+    console.log(JSON.stringify({
+      level: "info",
+      event: "ai_success",
+      requestId,
+      task,
+      model: result.response.model || TASKS[task].model,
+      durationMs,
+      usage,
+      sourceCount: result.sources.length,
+      result: resultSummary(task, request.input, result.data),
+    }));
+
     return res.status(200).json({
       data: result.data,
       meta: {
         requestId,
         task,
         model: result.response.model || TASKS[task].model,
-        usage: usageMeta(result.response.usage),
-        durationMs: Date.now() - startedAt,
+        usage,
+        durationMs,
         sources: result.sources,
       },
     });
   } catch (error) {
     const safe = classifyProviderError(error);
-    console.error("AI request failed", {
+    console.error(JSON.stringify({
+      level: "error",
+      event: "ai_failure",
       requestId,
       task,
       status: safe.status,
       code: safe.code,
       errorType: String(error?.name || "Error").slice(0, 80),
+      providerStatus: Number(error?.status || 0) || null,
+      providerCode: String(error?.code || error?.error?.code || "").slice(0, 80) || null,
       validationIssues: error instanceof z.ZodError
-        ? error.issues.slice(0, 8).map((issue) => ({ path: issue.path.join("."), code: issue.code }))
+        ? error.issues.slice(0, 8).map((issue) => ({
+          path: issue.path.map((part) => typeof part === "number" ? "[]" : part).join("."),
+          code: issue.code,
+          minimum: "minimum" in issue ? issue.minimum : undefined,
+          maximum: "maximum" in issue ? issue.maximum : undefined,
+          inclusive: "inclusive" in issue ? issue.inclusive : undefined,
+        }))
         : undefined,
-    });
+    }));
     return sendError(res, safe, requestId);
   }
 }
