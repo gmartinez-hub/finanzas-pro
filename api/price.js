@@ -3,9 +3,10 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Cache-Control", "no-store");
   if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "GET") return res.status(405).json({ error: "Método no permitido" });
 
   const { ticker } = req.query;
-  if (!ticker) return res.status(400).json({ error: "ticker required" });
+  if (typeof ticker !== "string" || !/^[A-Z0-9.^=-]{1,24}$/i.test(ticker)) return res.status(400).json({ error: "Ticker no válido" });
 
   const yahooResult = await tryYahoo(ticker);
   if (yahooResult) return res.json(yahooResult);
@@ -54,6 +55,9 @@ async function tryYahoo(ticker) {
 }
 
 async function tryTwelveData(ticker) {
+  // The price-only response has no currency/market metadata. Never label it
+  // as an Argentine quote just because the requested symbol ends in .BA.
+  if (ticker.toUpperCase().endsWith(".BA")) return null;
   // 800 calls/día gratis. Para key propia: agregar TWELVE_DATA_API_KEY en Vercel env vars
   const apiKey = process.env.TWELVE_DATA_API_KEY || "demo";
   try {

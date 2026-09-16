@@ -27,6 +27,8 @@ async function readPayload(response) {
 }
 
 export async function runAITask(task, input, { signal, timeoutMs = TASK_TIMEOUTS[task] || 30_000 } = {}) {
+  const demo = import.meta.env?.VITE_APP_MODE === 'demo' || (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('demo') === '1');
+  if (demo) throw new AIServiceError('La demostración usa datos ficticios y no envía consultas a la IA. Podés probar la importación CSV y el resto de las funciones locales.', { code: 'DEMO_OFFLINE' });
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("timeout"), timeoutMs);
   const abortFromParent = () => controller.abort(signal?.reason || "cancelled");

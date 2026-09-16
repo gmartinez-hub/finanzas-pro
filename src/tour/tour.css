@@ -1,0 +1,39 @@
+.mangos-tour {
+  position: fixed;
+  z-index: 450;
+  right: 16px;
+  bottom: 16px;
+  width: min(360px, calc(100vw - 24px));
+  height: fit-content;
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  padding: 18px;
+  background: var(--surface, #171416);
+  color: var(--text, #f5efe7);
+  border: 1px solid var(--ac-border, #808f44);
+  border-radius: 18px;
+  box-shadow: 0 14px 42px rgb(0 0 0 / 32%);
+  line-height: 1.5;
+  text-align: left;
+}
+.mangos-tour-heading { display: flex; align-items: center; gap: 10px; color: var(--ac, #ccff47); font-size: 12px; font-weight: 700; }
+.mangos-tour-progress { margin-left: auto; color: var(--text-mid, #b2a59d); font-variant-numeric: tabular-nums; font-weight: 500; }
+.mangos-tour-close { display: grid; place-items: center; min-width: 36px; min-height: 36px; margin: -8px -8px -8px 0; font-size: 24px; border-radius: 9px; }
+.mangos-tour-close:hover { background: var(--raised, #252126); }
+.mangos-tour-copy { margin-top: 12px; }
+.mangos-tour-copy h2 { font-size: 17px; line-height: 1.3; margin: 0 0 8px; font-weight: 700; }
+.mangos-tour-copy p { font-size: 13px; margin: 0; color: var(--text-mid, #b2a59d); }
+.mangos-tour .mangos-tour-note { color: var(--text-muted, #a3958c); font-size: 12px; margin-top: 8px; }
+.mangos-tour-actions { display: grid; gap: 10px; margin-top: 16px; }
+.mangos-tour-actions .btn { min-height: 42px; font-size: 13px; padding: 8px 12px; white-space: normal; }
+.mangos-tour-navigation { display: flex; gap: 8px; }
+.mangos-tour-navigation > button { flex: 1; }
+.mangos-tour-follow { min-height: 40px; color: var(--ac, #ccff47); font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
+.mangos-tour-highlight { outline: 2px solid var(--ac, #ccff47); outline-offset: 4px; scroll-margin: 90px 16px 280px; }
+body:has(.ov) .mangos-tour, body:has(dialog[open]) .mangos-tour { visibility: hidden; }
+@media (max-width: 768px) {
+  .mangos-tour { padding: 14px; border-radius: 14px; }
+  .mangos-tour-copy { max-height: 26dvh; overflow-y: auto; }
+  .mangos-tour-actions { margin-top: 12px; gap: 8px; }
+  body[data-mangos-tour-open] main { padding-bottom: var(--mangos-tour-space, 300px) !important; }
+}

@@ -1,3 +1,15 @@
+import {parsePastedAmount} from "./domain/paste.js";
+import {importSourceId,identifyImportRows} from "./domain/importSource.js";
+import AppRoot from "./app/AppRoot.jsx";
+import Settings, {downloadText} from "./features/Settings.jsx";
+import Dialog from "./components/Dialog.jsx";
+import {useMangosState} from "./app/useMangosState.js";
+import {createDemoState} from "./demo/data.js";
+import {createBackup} from "./storage/state.js";
+import {parseDecimal,parseMoney,getHoldingQuoteKey,monthSummary,getMonthIncomeParts,goalCash,goalProgress,calcHoldingValueArs as domainHoldingValue,getPendingRecurring,confirmRecurring,reserveForGoal,payGoal,revertGoalPayment} from "./domain/finance.js";
+import {parseMovementCSV,applyImportBatch,exportMovementCSV} from "./domain/imports.js";
+import TourGuide from "./tour/TourGuide.jsx";
+import "./styles/theme.css";
 import { useState, useEffect, useCallback, useMemo, useRef, useId } from "react";
 import { createPortal } from "react-dom";
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
@@ -34,10 +46,7 @@ const normalizeStoredState=data=>data&&typeof data==="object"?{
   transactions:Array.isArray(data.transactions)?data.transactions.map(tx=>normalizeTxRecord(tx)):[],
   recurring:Array.isArray(data.recurring)?data.recurring.map(item=>normalizeTxRecord(item)):[],
 }:data;
-const persist=async d=>{try{await window.storage?.set(SK,JSON.stringify(d),false);}catch(e){console.warn("persist fail",e);}};
-const hydrate=async()=>{try{const r=await window.storage?.get(SK,false);return r?normalizeStoredState(JSON.parse(r.value)):null;}catch(e){return null;}};
-const px=raw=>{const s=String(raw||"").trim().replace(/[^0-9.,-]/g,"");if(!s)return 0;if(/^\d{1,3}(\.\d{3})+(,\d*)?$/.test(s))return parseFloat(s.replace(/\./g,"").replace(",","."))||0;if(/^\d+,\d+$/.test(s))return parseFloat(s.replace(",","."))||0;if(/^\d{1,3}(,\d{3})+(\.\d*)?$/.test(s))return parseFloat(s.replace(/,/g,""))||0;return parseFloat(s)||0;};
-const fARS=n=>new Intl.NumberFormat("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0}).format(n||0);
+const fARS=n=>new Intl.NumberFormat("es-AR",{style:"currency",currency:"ARS",minimumFractionDigits:0,maximumFractionDigits:2}).format(n||0);
 const fUSD=n=>`US$ ${new Intl.NumberFormat("en-US",{minimumFractionDigits:0,maximumFractionDigits:2}).format(n||0)}`;
 const fQuoteARS=n=>`AR$ ${new Intl.NumberFormat("es-AR",{maximumFractionDigits:0}).format(Number(n)||0)}`;
 const fQuoteUSD=n=>`US$ ${new Intl.NumberFormat("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(n)||0)}`;
@@ -45,11 +54,16 @@ const formatMarketQuote=(price,sourceCurrency,displayCurrency,usdRate)=>{const v
 const quoteTime=iso=>{if(!iso)return null;const date=new Date(iso);if(Number.isNaN(date.getTime()))return null;return new Intl.DateTimeFormat("es-AR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}).format(date);};
 const withMarketQuote=(analysis,quote)=>{const price=Number(quote?.price);if(!analysis||!price)return analysis;const oldPrice=Number(analysis.currentEstimate);const explicitTarget=Number(analysis.priceTarget12m);const impliedTarget=explicitTarget>0?explicitTarget:(oldPrice>0&&Number.isFinite(analysis.upside)?oldPrice*(1+analysis.upside/100):null);return{...analysis,currentEstimate:price,priceCurrency:quote.currency||analysis.priceCurrency||"USD",quoteSource:quote.source||analysis.quoteSource||"market",quoteAsOf:quote.asOf||new Date().toISOString(),upside:impliedTarget?((impliedTarget/price)-1)*100:analysis.upside};};
 const clamp=(v,a,b)=>Math.min(Math.max(v,a),b);
-const getNow=()=>new Date();
+const IS_DEMO=import.meta.env.VITE_APP_MODE==="demo"||new URLSearchParams(window.location.search).get("demo")==="1";
+const px=parseDecimal;
+const isActiveRecord=record=>!record.voided&&!record.reversed&&record.status!=="reversed";
+const linkedTransactionOrigin=tx=>tx?.goalId||tx?.paymentId||tx?.kind?.startsWith("goal_")?"goals":tx?.source==="salary"||tx?.source==="extra"||tx?.extraId?"salary":tx?.recurringId||["recurring","auto"].includes(tx?.source)?"recurring":null;
+const getNow=()=>IS_DEMO?new Date("2026-09-16T12:00:00"):new Date();
 const todayISO=()=>{const n=getNow();return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}-${String(n.getDate()).padStart(2,"0")}`;};
 const isValidISODate=value=>{if(!/^\d{4}-\d{2}-\d{2}$/.test(String(value||"")))return false;const[y,m,d]=value.split("-").map(Number);const parsed=new Date(Date.UTC(y,m-1,d));return parsed.getUTCFullYear()===y&&parsed.getUTCMonth()===m-1&&parsed.getUTCDate()===d;};
 const normalizeInputDate=value=>{const raw=String(value||"").trim();const isoToken=raw.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0];if(isValidISODate(isoToken))return isoToken;const match=raw.match(/\b(\d{1,2})[\/\-.](\d{1,2})(?:[\/\-.](\d{2}|\d{4}))?\b/);if(!match)return null;const now=getNow();let year=match[3]?(match[3].length===2?Number(`20${match[3]}`):Number(match[3])):now.getFullYear();let iso=`${year}-${match[2].padStart(2,"0")}-${match[1].padStart(2,"0")}`;if(!match[3]&&isValidISODate(iso)&&new Date(`${iso}T00:00:00`)>now){year-=1;iso=`${year}-${match[2].padStart(2,"0")}-${match[1].padStart(2,"0")}`;}return isValidISODate(iso)?iso:null;};
 const getCUR=()=>{const n=getNow();return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}`;};
+const calcHoldingValueArs=(holding,prices,rate,options={})=>domainHoldingValue(holding,prices,rate,{asOfDate:todayISO(),...options});
 const gMonth=d=>{if(!d)return"";if(d.includes("-")&&d.indexOf("-")===4)return d.slice(0,7);const parts=d.split(/[\/\-]/);if(parts.length>=3){const[day,month,year]=parts[0].length===4?[parts[2],parts[1],parts[0]]:[parts[0],parts[1],parts[2]];return`${year.length===2?"20"+year:year}-${month.padStart(2,"0")}`;}return d.slice(0,7);};
 const MOS=["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
 const CATS=["🏠 Vivienda","🛒 Supermercado","🚗 Transporte","🍔 Comida y delivery","💊 Salud","🧴 Cuidado personal","🐾 Mascotas","👕 Indumentaria","📱 Servicios digitales","🎬 Ocio","💪 Deporte","✈️ Viajes","📚 Educación","💰 Ahorro","💳 Cuotas","🐜 Gastos hormiga","🧛 Suscripciones","❓ Otros"];
@@ -136,74 +150,32 @@ const detectTransfers=(newTxs,existingTxs,tolerancePct=0.02,dayWindow=2)=>{const
 async function fetchUSDRates(){try{const r=await fetch("https://dolarapi.com/v1/dolares");if(!r.ok)return null;const d=await r.json();const oficial=d.find(x=>x.casa==="oficial");const mep=d.find(x=>x.casa==="bolsa"||x.casa==="mep");const blue=d.find(x=>x.casa==="blue");return{oficial:oficial?(oficial.compra+oficial.venta)/2:1350,mep:mep?(mep.compra+mep.venta)/2:1350,blue:blue?(blue.compra+blue.venta)/2:1350};}catch{return null;}}
 async function fetchStockPrice(ticker){try{const r=await fetch(`/api/price?ticker=${encodeURIComponent(ticker)}`);if(!r.ok)return null;const d=await r.json();if(d.error||!d.price)return null;return d;}catch{return null;}}
 async function extractFromImage(b64,mime){const{data}=await extractTransactionsFromImage({imageBase64:b64,mime,today:todayISO()});return{...data,transactions:(data.transactions||[]).map(t=>({...t,category:matchCat(t.category)}))};}
-async function loadPDFJS(){if(window.pdfjsLib)return window.pdfjsLib;return new Promise((resolve,reject)=>{const s=document.createElement("script");s.src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";s.onload=()=>{window.pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";resolve(window.pdfjsLib);};s.onerror=()=>reject(new Error("No se pudo cargar el lector de PDF."));document.head.appendChild(s);});}
-async function extractFromPDF(file,onProgress){const lib=await loadPDFJS();const buf=await file.arrayBuffer();const pdf=await lib.getDocument({data:buf}).promise;const results=[];const warnings=[];const apps=new Set();for(let p=1;p<=pdf.numPages;p++){onProgress?.(`Procesando página ${p}/${pdf.numPages}...`);const page=await pdf.getPage(p);const vp=page.getViewport({scale:2.0});const canvas=document.createElement("canvas");canvas.width=vp.width;canvas.height=vp.height;const ctx=canvas.getContext("2d");await page.render({canvasContext:ctx,viewport:vp}).promise;const b64=canvas.toDataURL("image/jpeg",0.85).split(",")[1];const r=await extractFromImage(b64,"image/jpeg");if(r?.warnings?.length)warnings.push(...r.warnings.map(w=>`Página ${p}: ${w}`));if(r?.appDetected)apps.add(r.appDetected);if(r?.transactions?.length){results.push(...r.transactions.map((t,i)=>({...t,id:`pdf_${uid()}_${p}_${i}`,currency:r.currency||"ARS",source:"pdf"})));}}return{transactions:results,warnings:[...new Set(warnings)].slice(0,8),appDetected:[...apps].join(", ")||null};}
+async function loadPDFJS(){const lib=await import("pdfjs-dist");const {default:workerUrl}=await import("pdfjs-dist/build/pdf.worker.min.mjs?url");lib.GlobalWorkerOptions.workerSrc=workerUrl;return lib;}
+async function extractFromPDF(file,onProgress){const lib=await loadPDFJS();const buf=await file.arrayBuffer();const pdf=await lib.getDocument({data:buf,isEvalSupported:false}).promise;if(pdf.numPages>10)throw new Error("El PDF tiene más de 10 páginas. Dividilo antes de importarlo.");const results=[];const warnings=[];const apps=new Set();for(let p=1;p<=pdf.numPages;p++){onProgress?.(`Procesando página ${p}/${pdf.numPages}...`);const page=await pdf.getPage(p);const vp=page.getViewport({scale:2.0});const canvas=document.createElement("canvas");canvas.width=vp.width;canvas.height=vp.height;const ctx=canvas.getContext("2d");await page.render({canvasContext:ctx,viewport:vp}).promise;const b64=canvas.toDataURL("image/jpeg",0.85).split(",")[1];const r=await extractFromImage(b64,"image/jpeg");if(r?.warnings?.length)warnings.push(...r.warnings.map(w=>`Página ${p}: ${w}`));if(r?.appDetected)apps.add(r.appDetected);if(r?.transactions?.length){results.push(...r.transactions.map((t,i)=>({...t,id:`pdf_${uid()}_${p}_${i}`,currency:r.currency||"ARS",source:"pdf"})));}}return{transactions:results,warnings:[...new Set(warnings)].slice(0,8),appDetected:[...apps].join(", ")||null};}
 async function autoScanInvestments(profile,usdRate){const{data}=await scanInvestments({profile:{risk:profile.risk,horizon:profile.horizon,horizonLabel:horizonLabel(profile.horizon),allocation:profile.allocation||null,objective:profile.objective||null},usdRate,date:todayISO()});return data;}
 async function analyzeStock(ticker,name){const{data}=await analyzeInvestment({ticker,name:name||null,date:todayISO()});return data;}
 async function compareInstruments(monthly,months,usdRate){const{data}=await compareInvestmentInstruments({monthly,months,usdRate,date:todayISO()});return data;}
 async function autoCat(items){const{data}=await categorizeTransactions(items);return data.items||[];}
 async function genWeeklyInsight(transactions,goals,usdRate,portfolioValueArs=0,portfolioInvestedArs=0,holdings=[]){const now=Date.now();const w1=transactions.filter(t=>{const d=now-new Date(t.date);return d>=0&&d<=7*864e5;});const e1=w1.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);const w2=transactions.filter(t=>{const d=now-new Date(t.date);return d>7*864e5&&d<=14*864e5;});const e2=w2.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);const cm={};w1.filter(t=>t.type==="expense").forEach(t=>{cm[t.category]=(cm[t.category]||0)+t.amount;});const topCategories=Object.entries(cm).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([category,amount])=>({category,amount}));const portfolioPnlArs=portfolioValueArs-portfolioInvestedArs;const portfolioPnlPct=portfolioInvestedArs>0?(portfolioPnlArs/portfolioInvestedArs)*100:0;const goalMetrics=(goals||[]).slice(0,5).map(g=>{const saved=goalCash(g);return{name:g.name,progressPct:g.target>0?clamp((saved/g.target)*100,0,100):0,remainingArs:Math.max(0,(g.target||0)-saved)};});const{data}=await generateWeeklyInsight({last7dExpenses:e1,priorWeekExpenses:e2,topCategories,portfolioValueArs,portfolioInvestedArs,portfolioPnlArs,portfolioPnlPct,holdings:holdings.slice(0,6).map(h=>h.ticker||h.name).filter(Boolean),goals:goalMetrics,usdRate,date:todayISO()});return data;}
-function parseCSVLine(line,sep){const fields=[];let f="",inQ=false;for(let i=0;i<line.length;i++){const c=line[i];if(c==='"'){if(inQ&&line[i+1]==='"'){f+='"';i++;}else inQ=!inQ;}else if(c===sep&&!inQ){fields.push(f.trim());f="";}else f+=c;}fields.push(f.trim());return fields;}
-function parseCSV(txt){
-  const lines=txt.trim().split("\n").filter(line=>line.trim());
-  if(lines.length<2)return[];
-  const sep=lines[0].includes(";")?";":(lines[0].includes("\t")?"\t":",");
-  let headerIdx=0;
-  for(let i=0;i<Math.min(lines.length,10);i++){
-    const cols=parseCSVLine(lines[i],sep).map(col=>col.toLowerCase().replace(/"/g,""));
-    const hasDate=cols.some(col=>/^(fecha|date|release_date|transaction_date|dia)/.test(col));
-    const hasAmt=cols.some(col=>/^(transaction_amount|monto|importe|debito|credito|amount|debit|credit)/.test(col));
-    if(hasDate||hasAmt){headerIdx=i;break;}
-  }
-  const hdrs=parseCSVLine(lines[headerIdx],sep).map(header=>header.trim().replace(/"/g,"").toLowerCase());
-  const dK=hdrs.find(header=>!header.includes("reference")&&(/^(fecha|date|release_date|transaction_date|dia)$/.test(header)||/fecha|date/.test(header)));
-  const dscK=hdrs.find(header=>!header.includes("reference")&&(/^(description|descripcion|concepto|detalle|establecimiento|comercio)$/.test(header)||/desc|concepto|detalle|comer|estab/.test(header)));
-  const tK=hdrs.find(header=>/^(tipo|type|transaction_type|movement_type)$/.test(header));
-  const debK=hdrs.find(header=>/^(debito|debe|debit|cargo|egreso)$/.test(header));
-  const creK=hdrs.find(header=>/^(credito|haber|credit|abono)$/.test(header));
-  const aK=hdrs.find(header=>/^(transaction_amount|importe|monto|amount|total)$/.test(header)||(/import|monto|amount|total/.test(header)&&!header.includes("reference")&&!header.includes("balance")));
-  const curK=hdrs.find(header=>/^(moneda|currency|divisa)$/.test(header)||/moneda|currency|divisa/.test(header));
-  const out=[];
-  for(let i=headerIdx+1;i<lines.length;i++){
-    const cols=parseCSVLine(lines[i],sep);
-    const obj={};
-    hdrs.forEach((header,index)=>obj[header]=(cols[index]||"").trim().replace(/^"|"$/g,""));
-    let amount=0,type="expense";
-    if(debK&&creK){
-      const debit=px(obj[debK]),credit=px(obj[creK]);
-      if(credit>0){amount=credit;type="income";}else if(debit>0){amount=debit;}else continue;
-    }else if(aK){
-      const rawAmount=String(obj[aK]||"").trim();
-      if(/e[+\-]/i.test(rawAmount))continue;
-      const signed=px(rawAmount);amount=Math.abs(signed);type=rawAmount.startsWith("-")||signed<0?"expense":"income";
-    }else{
-      const numeric=Object.entries(obj).filter(([key])=>!key.includes("reference")&&!key.includes("balance")&&key!==dK).map(([,value])=>px(value)).find(value=>value>0&&value<1e10);
-      if(!numeric)continue;amount=numeric;
-    }
-    const declaredType=normalizeTxType(obj[tK]);
-    if(declaredType)type=declaredType;
-    if(amount<=0||amount>1e10)continue;
-    const currency=/(?:\bUSD\b|US\$|U\$S|\bD[ÓO]LAR(?:ES)?\b)/i.test(`${obj[curK]||""} ${obj[aK]||""} ${lines[i]}`)?"USD":"ARS";
-    out.push({id:`csv_${uid()}_${i}`,currency,date:normalizeInputDate(obj[dK]),description:obj[dscK]||`TX ${i-headerIdx}`,amount,type,category:"❓ Otros",source:"csv"});
-  }
-  return out;
-}
-
 const getSalaryTotal=(salaries,month)=>{const m=month||getCUR();const s=salaries?.find(s=>s.month===m);return s?(s.base+(s.extras||[]).reduce((a,e)=>a+e.amt,0)):0;};
-const getMonthIncomeParts=(salaries,transactions,month)=>{const record=salaries?.find(s=>s.month===month);const rows=(transactions||[]).filter(tx=>gMonth(tx.date)===month&&tx.type==="income");const legacyBase=rows.filter(tx=>tx.source==="salary").reduce((sum,tx)=>sum+tx.amount,0);const legacyExtras=rows.filter(tx=>tx.source==="extra").reduce((sum,tx)=>sum+tx.amount,0);const base=record?.base||legacyBase;const extras=record?(record.extras||[]).reduce((sum,item)=>sum+item.amt,0):legacyExtras;const other=rows.filter(tx=>tx.source!=="salary"&&tx.source!=="extra").reduce((sum,tx)=>sum+tx.amount,0);return{base,extras,other,total:base+extras+other};};
-const calcHoldingValueArs=(h,marketPrices={},usdRate=1)=>{let invArs=h.totalInvestedArs;if(!invArs)invArs=h.originalCurrency==="USD"?(h.totalInvested||0)*usdRate:(h.totalInvested||0);let curArs=invArs;if(["accion","cedear","etf","crypto"].includes(h.type)){const mp=marketPrices[h.ticker];if(mp){const priceArs=mp.currency==="USD"?mp.price*usdRate:mp.price;curArs=(h.quantity||0)*priceArs;}else{const fallbackPriceArs=h.originalCurrency==="USD"?(h.originalBuyPrice||h.buyPrice||0)*usdRate:(h.originalBuyPrice||h.buyPrice||0);curArs=(h.quantity||0)*fallbackPriceArs;}}else{const now=Date.now();const start=new Date(h.buyDate).getTime();const end=h.maturityDate?new Date(h.maturityDate).getTime():now;const calcDate=["plazo_fijo","bono"].includes(h.type)?Math.min(now,end):now;const daysElapsed=Math.max(0,Math.floor((calcDate-start)/864e5));if(h.type==="fci"){curArs=invArs*Math.pow(1+((h.rate||0)/100/365),daysElapsed);}else{curArs=invArs*(1+((h.rate||0)/100)*(daysElapsed/365));}}return{invArs,curArs};};
-const goalCash=g=>(g.saved||0)+(g.payments||g.milestones||[]).reduce((s,p)=>s+p.amount,0);
-const goalPlan=(goals,salaries,transactions,holdings=[],marketPrices={},usdRate=1)=>{const CUR=getCUR();const NOW=getNow();const salary=getSalaryTotal(salaries);const spent=transactions.filter(t=>gMonth(t.date)===CUR&&t.type==="expense").reduce((s,t)=>s+t.amount,0);const disponible=Math.max(0,salary-spent);const portfolioValue=holdings.reduce((s,h)=>s+calcHoldingValueArs(h,marketPrices,usdRate).curArs,0);const active=goals.filter(g=>goalCash(g)<g.target);return{disponible,portfolioValue,perGoal:active.map(g=>{const rem=g.target-goalCash(g);const couldUsePortfolio=portfolioValue>=rem*0.3;const days=g.deadline?Math.ceil((new Date(g.deadline)-NOW)/864e5):365;const months=Math.max(1,Math.ceil(days/30));const needed=rem/months;return{id:g.id,name:g.name,icon:g.icon,needed,months,rem,feasible:needed<=disponible/Math.max(active.length,1)*1.2,couldUsePortfolio,portfolioCover:portfolioValue>0?Math.min(100,Math.round(portfolioValue/rem*100)):0};})};};
+const goalPlan=(goals,salaries,transactions,holdings=[],marketPrices={},usdRate=1)=>{
+  const NOW=getNow();const disponible=monthSummary({salaries,transactions},getCUR()).available;
+  const portfolioValue=holdings.reduce((s,h)=>s+calcHoldingValueArs(h,marketPrices,usdRate).curArs,0);
+  const remaining=g=>Math.max(0,g.target-goalProgress(g)-holdings.filter(h=>h.goalId===g.id).reduce((v,h)=>v+calcHoldingValueArs(h,marketPrices,usdRate).curArs,0));
+  const active=goals.filter(g=>remaining(g)>0);
+  return{disponible,portfolioValue,perGoal:active.map(g=>{const rem=remaining(g);const days=g.deadline?Math.ceil((new Date(`${g.deadline}T12:00:00`)-NOW)/864e5):365;const months=Math.max(1,Math.ceil(days/30));const needed=rem/months;return{id:g.id,name:g.name,icon:g.icon,needed,months,rem,feasible:needed<=Math.max(0,disponible)/Math.max(active.length,1)};})};
+};
 const healthScore=(txs,goals,holdings=[],salaries=[],riskProfile=null,marketPrices={},usdRate=1)=>{
-  const monthKey=offset=>{const date=new Date();date.setMonth(date.getMonth()+offset);return`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}`;};
-  const snapshot=month=>{const rows=txs.filter(tx=>gMonth(tx.date)===month);const expenses=rows.filter(tx=>tx.type==="expense");const expense=expenses.reduce((sum,tx)=>sum+tx.amount,0);const categorizedExpense=expenses.filter(tx=>categoryName(tx.category)!=="Otros").reduce((sum,tx)=>sum+tx.amount,0);const byCategory=name=>expenses.filter(tx=>categoryName(tx.category)===name).reduce((sum,tx)=>sum+tx.amount,0);const income=getMonthIncomeParts(salaries,txs,month).total;return{month,income,expense,expenseCount:expenses.length,categorizedRatio:expense>0?categorizedExpense/expense:0,installments:byCategory("Cuotas"),leaks:byCategory("Gastos hormiga")+byCategory("Suscripciones")};};
+  txs=(txs||[]).filter(tx=>isActiveRecord(tx)&&isValidISODate(tx.date));
+  const monthKey=offset=>{const now=getNow();const date=new Date(now.getFullYear(),now.getMonth()+offset,1);return`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}`;};
+  const snapshot=month=>{const rows=txs.filter(tx=>gMonth(tx.date)===month);const expenses=rows.filter(tx=>tx.type==="expense");const expense=monthSummary({transactions:txs,salaries},month).expenses;const categorizedExpense=expenses.filter(tx=>categoryName(tx.category)!=="Otros").reduce((sum,tx)=>sum+tx.amount,0);const byCategory=name=>expenses.filter(tx=>categoryName(tx.category)===name).reduce((sum,tx)=>sum+tx.amount,0);const income=getMonthIncomeParts(salaries,txs,month).total;return{month,income,expense,expenseCount:expenses.length,categorizedRatio:expense>0?categorizedExpense/expense:0,installments:byCategory("Cuotas"),leaks:byCategory("Gastos hormiga")+byCategory("Suscripciones")};};
   const months=[0,-1,-2].map(offset=>snapshot(monthKey(offset)));const current=months[0];const usable=months.filter(month=>month.income>0&&month.expense>0);const usableMonths=usable.length;const categoryReady=current.expense>0&&current.categorizedRatio>=0.7;const status=!(current.income>0&&current.expense>0&&categoryReady)?"insufficient":usableMonths===3&&months.every(month=>month.categorizedRatio>=0.7)?"ready":"provisional";
   const evidence=usable.length?usable:[current];const average=(rows,key)=>rows.reduce((sum,month)=>sum+month[key],0)/Math.max(rows.length,1);const savingsRate=current.income>0&&current.expense>0?clamp((average(evidence,"income")-average(evidence,"expense"))/average(evidence,"income"),-1,1):null;const savingsValue=savingsRate===null?null:clamp(Math.round((Math.max(0,savingsRate)/0.2)*20),0,20);const positiveMonths=usable.filter(month=>month.income>month.expense).length;const consistencyValue=usableMonths===3?positiveMonths*5:null;const categoryEvidence=evidence.filter(month=>month.categorizedRatio>=0.7);const debtRate=categoryReady&&categoryEvidence.length&&average(categoryEvidence,"income")>0?average(categoryEvidence,"installments")/average(categoryEvidence,"income"):null;const debtValue=debtRate===null?null:clamp(Math.round(15-(debtRate/0.3)*15),0,15);const leakRate=categoryReady&&categoryEvidence.length&&average(categoryEvidence,"income")>0?average(categoryEvidence,"leaks")/average(categoryEvidence,"income"):null;const leaksValue=leakRate===null?null:clamp(Math.round(15-(leakRate/0.15)*15),0,15);
-  const activeGoals=goals.filter(goal=>goalCash(goal)<goal.target);const goalProgress=activeGoals.length?activeGoals.reduce((sum,goal)=>{const linked=holdings.filter(holding=>holding.goalId===goal.id).reduce((value,holding)=>value+calcHoldingValueArs(holding,marketPrices,usdRate).curArs,0);return sum+clamp((goalCash(goal)+linked)/goal.target,0,1);},0)/activeGoals.length:0;const holdingTypes=new Set(holdings.map(holding=>holding.type||"other"));
-  const baseTip="Primero cargá ingresos y gastos del mismo mes para calcular tu salud financiera.";const tips={ahorro:savingsRate===null?baseTip:savingsRate>=0.2?`Tu ahorro estimado es ${Math.round(savingsRate*100)}% del ingreso.`:`Tu ahorro estimado es ${Math.round(savingsRate*100)}%. El 20% funciona como referencia, no como regla.`,consistencia:usableMonths<3?`Hay ${usableMonths}/3 meses con ingresos y gastos. Falta historial para medir consistencia.`:`Cerraste ${positiveMonths}/3 meses en positivo.`,deuda:debtRate===null?"Categorizá al menos 70% de los gastos para estimar el peso de las cuotas.":`Las cuotas representan ${Math.round(debtRate*100)}% del ingreso observado.`,fugas:leakRate===null?"Categorizá los gastos para detectar suscripciones y consumos pequeños recurrentes.":`Gastos hormiga y suscripciones representan ${Math.round(leakRate*100)}% del ingreso observado.`,metas:activeGoals.length?`Tenés ${activeGoals.length} meta${activeGoals.length===1?"":"s"} activa${activeGoals.length===1?"":"s"}, con ${Math.round(goalProgress*100)}% de avance promedio.`:"Todavía no configuraste metas. Esto no afecta tu salud financiera.",diversif:holdingTypes.size?`Tu portfolio incluye ${holdingTypes.size} tipo${holdingTypes.size===1?"":"s"} de activo. Esto se muestra como progreso, no como salud.`:"Todavía no cargaste inversiones. Esto no afecta tu salud financiera.",perfil:riskProfile?"Tu perfil de inversión está configurado y se usa sólo en Inversiones.":"Tu perfil de inversión todavía no está configurado."};
+  const activeGoals=goals.filter(goal=>goalProgress(goal)<goal.target);const meanGoalProgress=activeGoals.length?activeGoals.reduce((sum,goal)=>{const linked=holdings.filter(holding=>holding.goalId===goal.id).reduce((value,holding)=>value+calcHoldingValueArs(holding,marketPrices,usdRate).curArs,0);return sum+clamp((goalProgress(goal)+linked)/goal.target,0,1);},0)/activeGoals.length:0;const holdingTypes=new Set(holdings.map(holding=>holding.type||"other"));
+  const baseTip="Primero cargá ingresos y gastos del mismo mes para calcular tu salud financiera.";const tips={ahorro:savingsRate===null?baseTip:savingsRate>=0.2?`Tu ahorro estimado es ${Math.round(savingsRate*100)}% del ingreso.`:`Tu ahorro estimado es ${Math.round(savingsRate*100)}%. El 20% funciona como referencia, no como regla.`,consistencia:usableMonths<3?`Hay ${usableMonths}/3 meses con ingresos y gastos. Falta historial para medir consistencia.`:`Cerraste ${positiveMonths}/3 meses en positivo.`,deuda:debtRate===null?"Categorizá al menos 70% de los gastos para estimar el peso de las cuotas.":`Las cuotas representan ${Math.round(debtRate*100)}% del ingreso observado.`,fugas:leakRate===null?"Categorizá los gastos para detectar suscripciones y consumos pequeños recurrentes.":`Gastos hormiga y suscripciones representan ${Math.round(leakRate*100)}% del ingreso observado.`,metas:activeGoals.length?`Tenés ${activeGoals.length} meta${activeGoals.length===1?"":"s"} activa${activeGoals.length===1?"":"s"}, con ${Math.round(meanGoalProgress*100)}% de avance promedio.`:"Todavía no configuraste metas. Esto no afecta tu salud financiera.",diversif:holdingTypes.size?`Tu portfolio incluye ${holdingTypes.size} tipo${holdingTypes.size===1?"":"s"} de activo. Esto se muestra como progreso, no como salud.`:"Todavía no cargaste inversiones. Esto no afecta tu salud financiera.",perfil:riskProfile?"Tu perfil de inversión está configurado y se usa sólo en Inversiones.":"Tu perfil de inversión todavía no está configurado."};
   const items=[{key:"ahorro",l:"Capacidad de ahorro",short:"Ahorro",desc:"Balance entre ingresos y gastos observados",v:savingsValue,m:20,tip:tips.ahorro},{key:"consistencia",l:"Consistencia mensual",short:"Constancia",desc:"Meses con balance positivo dentro del historial",v:consistencyValue,m:15,tip:tips.consistencia},{key:"deuda",l:"Control de deuda",short:"Deuda",desc:"Cuotas respecto de los ingresos registrados",v:debtValue,m:15,tip:tips.deuda},{key:"fugas",l:"Gastos recurrentes",short:"Recurrentes",desc:"Suscripciones y consumos pequeños detectados",v:leaksValue,m:15,tip:tips.fugas}];const availableItems=items.filter(item=>item.v!==null);const availablePoints=availableItems.reduce((sum,item)=>sum+item.m,0);const score=status!=="ready"||!availablePoints?null:clamp(Math.round(availableItems.reduce((sum,item)=>sum+item.v,0)/availablePoints*100),0,100);const worst=availableItems.length?availableItems.reduce((currentWorst,item)=>(item.v/item.m)<(currentWorst.v/currentWorst.m)?item:currentWorst):null;tips._worst=worst?`${worst.l}: ${worst.tip}`:baseTip;
   const missing=[];if(current.income<=0)missing.push("Ingresos del mes");if(current.expense<=0)missing.push("Gastos del mes");if(current.expense>0&&!categoryReady)missing.push("Categorías de gastos");
-  return{status,score,items,tips,coverage:{usableMonths,requiredMonths:3,categorizedRatio:current.categorizedRatio,hasIncome:current.income>0,hasExpenses:current.expense>0,expenseCount:current.expenseCount},missing,progressItems:[{key:"metas",label:"Metas",detail:activeGoals.length?`${activeGoals.length} activa${activeGoals.length===1?"":"s"} · ${Math.round(goalProgress*100)}% promedio`:"Sin metas activas",done:activeGoals.length>0,view:"goals"},{key:"diversif",label:"Inversiones",detail:holdings.length?`${holdings.length} activo${holdings.length===1?"":"s"} · ${holdingTypes.size} tipo${holdingTypes.size===1?"":"s"}`:"Sin inversiones cargadas",done:holdings.length>0,view:"investments"}],setupItems:[{key:"income",label:"Ingresos",done:current.income>0},{key:"expenses",label:"Gastos",done:current.expense>0},{key:"categories",label:"Categorías",done:categoryReady},{key:"profile",label:"Perfil inversor",done:Boolean(riskProfile)}]};
+  return{status,score,items,tips,coverage:{usableMonths,requiredMonths:3,categorizedRatio:current.categorizedRatio,hasIncome:current.income>0,hasExpenses:current.expense>0,expenseCount:current.expenseCount},missing,progressItems:[{key:"metas",label:"Metas",detail:activeGoals.length?`${activeGoals.length} activa${activeGoals.length===1?"":"s"} · ${Math.round(meanGoalProgress*100)}% promedio`:"Sin metas activas",done:activeGoals.length>0,view:"goals"},{key:"diversif",label:"Inversiones",detail:holdings.length?`${holdings.length} activo${holdings.length===1?"":"s"} · ${holdingTypes.size} tipo${holdingTypes.size===1?"":"s"}`:"Sin inversiones cargadas",done:holdings.length>0,view:"investments"}],setupItems:[{key:"income",label:"Ingresos",done:current.income>0},{key:"expenses",label:"Gastos",done:current.expense>0},{key:"categories",label:"Categorías",done:categoryReady},{key:"profile",label:"Perfil inversor",done:Boolean(riskProfile)}]};
 };
 
 function USDAtmosphere(){
@@ -475,10 +447,10 @@ function AppSelect({value,onChange,options=[],placeholder="Seleccionar",ariaLabe
   const handleKey=event=>{if(disabled)return;if(event.key==="Tab"){setOpen(false);return;}if(event.key==="Escape"){event.preventDefault();setOpen(false);triggerRef.current?.focus();return;}if(event.key==="ArrowDown"||event.key==="ArrowUp"){event.preventDefault();if(!open){setOpen(true);return;}const dir=event.key==="ArrowDown"?1:-1;setActive(index=>(index+dir+filtered.length)%Math.max(filtered.length,1));return;}if((event.key==="Enter"||event.key===" ")&&!open){event.preventDefault();setOpen(true);return;}if(event.key==="Enter"&&open){event.preventDefault();choose(filtered[active]);}};
   const activeDescendant=open&&filtered[active]?`${listboxId}-option-${active}`:undefined;
   const trigger=(<button ref={triggerRef} type="button" className="inp app-select-trigger" style={compact?{padding:"7px 10px",fontSize:11,minHeight:34}:undefined} aria-label={ariaLabel||placeholder} aria-haspopup="listbox" aria-expanded={open} aria-controls={listboxId} aria-activedescendant={!searchable?activeDescendant:undefined} disabled={disabled} onClick={()=>!disabled&&setOpen(current=>!current)} onKeyDown={handleKey} onBlur={()=>requestAnimationFrame(()=>{if(!menuRef.current?.contains(document.activeElement))setOpen(false);})}><span className="app-select-value">{selected?.icon}{<span style={{color:selected?T.white:T.muted}}>{selected?.label||placeholder}</span>}</span><span className="app-select-chevron"><ic.ChevronDown/></span></button>);
-  const menu=open&&menuPos?createPortal(<div ref={menuRef} id={listboxId} className="app-select-menu" role="listbox" aria-label={ariaLabel||placeholder} style={menuPos} onKeyDown={handleKey} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget)&&!triggerRef.current?.contains(event.relatedTarget))setOpen(false);}}>{searchable&&<div style={{position:"sticky",top:-6,zIndex:1,background:"inherit",padding:"4px 4px 7px"}}><input autoFocus className="inp" style={{padding:"8px 10px",fontSize:12,minHeight:36}} value={query} onChange={event=>{setQuery(event.target.value);setActive(0);}} placeholder={searchPlaceholder} aria-label={searchPlaceholder.replace(/…/g,"")} aria-controls={listboxId} aria-activedescendant={activeDescendant}/></div>}{filtered.length?filtered.map((option,index)=><button ref={node=>{optionRefs.current[index]=node;}} id={`${listboxId}-option-${index}`} tabIndex={-1} type="button" role="option" aria-selected={String(option.value)===String(value)} className={`app-select-option${active===index?" active":""}`} key={String(option.value)} onPointerMove={()=>setActive(index)} onClick={()=>choose(option)}>{option.icon}<span className="app-select-option-label">{option.label}</span><span className="app-select-check">{String(option.value)===String(value)&&<ic.Check/>}</span></button>):<div style={{padding:"14px 10px",fontSize:12,color:T.muted,textAlign:"center"}}>Sin resultados</div>}</div>,document.body):null;
+  const menu=open&&menuPos?createPortal(<div ref={menuRef} id={listboxId} className="app-select-menu" role="listbox" aria-label={ariaLabel||placeholder} style={menuPos} onKeyDown={handleKey} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget)&&!triggerRef.current?.contains(event.relatedTarget))setOpen(false);}}>{searchable&&<div style={{position:"sticky",top:-6,zIndex:1,background:"inherit",padding:"4px 4px 7px"}}><input autoFocus className="inp" style={{padding:"8px 10px",fontSize:12,minHeight:36}} value={query} onChange={event=>{setQuery(event.target.value);setActive(0);}} placeholder={searchPlaceholder} aria-label={searchPlaceholder.replace(/…/g,"")} aria-controls={listboxId} aria-activedescendant={activeDescendant}/></div>}{filtered.length?filtered.map((option,index)=><button ref={node=>{optionRefs.current[index]=node;}} id={`${listboxId}-option-${index}`} tabIndex={-1} type="button" role="option" aria-selected={String(option.value)===String(value)} className={`app-select-option${active===index?" active":""}`} key={String(option.value)} onPointerMove={()=>setActive(index)} onClick={()=>choose(option)}>{option.icon}<span className="app-select-option-label">{option.label}</span><span className="app-select-check">{String(option.value)===String(value)&&<ic.Check/>}</span></button>):<div style={{padding:"14px 10px",fontSize:12,color:T.muted,textAlign:"center"}}>Sin resultados</div>}</div>,triggerRef.current?.closest("dialog")||document.body):null;
   return <div className={`app-select ${className}`.trim()} style={style}>{trigger}{menu}</div>;
 }
-const CategorySelect=({includeAll=false,...props})=><AppSelect {...props} options={includeAll?[{value:"",label:"Todas las categorías"},...CATEGORY_SELECT_OPTIONS]:CATEGORY_SELECT_OPTIONS} searchable searchPlaceholder="Buscar categoría…"/>;
+const CategorySelect=({includeAll=false,...props})=><AppSelect {...props} options={[...(includeAll?[{value:"",label:"Todas las categorías"}]:[]),...(props.value&&!CATS.includes(props.value)?[{value:props.value,label:categoryName(props.value)}]:[]),...CATEGORY_SELECT_OPTIONS]} searchable searchPlaceholder="Buscar categoría…"/>;
 const Dots=()=><span className="dots"><span/><span/><span/></span>;
 const EmptyPanel=({icon="·",title,detail,compact=false,children})=>(<div className={`empty-panel${compact?" compact":""}`}><div className="empty-panel-icon">{icon}</div><div className="empty-panel-title">{title}</div>{detail&&<div className="empty-panel-detail">{detail}</div>}{children&&<div className="empty-panel-actions">{children}</div>}</div>);
 function FinancialHealthCard({health,setView}){
@@ -515,76 +487,8 @@ function exportData(state){const json=JSON.stringify(state,null,2);const jsonBlo
 
 const SUPABASE_URL=import.meta.env.VITE_SUPABASE_URL||"https://ghfnscswtsgnylumcxyp.supabase.co";
 const SUPABASE_KEY=import.meta.env.VITE_SUPABASE_ANON_KEY||"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdoZm5zY3N3dHNnbnlsdW1jeHlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNzUxOTgsImV4cCI6MjA4OTk1MTE5OH0.dq2Xhy7c7X_kZvGtln5Ko8hl5woYsHGq5hXLSfJQoic";
-const SLIDE_MAP={4:{section:"goals",target:"new-goal-btn",tip:"Tocá acá para crear tu primera meta — nombre, monto y fecha límite.",btn:"Crear meta"},6:{section:"dashboard",target:"plan-ahorro-card",tip:"Este es tu plan de ahorro calculado con tu sueldo real.",btn:"Ver plan"},8:{section:"dashboard",target:"kpi-balance",tip:"Tu balance libre es el número que manda todas las decisiones del mes.",btn:"Ver balance",scoreTipKey:"consistencia"},9:{section:"transactions",target:"presupuestos-btn",tip:"Fijá un límite por categoría. La app te avisa antes de que te pases.",btn:"Presupuestos",scoreTipKey:"ahorro"},10:{section:"transactions",target:"recurrentes-btn",tip:"Tus recurrentes activos están acá. Pausá las que no usás.",btn:"Recurrentes"},11:{section:"import",target:"import-image-tab",tip:"Subí un screenshot o CSV de tu banco aquí.",btn:"Importar"},12:{section:"dashboard",target:"generar-resumen",tip:"Generá tu resumen semanal — 4 cards con el análisis de tu semana.",btn:"Generar"},18:{section:"investments",target:"add-holding-btn",tip:"Cargá tu FCI o plazo fijo acá.",btn:"Agregar inversión",scoreTipKey:"diversif"},19:{section:"dashboard",target:"toggle-usd",tip:"Cambiá a USD — todos los números se convierten automáticamente.",btn:"Activar USD"},20:{section:"goals",target:"vincular-inv-btn",tip:"Vincular una inversión a tu meta hace que su valor cuente en el progreso.",btn:"Vincular",fallbackTarget:"add-holding-btn",fallbackSection:"investments",scoreTipKey:"metas"},21:{section:"dashboard",target:"score-card",tip:"Tu Score Financiero resume tu situación en un número.",btn:"Ver score",scoreTipKey:"_worst"},23:{section:"investments",target:"scanner-tab",tip:"El Scanner IA encuentra oportunidades adaptadas a tu perfil.",btn:"Ver scanner"},};
-const TOUR_SEQUENCE=[4,6,8,9,10,11,12,18,19,20,21,23];
-
-function TourGuide({setView,scoreTips={}}){
-  const TOUR_KEYS=TOUR_SEQUENCE;const LS_KEY="mangos_tour_step";
-  const [tip,setTip]=useState(null);const [pos,setPos]=useState(null);
-  const [tourStep,setTourStep]=useState(()=>{const s=localStorage.getItem(LS_KEY);return s!==null?parseInt(s):0;});
-  const chRef=useRef(null);const modeRef=useRef("local");
-  const getAnchor=targetId=>{if(!targetId)return null;const el=document.querySelector(`[data-tour-target="${targetId}"]`);if(!el)return null;const r=el.getBoundingClientRect();const vw=window.innerWidth;const vh=window.innerHeight;if(r.top<0||r.bottom>vh||r.right<0||r.left>vw)return null;const TW=300;const TH=130;if(r.right<260&&r.width<200){return{x:r.right+14,y:Math.max(8,Math.min(r.top+r.height/2-TH/2,vh-TH-8)),side:"right",rect:r};}if(r.height<60){const x=Math.max(8,Math.min(r.left+r.width/2-TW/2,vw-TW-8));const spaceAbove=r.top-8;if(spaceAbove>TH+20){return{x,y:null,bottom:vh-r.top+8,side:"above",rect:r};}return{x,y:r.bottom+8,side:"below",rect:r};}const x=Math.max(8,Math.min(r.left+8,vw-TW-8));const y=Math.max(8,r.top+8);return{x,y,side:"inside",rect:r};};
-  const showKey=useCallback(key=>{const mapped=SLIDE_MAP[key]||SLIDE_MAP[String(key)];if(mapped&&mapped.tip){setTip({...mapped,key});setTimeout(()=>{const anchorId=mapped.target||mapped.section;const p=getAnchor(anchorId);setPos(p);},120);}else setTip(null);},[]);
-  const next=useCallback(()=>{if(modeRef.current!=="local")return;const n=tourStep+1;if(n>=TOUR_KEYS.length){setTip(null);localStorage.removeItem(LS_KEY);return;}localStorage.setItem(LS_KEY,String(n));setTourStep(n);showKey(TOUR_KEYS[n]);},[tourStep,showKey]);
-  const dismiss=useCallback(()=>{setTip(null);localStorage.removeItem(LS_KEY);},[]);
-  const doTrigger=useCallback(el=>{const r=el.getBoundingClientRect();const ring=document.createElement("div");ring.className="tour-pulse";ring.style.cssText=`left:${r.left-4}px;top:${r.top-4}px;width:${r.width+8}px;height:${r.height+8}px;border:2px solid var(--ac);border-radius:${getComputedStyle(el).borderRadius||"12px"}`;document.body.appendChild(ring);setTimeout(()=>ring.remove(),800);el.scrollIntoView({behavior:"smooth",block:"nearest"});const tag=el.tagName.toLowerCase();const isClickable=tag==="button"||tag==="a"||el.getAttribute("role")==="button";if(isClickable){setTimeout(()=>el.click(),400);}else{const prev=el.style.outline;el.style.outline=`2px solid var(--ac)`;el.style.outlineOffset="3px";setTimeout(()=>{el.style.outline=prev;el.style.outlineOffset="";},900);}},[]);
-  const triggerTarget=useCallback((targetId,sectionId,fallbackTarget,fallbackSection)=>{let el=document.querySelector(`[data-tour-target="${targetId}"]`);if(!el&&fallbackTarget){el=document.querySelector(`[data-tour-target="${fallbackTarget}"]`);if(el&&fallbackSection&&fallbackSection!==sectionId){setView(fallbackSection);setTimeout(()=>{const el2=document.querySelector(`[data-tour-target="${fallbackTarget}"]`);if(el2)doTrigger(el2);},200);return;}}if(!el)el=document.querySelector(`[data-tour-target="${sectionId}"]`);if(!el)return;doTrigger(el);},[]);
-  useEffect(()=>{if(tourStep<TOUR_KEYS.length)showKey(TOUR_KEYS[tourStep]);},[]);// eslint-disable-line
-  useEffect(()=>{if(!SUPABASE_URL||!SUPABASE_KEY)return;(async()=>{try{const{createClient}=await import("@supabase/supabase-js");const sb=createClient(SUPABASE_URL,SUPABASE_KEY);const ch=sb.channel("charla_live").on("postgres_changes",{event:"UPDATE",schema:"public",table:"charla_state"},payload=>{const{slide,active:isActive}=payload.new;if(!isActive){modeRef.current="local";if(tourStep<TOUR_KEYS.length)showKey(TOUR_KEYS[tourStep]);else setTip(null);return;}modeRef.current="charla";const mapped=SLIDE_MAP[slide]||SLIDE_MAP[String(slide)];if(mapped&&mapped.tip){setTip({...mapped,isCharla:true});setView(mapped.section);setTimeout(()=>{const targetId=mapped.target||mapped.section;const p=getAnchor(targetId);setPos(p);if(mapped.target)triggerTarget(mapped.target,mapped.section,mapped.fallbackTarget,mapped.fallbackSection);},180);}else setTip(null);}).subscribe();chRef.current={sb,ch};}catch(e){console.warn("Supabase TourGuide error",e);}})();return()=>{chRef.current?.sb.removeChannel(chRef.current.ch);};},[]);// eslint-disable-line
-  if(!tip)return null;
-  const isCharla=tip.isCharla;const ac=isCharla?"rgba(204,255,71,.35)":"rgba(255,154,53,.3)";const acText=isCharla?T.lime:T.mango;
-  let tooltipStyle={};let arrowStyle=null;
-  if(pos){const W=pos.side==="right"?280:300;if(pos.side==="right"){tooltipStyle={position:"fixed",left:pos.x,top:pos.y,width:W};arrowStyle={position:"absolute",left:-7,top:"50%",marginTop:-7,width:0,height:0,borderTop:"7px solid transparent",borderBottom:"7px solid transparent",borderRight:`7px solid rgba(16,14,18,.97)`};}else if(pos.side==="above"){tooltipStyle={position:"fixed",left:pos.x,bottom:pos.bottom,width:W};arrowStyle={position:"absolute",bottom:-7,left:Math.min(20,W/2-7),width:0,height:0,borderLeft:"7px solid transparent",borderRight:"7px solid transparent",borderTop:`7px solid rgba(16,14,18,.97)`};}else if(pos.side==="below"){tooltipStyle={position:"fixed",left:pos.x,top:pos.y,width:W};arrowStyle={position:"absolute",top:-7,left:Math.min(20,W/2-7),width:0,height:0,borderLeft:"7px solid transparent",borderRight:"7px solid transparent",borderBottom:`7px solid rgba(16,14,18,.97)`};}else{tooltipStyle={position:"fixed",left:pos.x,top:pos.y,width:W};}}else{tooltipStyle={position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",maxWidth:460,width:"calc(100% - 24px)"};}
-  return(<div className="tour-guide" style={{...tooltipStyle,background:"rgba(16,14,18,.97)",border:`1px solid ${ac}`,borderRadius:16,padding:"13px 16px",zIndex:500,backdropFilter:"blur(20px)",boxShadow:`0 12px 48px rgba(0,0,0,.75)`,display:"flex",alignItems:"center",gap:11,animation:"up .3s ease",position:"fixed"}}>{arrowStyle&&<div className="tour-guide-arrow" style={arrowStyle}/>}<div className="tour-guide-copy" style={{flex:1,minWidth:0}}><div style={{fontSize:9,fontWeight:800,marginBottom:5,textTransform:"uppercase",letterSpacing:"1px",display:"flex",alignItems:"center",gap:6,color:acText}}><span style={{width:6,height:6,borderRadius:"50%",background:acText,display:"inline-block",animation:isCharla?"pulse-glow 1.2s infinite":"none",boxShadow:`0 0 8px ${acText}`}}/>{isCharla?"Charla en vivo":"Guía Mangos"}</div><div style={{fontSize:12,color:"#E8DDD4",lineHeight:1.6,fontWeight:500}}>{tip.tip}</div>{(()=>{const key=tip.scoreTipKey;if(!key||!scoreTips)return null;const stip=scoreTips[key];if(!stip)return null;return<div style={{fontSize:10,color:T.mango,marginTop:5,paddingTop:5,borderTop:"1px solid rgba(255,154,53,.15)",lineHeight:1.5}}><span style={{fontWeight:700}}>Tu situación: </span>{stip}</div>;})()}</div><div className="tour-guide-actions" style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0,alignItems:"stretch"}}><button onClick={()=>{setView(tip.section);setTimeout(()=>{const targetId=tip.target||tip.section;const p=getAnchor(targetId);setPos(p);if(tip.target)triggerTarget(tip.target,tip.section,tip.fallbackTarget,tip.fallbackSection);},180);}} style={{background:`linear-gradient(135deg,var(--ac),var(--acd))`,color:"#09080A",padding:"6px 12px",borderRadius:"8px",fontSize:"11px",fontWeight:"700",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>{tip.btn}</button><div style={{display:"flex",gap:4}}>{!isCharla&&<button className="btn bg bsm" onClick={next} style={{flex:1,justifyContent:"center",fontSize:11,padding:"4px 8px"}} aria-label="Siguiente paso"><ic.ArrowRight/></button>}<button className="btn bg bsm" style={{flex:1,justifyContent:"center",padding:"4px 8px",fontSize:11}} onClick={dismiss} aria-label="Cerrar guía"><ic.X/></button></div></div></div>);
-}
-
 export default function App(){
-  const [state,setState]=useState(DEFAULT);
-  const [view,setView]=useState("dashboard");
-  const [ready,setReady]=useState(false);
-  const [toast,setToast]=useState(null);
-  const [usdLoading,setUL]=useState(false);
-  const currAccent=useCurrencyAccent(state.displayCurrency);
-  const [sideOpen,setSO]=useState(false);
-  const mainRef=useRef(null);
-  const isMobile=useIsMobile();
-  useEffect(()=>{hydrate().then(s=>{if(s)setState(p=>({...p,...s}));setReady(true);});},[]);
-  useEffect(()=>{if(ready)persist(state);},[state,ready]);
-  useEffect(()=>{if(!ready)return;const hasBadDates=state.transactions?.some(t=>typeof t.date==="string"&&(t.date.includes("/")||(t.date.includes("-")&&t.date.indexOf("-")!==4)));if(hasBadDates){const fixed=state.transactions.map(t=>{if(typeof t.date==="string"&&(t.date.includes("/")||(t.date.includes("-")&&t.date.indexOf("-")!==4))){const parts=t.date.split(/[\/\-]/);if(parts.length>=3){const[d,m,y]=parts[0].length===4?[parts[2],parts[1],parts[0]]:[parts[0],parts[1],parts[2]];const year=y.length===2?"20"+y:y;return{...t,date:`${year}-${m.padStart(2,"0")}-${d.padStart(2,"0")}`};}}return t;});setState(s=>({...s,transactions:fixed}));}},[ready,state.transactions]);
-  const updateRates=useCallback(async()=>{setUL(true);const r=await fetchUSDRates();if(r){const currentType=state.usdType||"mep";setState(p=>({...p,usdRates:r,usdRate:r[currentType]}));}setUL(false);},[state.usdType]);
-  useEffect(()=>{if(ready)updateRates();},[ready,updateRates]);
-  useEffect(()=>{const root=document.documentElement;const usd=state.displayCurrency==="USD";root.style.setProperty("--ac",usd?"#5BCFB8":"#CCFF47");root.style.setProperty("--acd",usd?"#3ABDA6":"#AADC28");root.style.setProperty("--ac-rgb",usd?"91,207,184":"204,255,71");root.style.setProperty("--ac-bg",usd?"rgba(91,207,184,.08)":"rgba(204,255,71,.08)");root.style.setProperty("--ac-border",usd?"rgba(91,207,184,.25)":"rgba(204,255,71,.25)");document.documentElement.setAttribute("data-currency",usd?"USD":"ARS");if(usd)document.body.classList.add("usd-mode");else document.body.classList.remove("usd-mode");},[state.displayCurrency]);
-  const notify=(msg,type="ok")=>{setToast({msg,type});setTimeout(()=>setToast(null),4000);};
-  const update=useCallback(patch=>setState(s=>({...s,...patch})),[]);
-  const navTo=useCallback(id=>{if(mainRef.current)mainRef.current.scrollTop=0;setView(id);setSO(false);},[]);
-  if(!ready)return <><style>{CSS}</style><div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100dvh",background:T.bg,color:T.muted,fontFamily:"Sora",fontSize:14,gap:10}}><Dots/>Cargando</div></>;
-  if(!state.onboardingDone)return <><style>{CSS}</style><Onboarding update={update} notify={notify} usdRate={state.usdRate}/></>;
-  const pages={dashboard:<Dashboard state={state} update={update} notify={notify} setView={navTo}/>,transactions:<Transactions state={state} update={update} notify={notify} setView={navTo}/>,goals:<Goals state={state} update={update} notify={notify}/>,salary:<SalaryModule state={state} update={update} notify={notify}/>,analytics:<Analytics state={state} update={update} setView={navTo}/>,investments:<Investments state={state} update={update} notify={notify}/>,import:<Import state={state} update={update} notify={notify}/>};
-  const nav=[{id:"dashboard",l:"Dashboard",I:ic.Grid},{id:"transactions",l:"Movimientos",I:ic.Tx},{id:"goals",l:"Metas",I:ic.Target},{id:"salary",l:"Sueldo",I:ic.Salary},{id:"analytics",l:"Analíticas",I:ic.Chart},{id:"investments",l:"Inversiones",I:ic.Stock},{id:"import",l:"Importar",I:ic.Import}];
-  const CUR=getCUR();
-  const alerts=Object.entries(state.budgets||{}).filter(([cat,lim])=>state.transactions.filter(t=>gMonth(t.date)===CUR&&t.category===cat&&t.type==="expense").reduce((s,t)=>s+t.amount,0)>lim*0.8);
-  const sidebar=<aside className={isMobile?"mobile-drawer":undefined} style={{width:isMobile?"100%":212,background:T.surface,borderRight:isMobile?"none":`1px solid ${T.border}`,transition:"background .6s,border-color .4s",display:"flex",flexDirection:"column",padding:"20px 12px",gap:2,flexShrink:0,position:"relative",zIndex:10,...(isMobile?{position:"fixed",top:0,left:0,bottom:0,zIndex:300,width:260,transform:sideOpen?"translateX(0)":"translateX(-100%)",transition:"transform .25s cubic-bezier(.16,1,.3,1)",boxShadow:sideOpen?"8px 0 30px rgba(0,0,0,.6)":"none"}:{})}}><div style={{padding:"4px 10px 20px",display:"flex",alignItems:"center",gap:9,justifyContent:"space-between"}}><div style={{display:"flex",alignItems:"center",gap:9}}><div style={{width:30,height:30,background:"linear-gradient(135deg,rgba(255,154,53,.15),rgba(224,122,24,.1))",borderRadius:12,border:"1px solid rgba(255,154,53,.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}><svg width="22" height="22" viewBox="0 0 28 28" fill="none"><path d="M14 4C9 4 6 8 6 13c0 6 4.5 9.5 8 11 3.5-1.5 8-5 8-11 0-5-3-9-8-9z" fill="#FF9A35"/><path d="M14 4C14 4 14 1 17.5 1.5" stroke="#CCFF47" strokeWidth="1.8" strokeLinecap="round"/><ellipse cx="11.5" cy="13" rx="2" ry="3.5" fill="#E07A18" opacity=".4" transform="rotate(-15 11.5 13)"/></svg></div><div style={{fontSize:14,fontWeight:800,letterSpacing:"-.5px",background:"linear-gradient(135deg,#F2EBE0,#FF9A35)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>Mangos</div></div>{isMobile&&<button aria-label="Cerrar menú" onClick={()=>setSO(false)} style={{color:T.muted,width:40,height:40,display:"flex",alignItems:"center",justifyContent:"center"}}><ic.X/></button>}</div>{nav.map(({id,l,I})=>(<button key={id} data-tour-target={id} className={`nav${view===id?" on":""}`} onClick={()=>navTo(id)}><I/>{l}{id==="investments"&&state.savedAnalyses?.length>0&&<span style={{marginLeft:"auto",fontSize:10,background:T.raised,padding:"2px 6px",borderRadius:99,color:T.muted}}>{state.savedAnalyses.length}</span>}</button>))}<div style={{flex:1}}/>{alerts.length>0&&<div onClick={()=>navTo("transactions")} style={{background:"rgba(255,184,48,.08)",border:`1px solid rgba(255,184,48,.2)`,borderRadius:10,padding:"9px 12px",cursor:"pointer",marginBottom:8}}><div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:T.amber,fontWeight:600}}><ic.Bell/>{alerts.length} alerta{alerts.length>1?"s":""}</div></div>}
-  <div style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px"}}>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:state.displayCurrency==="USD"?7:10}}>
-      <span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".7px",fontWeight:600}}>Cotización Dólar</span>
-      {usdLoading?<Dots/>:<button type="button" onClick={updateRates} aria-label="Actualizar cotizaciones" title="Actualizar cotizaciones" style={{width:28,height:28,borderRadius:8,border:`1px solid ${T.border}`,background:T.surface,color:T.mango,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><ic.Refresh/></button>}
-    </div>
-    {state.displayCurrency==="USD"&&<div style={{display:"flex",alignItems:"center",gap:6,fontSize:9,fontWeight:700,color:"#5BCFB8",marginBottom:9}}><span style={{width:6,height:6,borderRadius:"50%",background:"#5BCFB8",boxShadow:"0 0 8px rgba(91,207,184,.65)"}}/>Visualización en USD</div>}
-    <div data-tour-target="currency-toggle" style={{display:"flex",background:T.bg,borderRadius:8,padding:3,marginBottom:12}}>
-      {[{id:"oficial",l:"Oficial"},{id:"mep",l:"MEP"},{id:"blue",l:"Blue"}].map(t=>(<button key={t.id} onClick={()=>{update({usdType:t.id,usdRate:state.usdRates?.[t.id]||state.usdRate});}} style={{flex:1,padding:"6px 0",fontSize:10,fontWeight:600,color:state.usdType===t.id?"#09080A":T.muted,background:state.usdType===t.id?T.lime:"transparent",borderRadius:6,transition:"all .2s"}}>{t.l}</button>))}
-    </div>
-    <div style={{textAlign:"center"}}>
-      <div style={{fontSize:9,color:T.muted,marginBottom:3}}>1 USD equivale a</div>
-      <div className="mono" style={{fontSize:24,fontWeight:600,color:currAccent.accent,transition:"color .4s"}}>{fQuoteARS(state.usdRate)}</div>
-    </div>
-    <div style={{display:"flex",gap:6,marginTop:14}}>
-      {["ARS","USD"].map(c=>(<button key={c} data-tour-target={!isMobile&&c==="USD"?"toggle-usd":undefined} onClick={()=>update({displayCurrency:c})} style={{flex:1,padding:"6px 0",borderRadius:8,fontSize:10,fontWeight:600,border:`1px solid ${state.displayCurrency===c?(c==="USD"?"rgba(91,207,184,.4)":"rgba(204,255,71,.35)"):T.border}`,background:state.displayCurrency===c?(c==="USD"?"rgba(91,207,184,.1)":"rgba(204,255,71,.08)"):T.surface,color:state.displayCurrency===c?(c==="USD"?"#5BCFB8":T.lime):T.muted,cursor:"pointer",transition:"all .3s"}}>{c}</button>))}
-    </div>
-  </div>
-  <div style={{fontSize:9,color:T.muted,textAlign:"left",marginTop:16,lineHeight:1.4,padding:"0 10px",display:"flex",alignItems:"flex-start",gap:6}}><span style={{color:T.amber,display:"flex",marginTop:1}}><ic.Alert/></span><span>Mangos es una herramienta educativa y de gestión personal. No constituye asesoramiento financiero.</span></div>
-  <button onClick={()=>exportData(state)} style={{display:"flex",alignItems:"center",gap:7,width:"100%",padding:"8px 12px",marginTop:8,borderRadius:9,border:`1px solid ${T.border}`,background:"none",color:T.muted,fontSize:11,cursor:"pointer",transition:"all .15s"}} onMouseEnter={e=>e.currentTarget.style.color=T.white} onMouseLeave={e=>e.currentTarget.style.color=T.muted}><ic.Download/>Exportar mis datos</button>
-  </aside>;
-  return(<div style={{display:"flex",height:"100dvh",overflow:"hidden",background:T.bg}}><style>{CSS}</style>{state.displayCurrency==="USD"&&<USDAtmosphere/>}{isMobile?<>{sideOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:299}} onClick={()=>setSO(false)}/>}{sidebar}</>:sidebar}{isMobile&&<div style={{position:"fixed",top:0,left:0,right:0,height:52,background:T.surface,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",padding:"0 14px",gap:8,zIndex:100}}><button aria-label="Abrir menú" onClick={()=>setSO(true)} style={{color:T.white,width:40,height:40,display:"flex",alignItems:"center",justifyContent:"center"}}><ic.Menu/></button><div style={{fontSize:14,fontWeight:800,letterSpacing:"-.4px",background:"linear-gradient(135deg,#F2EBE0,#FF9A35)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>Mangos</div><div style={{flex:1}}/><button data-tour-target="toggle-usd" aria-label={`Cambiar visualización a ${state.displayCurrency==="USD"?"ARS":"USD"}`} onClick={()=>update({displayCurrency:state.displayCurrency==="USD"?"ARS":"USD"})} className="mono" style={{fontSize:10,color:"var(--ac)",padding:"7px 8px",borderRadius:9,border:`1px solid ${currAccent.accentBorder}`,background:currAccent.accentBg,whiteSpace:"nowrap"}}>{state.displayCurrency} · {state.displayCurrency==="USD"?fUSD(1):fARS(state.usdRate)}</button></div>}<main ref={mainRef} style={{flex:1,minWidth:0,overflow:"auto",padding:isMobile?"66px 14px 20px":"28px 32px",transition:"background .6s",position:"relative",zIndex:2}}>{pages[view]}</main>{toast&&<div className={`toast t${toast.type}`}>{toast.msg}</div>}<TourGuide setView={navTo} scoreTips={healthScore(state.transactions||[],state.goals||[],state.holdings||[],state.salaries||[],state.riskProfile,state.marketPrices||{},state.usdRate).tips}/></div>);
+  return <AppRoot defaults={DEFAULT} components={{Transactions,Goals,SalaryModule,Analytics,Investments,Import,Onboarding,FinancialHealthCard}} getHealth={s=>healthScore(s.transactions,s.goals,s.holdings,s.salaries,s.riskProfile,s.marketPrices,s.usdRate)} legacyStyles={CSS} supabaseConfig={{url:SUPABASE_URL,anonKey:SUPABASE_KEY}} icons={ic}/>;
 }
 
 function Onboarding({update,notify,usdRate=1350}){
@@ -592,8 +496,8 @@ function Onboarding({update,notify,usdRate=1350}){
   const profileData={conservador:{icon:<svg width="28" height="28" viewBox="0 0 20 20" fill="none"><path d="M10 3 4 6v4c0 3.5 2.5 6.5 6 7.5 3.5-1 6-4 6-7.5V6l-6-3Z" stroke="#5B9EFF" strokeWidth="1.5"/><path d="m7 10 2 2 4-4" stroke="#5B9EFF" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>,label:"Conservador",color:"#5B9EFF",desc:"Preferís estabilidad y tolerás poca variación en el valor."},moderado:{icon:<svg width="28" height="28" viewBox="0 0 20 20" fill="none"><path d="M10 3v14M5 6h10M5 6l-3 6h6L5 6ZM15 6l-3 6h6l-3-6ZM7 17h6" stroke="#FFB830" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>,label:"Moderado",color:"#FFB830",desc:"Aceptás variaciones acotadas para buscar crecimiento en el tiempo."},agresivo:{icon:<svg width="28" height="28" viewBox="0 0 20 20" fill="none"><path d="m3 15 5-5 3 3 6-8" stroke="#FF5F6D" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/><path d="M13 5h4v4" stroke="#FF5F6D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>,label:"Agresivo",color:"#FF5F6D",desc:"Tolerás variaciones altas para priorizar crecimiento de largo plazo."}};
   const pf=profileData[profile];const horizonExplanation=horizon==="under_6m"?"Como vas a necesitar el dinero pronto, el plazo limita el riesgo aunque tu tolerancia sea mayor.":horizon==="6_to_12m"?"El plazo sigue siendo corto: priorizamos liquidez y estabilidad antes que rendimiento.":"El plazo permite incorporar más variación, siempre dentro de tu tolerancia al riesgo.";
   const QS=[{title:"Experiencia",sub:"¿Cuánto sabés de inversiones?",icon:<svg width="22" height="22" viewBox="0 0 20 20" fill="none"><path d="M4 5h12v9a1 1 0 01-1 1H5a1 1 0 01-1-1V5z" stroke="currentColor" strokeWidth="1.4"/><path d="M7 5V3h6v2M4 5h12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>,opts:[{l:"Nunca invertí",d:"Ni plazo fijo ni fondos",v:0},{l:"Plazo fijo o FCI",d:"Instrumentos básicos",v:1},{l:"Acciones, bonos o CEDEARs",d:"Mercado de capitales",v:2},{l:"Trading activo u opciones",d:"Operaciones avanzadas",v:3}]},{title:"Colchón financiero",sub:"¿Tenés un fondo de emergencia?",icon:<svg width="22" height="22" viewBox="0 0 20 20" fill="none"><path d="M3 9l7-5 7 5v8a1 1 0 01-1 1H4a1 1 0 01-1-1V9z" stroke="currentColor" strokeWidth="1.4"/><path d="M8 18v-5h4v5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>,opts:[{l:"No, vivo al día",d:"Sin ahorro de respaldo",v:0},{l:"Algo, pero no llega a 3 meses",d:"Colchón parcial",v:1},{l:"Sí, 3 a 6 meses cubiertos",d:"Buen respaldo",v:2},{l:"Más de 6 meses",d:"Muy sólido",v:3}]},{title:"Tolerancia al riesgo",sub:"Si tu inversión baja 25% en un mes...",icon:<svg width="22" height="22" viewBox="0 0 20 20" fill="none"><path d="M3 6l4 5 4-3 3 5 3-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M3 17h14" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity=".4"/></svg>,opts:[{l:"Vendo todo inmediatamente",d:"No puedo tolerar pérdidas",v:0},{l:"Vendo una parte",d:"Bajo exposición",v:1},{l:"No toco nada, espero",d:"Confío en la recuperación",v:2},{l:"Compro más aprovechando",d:"Oportunidad en la caída",v:3}]},{title:"Horizonte temporal",sub:"¿Cuándo vas a necesitar la plata?",icon:<svg width="22" height="22" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.4"/><path d="M10 6v4l2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>,opts:[{l:"Menos de 6 meses",d:"Muy corto plazo",v:0},{l:"6 meses a 1 año",d:"Corto plazo",v:1},{l:"1 a 3 años",d:"Mediano plazo",v:2},{l:"Más de 3 años",d:"Largo plazo",v:3}]}];
-  const finish=()=>{const rawBase=px(d.income);const conversionRate=Number(usdRate)||1350;const base=d.incomeCurrency==="USD"?rawBase*conversionRate:rawBase;const CUR=getCUR();const patch={onboardingDone:true,riskProfile:{risk:profile,horizon,horizonLabel:horizonInfo.label,allocation:{liquidity:allocation[0],fixedIncome:allocation[1],variableIncome:allocation[2]},monthlyIncome:base,incomeCurrency:d.incomeCurrency,incomeRaw:rawBase,riskScore,answers:ans},lastSalaryBase:rawBase,lastSalaryCurrency:d.incomeCurrency,salaries:base>0?[{month:CUR,base,originalBase:rawBase,baseCurrency:d.incomeCurrency,extras:[]}]:[]};update(patch);notify("Perfil guardado ✓");};
-  const canNext=step===0?true:step>=1&&step<=4?ans[step-1]!==null:true;
+  const finish=()=>{const rawBase=parseMoney(d.income);if(!Number.isFinite(rawBase)||rawBase<0)return notify("Ingresá un sueldo válido, igual o mayor que cero","err");const conversionRate=Number(usdRate)||1350;const base=parseMoney(d.incomeCurrency==="USD"?rawBase*conversionRate:rawBase);const CUR=getCUR();const patch={onboardingDone:true,riskProfile:{risk:profile,horizon,horizonLabel:horizonInfo.label,allocation:{liquidity:allocation[0],fixedIncome:allocation[1],variableIncome:allocation[2]},monthlyIncome:base,incomeCurrency:d.incomeCurrency,incomeRaw:rawBase,riskScore,answers:ans},lastSalaryBase:rawBase,lastSalaryCurrency:d.incomeCurrency,salaries:base>0?[{month:CUR,base,originalBase:rawBase,baseCurrency:d.incomeCurrency,extras:[]}]:[]};update(patch);notify("Perfil guardado ✓");};
+  const canNext=step===0?(Number.isFinite(parseMoney(d.income))&&parseMoney(d.income)>=0):step>=1&&step<=4?ans[step-1]!==null:true;
   return(<div className="onboarding-shell"><div className="onboarding-panel"><div style={{fontSize:10,color:T.muted,textAlign:"center",background:"rgba(255,255,255,0.025)",border:`1px solid ${T.border}`,padding:"10px 12px",borderRadius:10,lineHeight:1.55}}>Al continuar, entendés que esta app es para organización personal y no reemplaza la consulta con un asesor idóneo o matriculado.</div>
   <div aria-label={`Paso ${step+1} de ${STEPS}`} style={{display:"flex",gap:8,marginTop:20}}>{Array.from({length:STEPS}).map((_,i)=><div key={i} aria-current={i===step?"step":undefined} style={{flex:1,height:3,borderRadius:3,background:i<step?T.lime:i===step?T.mango:T.raised,transition:"background .3s"}}/>)}</div>
   {step===0&&<><div style={{fontSize:22,fontWeight:800,marginBottom:6,letterSpacing:"-.5px",marginTop:20}}>Bienvenido a Mangos 🥭</div><div style={{fontSize:13,color:T.muted,marginBottom:24}}>Tomá el control de tu dinero</div><div style={{display:"flex",flexDirection:"column",gap:12}}><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tu nombre (opcional)</label><input className="inp" placeholder="ej: Martín" value={d.name} onChange={e=>setD(p=>({...p,name:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Sueldo neto mensual</label><div style={{display:"flex",gap:8,minWidth:0}}><input className="inp" style={{flex:1,minWidth:0}} placeholder={d.incomeCurrency==="ARS"?"ej: 800000":"ej: 1200"} value={d.income} onChange={e=>setD(p=>({...p,income:e.target.value}))}/><div style={{display:"flex",borderRadius:10,overflow:"hidden",border:`1px solid ${T.border}`,flexShrink:0}}>{["ARS","USD"].map(c=><button key={c} onClick={()=>setD(p=>({...p,incomeCurrency:c}))} style={{padding:"8px 12px",fontSize:12,fontWeight:600,background:d.incomeCurrency===c?"rgba(200,255,87,.15)":T.raised,color:d.incomeCurrency===c?T.lime:T.muted,border:"none",cursor:"pointer"}}>{c}</button>)}</div></div></div></div></>}
@@ -608,7 +512,7 @@ function Dashboard({state,update,notify,setView}){
   const [loadingIns,setLI]=useState(false);
   const isMobile=useIsMobile();
   const NOW=getNow();const CUR=getCUR();
-  const cur=transactions.filter(t=>gMonth(t.date)===CUR);
+  const cur=transactions.filter(t=>isActiveRecord(t)&&gMonth(t.date)===CUR);
   const prevM=(()=>{const d=new Date(NOW.getFullYear(),NOW.getMonth()-1,1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;})();
   const prev=transactions.filter(t=>gMonth(t.date)===prevM);
   const incomeParts=getMonthIncomeParts(salaries,transactions,CUR);
@@ -674,17 +578,17 @@ function SalaryModule({state,update,notify}){
   const [form,setForm]=useState({base:"",month:CUR,currency:state.lastSalaryCurrency||"ARS"});
   const [ef,setEF]=useState({desc:"",amt:"",currency:"ARS"});
   const [addingE,setAE]=useState(null);
-  const totalCur=getSalaryTotal(salaries);
-  const curExp=transactions.filter(t=>gMonth(t.date)===CUR&&t.type==="expense").reduce((s,t)=>s+t.amount,0);
-  const disponible=Math.max(0,totalCur-curExp);
+  const summary=monthSummary(state,CUR);
+  const disponible=summary.available;
   const curSal=salaries.find(s=>s.month===form.month);
   const saveSalary=()=>{
-    const rawBase=Math.abs(px(form.base));
-    if(!rawBase)return notify("Ingresá un monto","err");
-    const baseArs=rawBase*(form.currency==="USD"?usdRate:1);
+    const rawBase=parseMoney(form.base);
+    if(!Number.isFinite(rawBase)||rawBase<=0)return notify("Ingresá un monto","err");
+    const baseArs=parseMoney(rawBase*(form.currency==="USD"?usdRate:1));
+    if(!Number.isFinite(baseArs)||baseArs<=0)return notify("Tipo de cambio inválido","err");
     const exists=salaries.find(s=>s.month===form.month);
     const updated=exists?salaries.map(s=>s.month===form.month?{...s,base:baseArs,originalBase:rawBase,baseCurrency:form.currency}:s):[...salaries,{month:form.month,base:baseArs,originalBase:rawBase,baseCurrency:form.currency,extras:[]}];
-    const existingTx=transactions.find(t=>t.type==="income"&&gMonth(t.date)===form.month&&t.source==="salary");
+    const existingTx=transactions.find(t=>isActiveRecord(t)&&t.type==="income"&&gMonth(t.date)===form.month&&t.source==="salary");
     let txList=transactions;
     if(existingTx){txList=txList.map(t=>t.id===existingTx.id?{...t,amount:baseArs,currency:form.currency}:t);}
     else{txList=[...txList,{id:`sal_${uid()}`,date:form.month+"-01",description:`Sueldo ${form.month}`,amount:baseArs,type:"income",category:"❓ Otros",currency:form.currency,source:"salary"}];}
@@ -692,22 +596,30 @@ function SalaryModule({state,update,notify}){
     notify(exists?"Sueldo actualizado ✓":"Sueldo registrado ✓");
   };
   const addExtra=(month)=>{
-    const rawAmt=Math.abs(px(ef.amt));
-    if(!ef.desc||!rawAmt)return notify("Completá descripción y monto","err");
-    const amtArs=rawAmt*(ef.currency==="USD"?usdRate:1);
+    const rawAmt=parseMoney(ef.amt);
+    if(!ef.desc.trim()||!Number.isFinite(rawAmt)||rawAmt<=0)return notify("Completá descripción y monto","err");
+    const amtArs=parseMoney(rawAmt*(ef.currency==="USD"?usdRate:1));
+    if(!Number.isFinite(amtArs)||amtArs<=0)return notify("Tipo de cambio inválido","err");
     const extraId=`e_${uid()}`;const transactionId=`ex_${uid()}`;const extra={id:extraId,transactionId,desc:ef.desc,amt:amtArs,originalAmt:rawAmt,cur:ef.currency};const existingSalary=salaries.find(s=>s.month===month);
     const updated=existingSalary?salaries.map(s=>s.month===month?{...s,extras:[...(s.extras||[]),extra]}:s):[...salaries,{month,base:0,originalBase:0,baseCurrency:"ARS",extras:[extra]}];
     const newTx={id:transactionId,extraId,date:month+"-15",description:ef.desc,amount:amtArs,type:"income",category:"❓ Otros",currency:ef.currency,source:"extra"};
     update({salaries:updated,transactions:[...transactions,newTx]});
     setEF({desc:"",amt:"",currency:"ARS"});setAE(null);notify("Ingreso extra agregado ✓");
   };
-  const delExtra=(month,id)=>{const extra=salaries.find(s=>s.month===month)?.extras?.find(item=>item.id===id);const legacyTx=!extra?.transactionId&&extra?transactions.find(tx=>tx.source==="extra"&&gMonth(tx.date)===month&&tx.description===extra.desc&&Number(tx.amount)===Number(extra.amt)):null;const linkedTxId=extra?.transactionId||legacyTx?.id;update({salaries:salaries.map(s=>s.month===month?{...s,extras:(s.extras||[]).filter(e=>e.id!==id)}:s),transactions:linkedTxId?transactions.filter(tx=>tx.id!==linkedTxId):transactions});notify("Eliminado","err");};
+  const delExtra=(month,id)=>{
+    const extra=salaries.find(s=>s.month===month)?.extras?.find(item=>item.id===id);
+    if(!extra)return;
+    if(!extra.transactionId)return notify("Este extra histórico no tiene un vínculo verificable. Conservamos el registro para evitar eliminar otro ingreso.","err");
+    const linked=transactions.find(tx=>tx.id===extra.transactionId);
+    if(!linked||linked.source!=="extra"||linked.extraId!==extra.id||linkedTransactionOrigin(linked)==="recurring"||linked.recurringId)return notify("El vínculo del extra necesita revisión antes de eliminarlo.","err");
+    update({salaries:salaries.map(s=>s.month===month?{...s,extras:(s.extras||[]).filter(e=>e.id!==id)}:s),transactions:transactions.filter(tx=>tx.id!==extra.transactionId)});notify("Ingreso extra eliminado", "info");
+  };
   const hist=Array.from({length:6},(_,i)=>{const d=new Date(NOW.getFullYear(),NOW.getMonth()-5+i,1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;});
   let pVal=0;
   (state.holdings||[]).forEach(h=>{pVal+=calcHoldingValueArs(h,state.marketPrices,usdRate).curArs;});
-  return(<div className="up"><PH title="Sueldo e ingresos" sub="Registrá tu sueldo y agregá ingresos extra"/>
+  return(<div className="up"><PH title="Sueldo e ingresos" sub="Registrá tu sueldo y agregá ingresos extra"/><p style={{fontSize:12,color:T.mid,marginBottom:14}}>Disponible del mes = ingresos − gastos − reservas netas del período. No representa el saldo de tus cuentas.</p>
   <div className="kpi-grid salary-kpis" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:12,marginBottom:18}}>
-    {[{l:"Sueldo base",v:fmt(salaries.find(s=>s.month===CUR)?.base||0),c:T.mango,i:<IcSalaryKpi/>},{l:"Ingresos extra",v:fmt((salaries.find(s=>s.month===CUR)?.extras||[]).reduce((s,e)=>s+e.amt,0)),c:T.blue,i:<IcIncome/>},{l:"Disponible libre",v:fmt(disponible),c:disponible>0?T.teal:T.coral,i:<IcFree/>},{l:"Portfolio",v:fmt(pVal),c:T.blue,i:<IcPortfolio/>}].map((k,i)=>(
+    {[{l:"Sueldo base",v:fmt(salaries.find(s=>s.month===CUR)?.base||0),c:T.mango,i:<IcSalaryKpi/>},{l:"Ingresos extra",v:fmt(summary.incomeParts.extras),c:T.blue,i:<IcIncome/>},{l:"Disponible del mes",v:fmt(disponible),c:disponible>0?T.teal:T.coral,i:<IcFree/>},{l:"Portfolio",v:fmt(pVal),c:T.blue,i:<IcPortfolio/>}].map((k,i)=>(
       <div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".6px",fontWeight:600}}>{k.l}</span><span style={{color:k.c,opacity:.8,display:"flex",alignItems:"center"}}>{k.i}</span></div><div className="mono" title={k.v} style={{fontSize:20,fontWeight:500,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div><div style={{fontSize:10,color:T.muted,marginTop:3}}>{CUR}</div></div>
     ))}
   </div>
@@ -742,8 +654,36 @@ function SalaryModule({state,update,notify}){
   })}</tbody></table></div></div>);
 }
 
-function Transactions({state,update,notify,setView}){
+function PendingPayments({state,update,notify,month}){
+  const {fmt}=useDsp(state);
+  const [period,setPeriod]=useState(month);
+  const [drafts,setDrafts]=useState({});
+  const pending=getPendingRecurring(state,period);
+  const setDraft=(id,patch)=>setDrafts(values=>({...values,[id]:{...values[id],...patch}}));
+  const apply=(item,options)=>{try{update(confirmRecurring(state,item.id,period,options));notify(options.action==="skip"?"Período omitido; no se creó un movimiento.":options.action==="pause"?"Recurrente pausado.":options.transactionId?"Movimiento vinculado; no se duplicó el pago.":"Pago confirmado ✓");}catch(error){notify(error.message,"err");}};
+  return <div>
+    <p style={{fontSize:12,color:T.mid,marginBottom:14}}>Estos importes son previstos. Sólo un pago confirmado o un movimiento vinculado afecta tus gastos. No se inventa una fecha de vencimiento.</p>
+    <label style={{display:"block",fontSize:12,marginBottom:14}}>Período<input className="inp" type="month" value={period} onChange={e=>{if(isValidISODate(`${e.target.value}-01`))setPeriod(e.target.value);}}/></label>
+    {pending.length===0&&<p style={{fontSize:12,color:T.muted,marginBottom:14}}>No hay pagos pendientes en este período.</p>}
+    {pending.map(item=>{const draft=drafts[`${period}:${item.id}`]||{};const key=`${period}:${item.id}`;const candidates=(state.transactions||[]).filter(tx=>isActiveRecord(tx)&&gMonth(tx.date)===period&&tx.type===(item.type||"expense")&&!linkedTransactionOrigin(tx)&&!(state.recurring||[]).some(r=>r.originTransactionId===tx.id));return <div className="card csm" key={key} style={{marginBottom:12}}>
+      <div style={{fontWeight:700,fontSize:13}}>{item.description} · {fmt(item.amount)}</div>
+      <p style={{fontSize:11,color:T.muted,margin:"6px 0 10px"}}>{item.dueDate?`Vencimiento registrado: ${item.dueDate}`:"Sin vencimiento registrado"}</p>
+      {item.status==="review"?<p role="alert" style={{fontSize:12,color:T.amber}}>{item.warnings.join(" ")}</p>:<>
+        <label style={{display:"block",fontSize:11,marginBottom:8}}>Fecha real del pago<input type="date" className="inp" value={draft.date||""} min={`${period}-01`} onChange={e=>setDraft(key,{date:e.target.value})}/></label>
+        <button className="btn bl bsm" disabled={!draft.date} onClick={()=>apply(item,{date:draft.date})}>Confirmar pago nuevo</button>
+        <label style={{display:"block",fontSize:11,marginTop:12}}>O vincular un movimiento ya registrado<select className="inp" value={draft.transactionId||""} onChange={e=>setDraft(key,{transactionId:e.target.value})}><option value="">Elegir movimiento</option>{candidates.map(tx=><option key={tx.id} value={tx.id}>{tx.date} · {tx.description} · {fmt(tx.amount)}</option>)}</select></label>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}><button className="btn bg bsm" disabled={!draft.transactionId} onClick={()=>apply(item,{transactionId:draft.transactionId})}>Vincular existente</button><button className="btn bg bsm" onClick={()=>apply(item,{action:"skip"})}>Omitir este mes</button><button className="btn bg bsm" onClick={()=>apply(item,{action:"pause"})}>Pausar</button></div>
+      </>}
+    </div>;})}
+    <h3 style={{fontSize:13,margin:"18px 0 10px"}}>Recurrentes configurados</h3>
+    {(state.recurring||[]).map(item=><div key={item.id} style={{padding:"10px 0",borderTop:`1px solid ${T.border}`,display:"flex",gap:10,alignItems:"center",justifyContent:"space-between"}}><div style={{fontSize:12}}>{item.description}<div style={{fontSize:10,color:T.muted,marginTop:4}}>{item.paused?"Pausado":item.confirmations?.[period]?.status==="paid"?"Pagado: movimiento vinculado":item.confirmations?.[period]?.status==="skipped"?"Período omitido":item.lastMonth&&item.lastMonth>=period?"Período incluido en historial previo":"Previsto"} · {fmt(item.amount)}</div></div><button className="btn bg bsm" onClick={()=>update({recurring:state.recurring.map(r=>r.id===item.id?{...r,paused:!r.paused}:r)})}>{item.paused?"Reanudar":"Pausar"}</button></div>)}
+    <p style={{fontSize:11,color:T.muted,marginTop:12}}>Pausar conserva las confirmaciones y sus movimientos. Los registros vinculados se protegen de cambios aislados.</p>
+  </div>;
+}
+
+function Transactions({state,update,notify,setView,request}){
   const {transactions,budgets,usdRate,recurring=[]}=state;
+  const isProtected=t=>Boolean(linkedTransactionOrigin(t)||recurring.some(r=>r.originTransactionId===t.id));
   const {fmt}=useDsp(state);
   const CUR=getCUR();
   const [showAdd,setSA]=useState(false);
@@ -761,21 +701,24 @@ function Transactions({state,update,notify,setView}){
   const [rejectedPairs,setRejectedPairs]=useState(new Set());
 
   const rows=useMemo(()=>transactions.filter(t=>{
+    if(!isActiveRecord(t))return false;
     if(t.type==="transfer"&&!showTransfers)return false;
     if(filter.month&&gMonth(t.date)!==filter.month)return false;
     if(filter.type&&t.type!==filter.type)return false;
     if(filter.cat&&t.category!==filter.cat)return false;
+    if(filter.dateFrom&&t.date<filter.dateFrom)return false;
+    if(filter.dateTo&&t.date>filter.dateTo)return false;
     return true;
   }).sort((a,b)=>new Date(b.date)-new Date(a.date)),[transactions,filter,showTransfers]);
 
-  const cur=transactions.filter(t=>gMonth(t.date)===CUR);
+  const cur=transactions.filter(t=>isActiveRecord(t)&&gMonth(t.date)===(filter.month||CUR));
   const months=[...new Set(transactions.map(t=>gMonth(t.date)))].sort().reverse();
-  const transferCount=transactions.filter(t=>t.type==="transfer").length;
+  const transferCount=transactions.filter(t=>isActiveRecord(t)&&t.type==="transfer").length;
 
   // ── DETECCIÓN SOBRE EXISTENTES ──
   const runDetection=()=>{
-    const income=transactions.filter(t=>t.type==="income");
-    const expense=transactions.filter(t=>t.type==="expense");
+    const income=transactions.filter(t=>isActiveRecord(t)&&!isProtected(t)&&t.type==="income");
+    const expense=transactions.filter(t=>isActiveRecord(t)&&!isProtected(t)&&t.type==="expense");
     const pairs=detectTransfers(income,expense);
     if(!pairs.length)return notify("No se detectaron transferencias internas","info");
     setTransferPairs(pairs);
@@ -783,34 +726,41 @@ function Transactions({state,update,notify,setView}){
     setSTM(true);
   };
 
+
+  const protect=t=>{
+    if(!t||!isProtected(t))return false;
+    const origin=linkedTransactionOrigin(t)||"recurring";
+    if(origin==="recurring")setSRec(true);else setView?.(origin);
+    notify(origin==="goals"?"Este movimiento pertenece a una meta. Revisá o revertí el pago desde Metas.":origin==="salary"?"Este ingreso se administra desde Sueldo e ingresos.":"Este movimiento está vinculado a un recurrente. Su historial se conserva; revisalo desde Recurrentes.","info");
+    return true;
+  };
+  const handledRequest=useRef(null);
   useEffect(()=>{
-    const pending=recurring.filter(r=>r.lastMonth<CUR&&!r.paused);
-    if(pending.length===0)return;
-    let newTxs=[...transactions];
-    let newRec=recurring.map(r=>{
-      if(r.lastMonth<CUR&&!r.paused){
-        newTxs.push({id:`auto_${uid()}`,date:`${CUR}-01`,description:r.description,amount:r.amount,type:r.type,category:r.category,currency:r.currency,source:"auto"});
-        return{...r,lastMonth:CUR};
-      }
-      return r;
-    });
-    setTimeout(()=>{update({transactions:newTxs,recurring:newRec});notify(`${pending.length} cargos recurrentes aplicados ✓`,"info");},100);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[CUR]);
+    if(!request||handledRequest.current===request.nonce)return;
+    handledRequest.current=request.nonce;
+    setFilter(f=>({...f,...(request.month!==undefined?{month:request.month,dateFrom:"",dateTo:""}:{}),...((request.category??request.cat)!==undefined?{cat:request.category??request.cat}:{}),...(request.dateFrom!==undefined?{dateFrom:request.dateFrom}:{}),...(request.dateTo!==undefined?{dateTo:request.dateTo}:{}),...(request.type!==undefined?{type:request.type}:{})}));
+    if(["new","transactions:new"].includes(request.action))openNew();
+    if(["transactions:budgets","budgets"].includes(request.action))setSB(true);
+    if(["transactions:recurring","recurring"].includes(request.action))setSRec(true);
+  },[request]);
 
   const saveTx=()=>{
     if(!form.description||!form.amount)return notify("Completá descripción y monto","err");
     const type=normalizeTxType(form.type);
     if(!type)return notify("Elegí un tipo de movimiento válido","err");
-    const ars=Math.abs(px(form.amount))*(form.currency==="USD"?usdRate:1);
-    if(ars<=0)return notify("Monto inválido","err");
+    const originalAmount=parseMoney(form.amount);
+    const ars=parseMoney(originalAmount*(form.currency==="USD"?usdRate:1));
+    if(!Number.isFinite(ars)||ars<=0||!isValidISODate(form.date))return notify("Ingresá un monto positivo y una fecha válida","err");
+    const entry={...form,description:form.description.trim(),currency:"ARS",originalAmount,originalCurrency:form.currency,fxRateAtEntry:form.currency==="USD"?usdRate:1,fxDate:todayISO()};
+    if(editTx&&protect(transactions.find(t=>t.id===editTx)))return;
     if(editTx){
-      update({transactions:transactions.map(t=>t.id===editTx?{...t,...form,type,amount:ars}:t)});
+      update({transactions:transactions.map(t=>t.id===editTx?{...t,...entry,type,amount:ars}:t)});
       setETx(null);notify("Movimiento actualizado ✓");
     }else{
-      const newTxs=[...transactions,{...form,type,id:`m_${uid()}`,amount:ars,source:"manual"}];
+      const transactionId=`m_${uid()}`;
+      const newTxs=[...transactions,{...entry,type,id:transactionId,amount:ars,source:"manual"}];
       if(form.isRecurring){
-        const newR={id:`rec_${uid()}`,description:form.description,amount:ars,type,category:form.category,currency:"ARS",lastMonth:gMonth(form.date),paused:false};
+        const newR={id:`rec_${uid()}`,description:form.description,amount:ars,type,category:form.category,currency:"ARS",originTransactionId:transactionId,startMonth:gMonth(form.date),lastMonth:gMonth(form.date),paused:false};
         update({transactions:newTxs,recurring:[...recurring,newR]});
         notify("Movimiento programado para repetirse ✓");
       }else{
@@ -821,9 +771,9 @@ function Transactions({state,update,notify,setView}){
     setSA(false);
   };
   const openNew=()=>{setETx(null);setForm({date:todayISO(),description:"",amount:"",type:"expense",category:"❓ Otros",currency:"ARS",isRecurring:false});setSA(true);};
-  const editMovement=t=>{setForm({date:t.date,description:t.description.replace("🔁 ",""),amount:t.amount,type:normalizeTxType(t.type)||"expense",category:t.category,currency:"ARS",isRecurring:false});setETx(t.id);setSA(true);};
-  const removeMovement=id=>{update({transactions:transactions.filter(x=>x.id!==id)});notify("Eliminado","err");};
-  const hasFilters=Boolean(filter.month||filter.type||filter.cat);
+  const editMovement=t=>{if(protect(t))return;setForm({date:t.date,description:t.description.replace("🔁 ",""),amount:t.amount,type:normalizeTxType(t.type)||"expense",category:t.category,currency:"ARS",isRecurring:false});setETx(t.id);setSA(true);};
+  const removeMovement=id=>{if(protect(transactions.find(t=>t.id===id)))return;update({transactions:transactions.filter(x=>x.id!==id)});notify("Eliminado","err");};
+  const hasFilters=Boolean(filter.month||filter.type||filter.cat||filter.dateFrom||filter.dateTo);
 
   return(<div className="up">
     <PH title="Movimientos" sub={`${rows.length} registros`} right={
@@ -835,10 +785,11 @@ function Transactions({state,update,notify,setView}){
       </div>
     }/>
 
+    {getPendingRecurring(state,filter.month||CUR).length>0&&<div className="card csm" style={{marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}><div style={{fontSize:12}}>{getPendingRecurring(state,filter.month||CUR).length} recurrentes pendientes · {filter.month||CUR}<div style={{fontSize:10,color:T.muted,marginTop:4}}>Todavía no afectan tus gastos.</div></div><button className="btn bg bsm" onClick={()=>setSRec(true)}>Revisar pagos</button></div>}
     {Object.keys(budgets||{}).length>0&&(<div style={{display:"flex",gap:10,marginBottom:14,overflowX:"auto",paddingBottom:4}}>{Object.entries(budgets).map(([cat,lim])=>{const spent=cur.filter(t=>t.category===cat&&t.type==="expense").reduce((s,t)=>s+t.amount,0);const pct=clamp(spent/lim*100,0,200);return<div key={cat} style={{background:T.raised,border:`1px solid ${pct>=100?T.red:pct>=80?T.amber:T.border}`,borderRadius:10,padding:"10px 14px",minWidth:150,flexShrink:0}}><div style={{fontSize:10,color:T.muted,marginBottom:4}}><CategoryLabel category={cat} compact/></div><div className="mono" style={{fontSize:13,color:pct>=100?T.red:pct>=80?T.amber:T.white}}>{fmt(spent)}/{fmt(lim)}</div><div className="prog" style={{marginTop:6}}><div className="progf" style={{width:`${clamp(pct,0,100)}%`,background:pct>=100?T.red:pct>=80?T.amber:T.teal}}/></div></div>;})}</div>)}
 
     <div className="tx-filters" style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
-      <AppSelect style={{width:"auto",minWidth:170}} value={filter.month} options={[{value:"",label:"Todos los meses"},...months.map(month=>({value:month,label:month}))]} ariaLabel="Filtrar por mes" onChange={month=>setFilter(f=>({...f,month}))}/>
+      <AppSelect style={{width:"auto",minWidth:170}} value={filter.month} options={[{value:"",label:"Todos los meses"},...months.map(month=>({value:month,label:month}))]} ariaLabel="Filtrar por mes" onChange={month=>setFilter(f=>({...f,month,dateFrom:"",dateTo:""}))}/>
       <AppSelect style={{width:"auto",minWidth:140}} value={filter.type} options={[{value:"",label:"Todos"},{value:"expense",label:"Gastos"},{value:"income",label:"Ingresos"}]} ariaLabel="Filtrar por tipo" onChange={type=>setFilter(f=>({...f,type}))}/>
       <CategorySelect includeAll style={{width:"auto",minWidth:180}} value={filter.cat} placeholder="Todas las categorías" ariaLabel="Filtrar por categoría" onChange={cat=>setFilter(f=>({...f,cat}))}/>
       {transferCount>0&&(
@@ -847,17 +798,17 @@ function Transactions({state,update,notify,setView}){
           <span style={{background:T.raised,borderRadius:99,padding:"1px 6px",fontSize:10,marginLeft:2}}>{transferCount}</span>
         </button>
       )}
-      {(filter.month||filter.type||filter.cat)&&<button className="btn bg bsm" onClick={()=>setFilter({month:"",type:"",cat:""})}>Limpiar</button>}
+      {hasFilters&&<button className="btn bg bsm" onClick={()=>setFilter({month:"",type:"",cat:""})}>Limpiar</button>}
     </div>
 
     {rows.length===0?<div className="card" style={{padding:0}}><EmptyPanel icon={<ic.Tx/>} title={hasFilters?"No hay resultados":"Todavía no hay movimientos"} detail={hasFilters?"Probá limpiando los filtros para volver a ver todos tus registros.":"Agregá un movimiento o importá un extracto para empezar a ordenar tus gastos."}>{hasFilters?<button className="btn bg" onClick={()=>setFilter({month:"",type:"",cat:""})}>Limpiar filtros</button>:<><button className="btn bl" onClick={openNew}><ic.Plus/> Nuevo</button>{setView&&<button className="btn bg" onClick={()=>setView("import")}><ic.Import/> Importar</button>}</>}</EmptyPanel></div>:<>
-    <div className="tx-mobile-list">{rows.map(t=>(<div key={t.id} className="card csm" style={{opacity:t.type==="transfer"?.65:1}}><div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12}}><div style={{minWidth:0,flex:1}}><div style={{fontSize:13,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</div><div style={{display:"flex",alignItems:"center",gap:7,marginTop:5,flexWrap:"wrap"}}><span className="mono" style={{fontSize:10,color:T.muted}}>{t.date}</span><span className={`tag ${txTypeClass(t.type,t.category)}`} style={{fontSize:9,padding:"2px 7px"}}>{txTypeLabel(t.type,t.category)}</span></div></div><div className="mono" style={{fontSize:13,fontWeight:700,color:txAmountColor(t.type),flexShrink:0}}>{txAmountSign(t.type)}{fmt(t.amount)}</div></div><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginTop:11,paddingTop:10,borderTop:`1px solid ${T.border}`}}><button onClick={()=>t.type!=="transfer"&&setEC({id:t.id,cat:t.category})} style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:8,padding:"6px 9px",fontSize:10,color:T.mid,cursor:t.type==="transfer"?"default":"pointer",minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.type==="transfer"?"Transferencia interna":<CategoryLabel category={t.category} compact/>}</button><div style={{display:"flex",gap:6,flexShrink:0}}>{t.type!=="transfer"&&<button className="btn bg bsm" aria-label="Editar movimiento" style={{width:40,height:40,padding:0}} onClick={()=>editMovement(t)}><ic.Edit/></button>}<button className="btn bd bsm" aria-label="Eliminar movimiento" style={{width:40,height:40,padding:0}} onClick={()=>removeMovement(t.id)}><ic.Trash/></button></div></div></div>))}</div>
+    <div className="tx-mobile-list">{rows.map(t=>(<div key={t.id} className="card csm" style={{opacity:t.type==="transfer"?.65:1}}><div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12}}><div style={{minWidth:0,flex:1}}><div style={{fontSize:13,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</div><div style={{display:"flex",alignItems:"center",gap:7,marginTop:5,flexWrap:"wrap"}}><span className="mono" style={{fontSize:10,color:T.muted}}>{t.date}</span><span className={`tag ${txTypeClass(t.type,t.category)}`} style={{fontSize:9,padding:"2px 7px"}}>{txTypeLabel(t.type,t.category)}</span></div></div><div className="mono" style={{fontSize:13,fontWeight:700,color:txAmountColor(t.type),flexShrink:0}}>{txAmountSign(t.type)}{fmt(t.amount)}</div></div><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginTop:11,paddingTop:10,borderTop:`1px solid ${T.border}`}}><button onClick={()=>!protect(t)&&t.type!=="transfer"&&setEC({id:t.id,cat:t.category})} style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:8,padding:"6px 9px",fontSize:10,color:T.mid,cursor:t.type==="transfer"?"default":"pointer",minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.type==="transfer"?"Transferencia interna":<CategoryLabel category={t.category} compact/>}</button><div style={{display:"flex",gap:6,flexShrink:0}}>{t.type!=="transfer"&&<button className="btn bg bsm" aria-label="Editar movimiento" style={{width:40,height:40,padding:0}} onClick={()=>editMovement(t)}><ic.Edit/></button>}<button className="btn bd bsm" aria-label="Eliminar movimiento" style={{width:40,height:40,padding:0}} onClick={()=>removeMovement(t.id)}><ic.Trash/></button></div></div></div>))}</div>
     <div className="card tx-desktop-table" style={{padding:0,overflow:"auto"}}><table className="tbl"><thead><tr><th className="hide-m">Fecha</th><th>Descripción</th><th>Categoría</th><th className="hide-m">Tipo</th><th>Monto</th><th></th></tr></thead><tbody>
     {rows.map(t=>(
       <tr key={t.id} style={{opacity:t.type==="transfer"?.6:1}}>
         <td className="mono hide-m" style={{color:T.muted,fontSize:11}}>{t.date}</td>
         <td style={{maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td>
-        <td><button onClick={()=>t.type!=="transfer"&&setEC({id:t.id,cat:t.category})} style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:8,padding:"4px 9px",fontSize:11,color:T.mid,cursor:t.type==="transfer"?"default":"pointer"}}>{t.type==="transfer"?"Transferencia interna":<CategoryLabel category={t.category} compact/>}</button></td>
+        <td><button onClick={()=>!protect(t)&&t.type!=="transfer"&&setEC({id:t.id,cat:t.category})} style={{background:T.raised,border:`1px solid ${T.border}`,borderRadius:8,padding:"4px 9px",fontSize:11,color:T.mid,cursor:t.type==="transfer"?"default":"pointer"}}>{t.type==="transfer"?"Transferencia interna":<CategoryLabel category={t.category} compact/>}</button></td>
         <td className="hide-m">
           <span className={`tag ${txTypeClass(t.type,t.category)}`}>
             {txTypeLabel(t.type,t.category)}
@@ -875,29 +826,15 @@ function Transactions({state,update,notify,setView}){
     ))}</tbody></table></div></>}
 
     {/* ── MODAL NUEVO MOVIMIENTO ── */}
-    {showAdd&&<div className="ov" onClick={e=>{if(e.target===e.currentTarget){setSA(false);setETx(null);}}}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h2 style={{fontSize:18,fontWeight:700}}>{editTx?"Editar movimiento":"Nuevo movimiento"}</h2><button className="btn bg bsm" onClick={()=>{setSA(false);setETx(null);}}><ic.X/></button></div><div style={{display:"flex",flexDirection:"column",gap:12}}><div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha</label><input type="date" className="inp" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tipo</label><AppSelect value={form.type} options={[{value:"expense",label:"Gasto"},{value:"income",label:"Ingreso"}]} ariaLabel="Tipo de movimiento" onChange={type=>setForm(f=>({...f,type}))}/></div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Descripción</label><input className="inp" placeholder="ej: Alquiler / Netflix" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/></div><div className="g3"><div style={{gridColumn:"1/3"}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Monto (positivo siempre)</label><input className="inp" placeholder="15000" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda</label><AppSelect value={form.currency} options={[{value:"ARS",label:"ARS"},{value:"USD",label:"USD"}]} ariaLabel="Moneda del movimiento" onChange={currency=>setForm(f=>({...f,currency}))}/></div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Categoría</label><CategorySelect value={form.category} ariaLabel="Categoría del movimiento" onChange={category=>setForm(f=>({...f,category}))}/></div>{!editTx&&(<label style={{display:"flex",alignItems:"center",gap:10,fontSize:12,color:form.isRecurring?T.lime:T.white,marginTop:4,background:form.isRecurring?"rgba(200,255,87,.08)":T.raised,padding:"12px 14px",borderRadius:10,border:`1px solid ${form.isRecurring?"rgba(200,255,87,.3)":T.border}`,cursor:"pointer",transition:"all .2s"}}><input type="checkbox" checked={form.isRecurring} onChange={e=>setForm(f=>({...f,isRecurring:e.target.checked}))} style={{accentColor:T.lime,width:16,height:16}}/><div><div style={{fontWeight:600,display:"flex",alignItems:"center",gap:7}}><ic.Repeat/> Repetir todos los meses</div><div style={{fontSize:10,color:T.muted,marginTop:2,fontWeight:400}}>La app lo cargará automáticamente el día 1 de cada mes.</div></div></label>)}{form.currency==="USD"&&px(form.amount)>0&&<div style={{background:"rgba(77,158,255,.08)",border:`1px solid rgba(77,158,255,.2)`,borderRadius:8,padding:"8px 12px",fontSize:11,color:T.blue}}>= {fARS(Math.abs(px(form.amount))*usdRate)} ARS al tipo de cambio seleccionado</div>}<button className="btn bl" style={{justifyContent:"center",marginTop:8}} onClick={saveTx}>{editTx?"Guardar cambios":"Agregar Movimiento"}</button></div></div></div>}
+    {showAdd&&<div className="ov" onClick={e=>{if(e.target===e.currentTarget){setSA(false);setETx(null);}}}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h2 style={{fontSize:18,fontWeight:700}}>{editTx?"Editar movimiento":"Nuevo movimiento"}</h2><button className="btn bg bsm" onClick={()=>{setSA(false);setETx(null);}}><ic.X/></button></div><div style={{display:"flex",flexDirection:"column",gap:12}}><div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha</label><input type="date" className="inp" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tipo</label><AppSelect value={form.type} options={[{value:"expense",label:"Gasto"},{value:"income",label:"Ingreso"}]} ariaLabel="Tipo de movimiento" onChange={type=>setForm(f=>({...f,type}))}/></div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Descripción</label><input className="inp" placeholder="ej: Alquiler / Netflix" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/></div><div className="g3"><div style={{gridColumn:"1/3"}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Monto (positivo siempre)</label><input className="inp" placeholder="15000" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda</label><AppSelect value={form.currency} options={[{value:"ARS",label:"ARS"},{value:"USD",label:"USD"}]} ariaLabel="Moneda del movimiento" onChange={currency=>setForm(f=>({...f,currency}))}/></div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Categoría</label><CategorySelect value={form.category} ariaLabel="Categoría del movimiento" onChange={category=>setForm(f=>({...f,category}))}/></div>{!editTx&&(<label style={{display:"flex",alignItems:"center",gap:10,fontSize:12,color:form.isRecurring?T.lime:T.white,marginTop:4,background:form.isRecurring?"rgba(200,255,87,.08)":T.raised,padding:"12px 14px",borderRadius:10,border:`1px solid ${form.isRecurring?"rgba(200,255,87,.3)":T.border}`,cursor:"pointer",transition:"all .2s"}}><input type="checkbox" checked={form.isRecurring} onChange={e=>setForm(f=>({...f,isRecurring:e.target.checked}))} style={{accentColor:T.lime,width:16,height:16}}/><div><div style={{fontWeight:600,display:"flex",alignItems:"center",gap:7}}><ic.Repeat/> Repetir todos los meses</div><div style={{fontSize:10,color:T.muted,marginTop:2,fontWeight:400}}>Aparecerá como pendiente. Cada mes confirmás el pago o vinculás un movimiento existente.</div></div></label>)}{form.currency==="USD"&&px(form.amount)>0&&<div style={{background:"rgba(77,158,255,.08)",border:`1px solid rgba(77,158,255,.2)`,borderRadius:8,padding:"8px 12px",fontSize:11,color:T.blue}}>= {fARS(Math.abs(px(form.amount))*usdRate)} ARS al tipo de cambio seleccionado</div>}<button className="btn bl" style={{justifyContent:"center",marginTop:8}} onClick={saveTx}>{editTx?"Guardar cambios":"Agregar Movimiento"}</button></div></div></div>}
 
-    {/* ── MODAL RECURRENTES ── */}
-    {showRec&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setSRec(false)}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}><h2 style={{fontSize:18,fontWeight:700}}>Suscripciones y Recurrentes</h2><button className="btn bg bsm" onClick={()=>setSRec(false)}><ic.X/></button></div><div style={{fontSize:12,color:T.mid,marginBottom:16}}>Acá ves los gastos que se inyectan automáticamente cada mes. Si eliminás uno, no afectará a los meses anteriores.</div>
-    {recurring.length===0?<div style={{color:T.muted,fontSize:12,textAlign:"center",padding:20,background:T.raised,borderRadius:12}}>No tenés gastos recurrentes configurados.</div>:recurring.map(r=>(
-      <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:T.raised,borderRadius:10,padding:"12px 14px",marginBottom:8,border:`1px solid ${T.border}`,opacity:r.paused?0.5:1}}>
-        <div>
-          <div style={{fontSize:13,fontWeight:600,color:r.paused?T.muted:T.white,display:"flex",alignItems:"center",gap:7}}><span style={{display:"flex",color:r.paused?T.muted:T.teal}}>{r.paused?<ic.Pause/>:<ic.Repeat/>}</span>{r.description}</div>
-          <div style={{fontSize:10,color:T.muted,marginTop:5,display:"flex",alignItems:"center",gap:6}}><CategoryLabel category={r.category} compact/><span>· Último cobro: {r.lastMonth}</span></div>
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <span className="mono" style={{fontSize:14,color:r.paused?T.muted:(r.type==="income"?T.teal:T.red),fontWeight:500,marginRight:4}}>{fmt(r.amount)}</span>
-          <button className="btn bg bsm" style={{padding:"4px 8px"}} aria-label={r.paused?"Reanudar recurrente":"Pausar recurrente"} title={r.paused?"Reanudar":"Pausar"} onClick={()=>update({recurring:recurring.map(x=>x.id===r.id?{...x,paused:!x.paused}:x)})}>{r.paused?<ic.Play/>:<ic.Pause/>}</button>
-          <button className="btn bd bsm" style={{padding:"4px 8px"}} onClick={()=>{update({recurring:recurring.filter(x=>x.id!==r.id)});notify("Suscripción eliminada","err");}}><ic.Trash/></button>
-        </div>
-      </div>
-    ))}</div></div>}
+    {showRec&&<Dialog title="Pagos recurrentes" onClose={()=>setSRec(false)} wide><PendingPayments state={state} update={update} notify={notify} month={filter.month||CUR}/></Dialog>}
 
     {/* ── MODAL CAMBIAR CATEGORÍA ── */}
-    {editCat&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setEC(null)}><div className="modal" style={{width:360}}><h2 style={{fontSize:16,fontWeight:700,marginBottom:14}}>Cambiar categoría</h2><CategorySelect style={{marginBottom:14}} value={editCat.cat} ariaLabel="Nueva categoría" onChange={cat=>setEC(current=>({...current,cat}))}/><div style={{display:"flex",gap:8}}><button className="btn bl" style={{flex:1,justifyContent:"center"}} onClick={()=>{update({transactions:transactions.map(t=>t.id===editCat.id?{...t,category:editCat.cat}:t)});setEC(null);notify("Guardado ✓");}}>Guardar</button><button className="btn bg" onClick={()=>setEC(null)}>Cancelar</button></div></div></div>}
+    {editCat&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setEC(null)}><div className="modal" style={{width:360}}><h2 style={{fontSize:16,fontWeight:700,marginBottom:14}}>Cambiar categoría</h2><CategorySelect style={{marginBottom:14}} value={editCat.cat} ariaLabel="Nueva categoría" onChange={cat=>setEC(current=>({...current,cat}))}/><div style={{display:"flex",gap:8}}><button className="btn bl" style={{flex:1,justifyContent:"center"}} onClick={()=>{if(protect(transactions.find(t=>t.id===editCat.id)))return;update({transactions:transactions.map(t=>t.id===editCat.id?{...t,category:editCat.cat}:t)});setEC(null);notify("Guardado ✓");}}>Guardar</button><button className="btn bg" onClick={()=>setEC(null)}>Cancelar</button></div></div></div>}
 
     {/* ── MODAL PRESUPUESTOS ── */}
-    {showBud&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setSB(false)}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}><h2 style={{fontSize:18,fontWeight:700}}>Presupuestos</h2><button className="btn bg bsm" onClick={()=>setSB(false)}><ic.X/></button></div><div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}><CategorySelect style={{flex:1.5,minWidth:180}} value={bf.category} ariaLabel="Categoría del presupuesto" onChange={category=>setBF(f=>({...f,category}))}/><input className="inp" style={{flex:1,minWidth:100}} placeholder="Límite ARS" value={bf.limit} onChange={e=>setBF(f=>({...f,limit:e.target.value}))}/><button className="btn bl" aria-label="Agregar presupuesto" onClick={()=>{if(!bf.limit)return;update({budgets:{...budgets,[bf.category]:px(bf.limit)}});setSB(false);notify("Guardado ✓");}}><ic.Plus/></button></div>{Object.entries(budgets||{}).map(([cat,lim])=>(<div key={cat} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:T.raised,borderRadius:10,padding:"10px 14px",marginBottom:7,flexWrap:"wrap",gap:6}}><span style={{fontSize:13}}><CategoryLabel category={cat}/></span><div style={{display:"flex",alignItems:"center",gap:10}}><span className="mono" style={{fontSize:12,color:T.mid}}>{fmt(lim)}/mes</span><button className="btn bd bsm" aria-label={`Eliminar presupuesto de ${categoryName(cat)}`} onClick={()=>{const b={...budgets};delete b[cat];update({budgets:b});}}><ic.Trash/></button></div></div>))}</div></div>}
+    {showBud&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setSB(false)}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}><h2 style={{fontSize:18,fontWeight:700}}>Presupuestos</h2><button className="btn bg bsm" onClick={()=>setSB(false)}><ic.X/></button></div><div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}><CategorySelect style={{flex:1.5,minWidth:180}} value={bf.category} ariaLabel="Categoría del presupuesto" onChange={category=>setBF(f=>({...f,category}))}/><input className="inp" style={{flex:1,minWidth:100}} placeholder="Límite ARS" value={bf.limit} onChange={e=>setBF(f=>({...f,limit:e.target.value}))}/><button className="btn bl" aria-label="Agregar presupuesto" onClick={()=>{const limit=parseMoney(bf.limit);if(!Number.isFinite(limit)||limit<=0)return notify("Ingresá un límite positivo","err");update({budgets:{...budgets,[bf.category]:limit}});setSB(false);notify("Guardado ✓");}}><ic.Plus/></button></div>{Object.entries(budgets||{}).map(([cat,lim])=>(<div key={cat} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:T.raised,borderRadius:10,padding:"10px 14px",marginBottom:7,flexWrap:"wrap",gap:6}}><span style={{fontSize:13}}><CategoryLabel category={cat}/></span><div style={{display:"flex",alignItems:"center",gap:10}}><span className="mono" style={{fontSize:12,color:T.mid}}>{fmt(lim)}/mes</span><button className="btn bd bsm" aria-label={`Eliminar presupuesto de ${categoryName(cat)}`} onClick={()=>{const b={...budgets};delete b[cat];update({budgets:b});}}><ic.Trash/></button></div></div>))}</div></div>}
 
     {/* ── MODAL TRANSFERENCIAS INTERNAS ── */}
     {showTransferModal&&(
@@ -928,6 +865,7 @@ function Transactions({state,update,notify,setView}){
                 </div>
                 <div className="transfer-actions" style={{display:"flex",gap:8}}>
                   <button className="btn bl bsm" style={{flex:1,justifyContent:"center"}} onClick={()=>{
+                    if(protect(transactions.find(t=>t.id===pair.a.id))||protect(transactions.find(t=>t.id===pair.b.id)))return;
                     update({
                       transactions:transactions.map(t=>t.id===pair.a.id||t.id===pair.b.id?{...t,type:"transfer",category:"🔄 Transferencia interna"}:t),
                       recurring:recurring.filter(r=>r.originTransactionId!==pair.a.id&&r.originTransactionId!==pair.b.id),
@@ -953,7 +891,7 @@ function Transactions({state,update,notify,setView}){
   </div>);
 }
 
-function Goals({state,update,notify}){
+function Goals({state,update,notify,request}){
   const {goals,transactions,usdRate,salaries,holdings=[],marketPrices={}}=state;
   const {fmt}=useDsp(state);
   const NOW=getNow();
@@ -968,44 +906,35 @@ function Goals({state,update,notify}){
 
   const addG=()=>{
     if(!form.name||!form.target)return notify("Nombre y monto requeridos","err");
-    const conversion=form.currency==="USD"?usdRate:1;const t=Math.abs(px(form.target))*conversion;const saved=(Math.abs(px(form.saved))||0)*conversion;
+    const conversion=form.currency==="USD"?usdRate:1;const t=parseMoney(parseMoney(form.target)*conversion);const saved=parseMoney(parseMoney(form.saved)*conversion);
+    if(!Number.isFinite(t)||t<=0||!Number.isFinite(saved)||saved<0||(form.deadline&&!isValidISODate(form.deadline)))return notify("Ingresá un objetivo positivo, una reserva válida y revisá la fecha.","err");
     update({goals:[...goals,{id:`g_${uid()}`,name:form.name,target:t,saved,icon:form.icon,deadline:form.deadline,createdAt:todayISO(),payments:[]}]});
     setForm({name:"",target:"",currency:"ARS",saved:"",icon:"🎯",deadline:""});setSF(false);notify("Meta creada ✓");
   };
 
   const addSav=g=>{
-    const a=Math.abs(px(addAmt))*(addCur==="USD"?usdRate:1);
-    if(!a)return notify("Ingresá un monto","err");
-    if(addTo?.mode==="payment"){
-      if(!addLabel.trim())return notify("Ingresá un nombre para el pago","err");
-      const p={id:`p_${uid()}`,name:addLabel.trim(),amount:a,date:todayISO()};
-      update({goals:goals.map(gl=>gl.id===g.id?{...gl,payments:[...(gl.payments||[]),p]}:gl),
-        transactions:[...transactions,{id:`t_${uid()}`,date:todayISO(),description:`${addLabel}: ${g.name}`,amount:a,type:"expense",category:"💰 Ahorro",currency:"ARS",source:"manual"}]});
-      notify(`"${addLabel}" agregado ✓`);
-    }else{
-      update({goals:goals.map(gl=>gl.id===g.id?{...gl,saved:gl.saved+a}:gl),
-        transactions:[...transactions,{id:`t_${uid()}`,date:todayISO(),description:`Ahorro: ${g.name}`,amount:a,type:"expense",category:"💰 Ahorro",currency:"ARS",source:"manual"}]});
-      notify(`+${fmt(a)} sumado ✓`);
-    }
-    setAT(null);setAA("");setAC("ARS");setAL("");
+    const originalAmount=parseMoney(addAmt);const amount=parseMoney(originalAmount*(addCur==="USD"?usdRate:1));
+    if(!Number.isFinite(amount)||amount<=0)return notify("Ingresá un monto positivo","err");
+    if(addTo?.mode==="payment"&&!addLabel.trim())return notify("Ingresá un nombre para el pago","err");
+    const options={date:todayISO(),id:`goal_${uid()}`,name:addLabel.trim(),originalAmount,originalCurrency:addCur,fxRateAtEntry:addCur==="USD"?usdRate:1,fxDate:todayISO()};
+    try{update(addTo?.mode==="payment"?payGoal(state,g.id,amount,options):reserveForGoal(state,g.id,amount,options));notify(addTo?.mode==="payment"?"Pago registrado; la reserva utilizada se liberó ✓":"Reserva registrada ✓");setAT(null);setAA("");setAC("ARS");setAL("");}catch(error){notify(error.message,"err");}
   };
-
-  const removePayment=(g,pid)=>{update({goals:goals.map(gl=>gl.id===g.id?{...gl,payments:(gl.payments||[]).filter(p=>p.id!==pid)}:gl)});notify("Pago eliminado","err");};
-
-  const liquidar=(g,linkedHoldings,investedValue)=>{
-    if(!window.confirm(`¿Liquidar "${g.name}"? Se registrará el gasto.`))return;
-    const newTxs=[...transactions];
-    if(investedValue>0)newTxs.push({id:`liq_i_${uid()}`,date:todayISO(),description:`Venta activos: ${g.name}`,amount:investedValue,type:"income",category:"💰 Ahorro",currency:"ARS"});
-    newTxs.push({id:`liq_e_${uid()}`,date:todayISO(),description:`Meta cumplida: ${g.name}`,amount:g.target,type:"expense",category:"🎬 Ocio",currency:"ARS"});
-    const holdingIds=linkedHoldings.map(h=>h.id);
-    update({transactions:newTxs,holdings:holdings.filter(h=>!holdingIds.includes(h.id)),goals:goals.map(x=>x.id===g.id?{...x,saved:x.target}:x)});
-    notify(`¡Meta "${g.name}" alcanzada! 🎉`);
+  const removePayment=(g,pid)=>{try{update(revertGoalPayment(state,g.id,pid));notify("Pago revertido. Historial conservado y reserva restituida ✓");}catch(error){notify(error.message,"err");}};
+  const deleteGoal=g=>{
+    if(goalCash(g)>0||(g.payments||g.milestones||[]).length||holdings.some(h=>h.goalId===g.id)||transactions.some(t=>t.goalId===g.id))return notify("Esta meta tiene reservas, pagos o inversiones vinculadas. Conservamos su historial; revisá esos vínculos antes de eliminarla.","info");
+    update({goals:goals.filter(x=>x.id!==g.id)});notify("Meta eliminada","info");
   };
+  const handledRequest=useRef(null);
+  useEffect(()=>{
+    if(!request||handledRequest.current===request.nonce)return;handledRequest.current=request.nonce;
+    if(["new","goals:new"].includes(request.action))setSF(true);
+    if(["link","goals:link"].includes(request.action)){const goal=goals.find(g=>g.id===request.goalId)||goals[0];if(goal)setLG(goal.id);else setSF(true);}
+  },[request]);
 
   return(<div className="up">
-    <PH title="Metas" sub={`${goals.filter(g=>goalCash(g)<g.target).length} activas`} right={<button data-tour-target="new-goal-btn" className="btn bl" onClick={()=>setSF(true)}><ic.Plus/> Nueva meta</button>}/>
+    <PH title="Metas" sub={`${goals.filter(g=>goalProgress(g)<g.target).length} activas`} right={<button data-tour-target="new-goal-btn" className="btn bl" onClick={()=>setSF(true)}><ic.Plus/> Nueva meta</button>}/>
 
-    {disponible>0&&perGoal.length>0&&<div className="card" style={{marginBottom:16,borderColor:"rgba(200,255,87,.18)"}}><div style={{fontSize:13,fontWeight:700,marginBottom:10}}>Plan de ahorro recomendado</div><div style={{fontSize:12,color:T.mid,marginBottom:12}}>Tenés <span className="mono" style={{color:T.lime}}>{fmt(disponible)}</span> disponibles este mes:</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:10}}>{perGoal.map(g=><div key={g.id} style={{background:T.raised,borderRadius:10,padding:"12px 14px",border:`1px solid ${g.feasible?T.border:"rgba(255,184,48,.3)"}`}}><div style={{fontSize:12,marginBottom:6}}><GoalLabel goal={g} compact/></div><div className="mono" style={{fontSize:18,fontWeight:600,color:g.feasible?T.lime:T.amber}}>{fmt(g.needed)}<span style={{fontSize:11,fontWeight:400,color:T.muted}}>/mes</span></div><div style={{fontSize:10,color:T.muted,marginTop:3}}>{g.months} mes{g.months>1?"es":""} · Falta {fmt(g.rem)}</div>{!g.feasible&&<div style={{fontSize:10,color:T.amber,marginTop:4}}>Ajustá el plazo o el monto</div>}</div>)}</div></div>}
+    {disponible>0&&perGoal.length>0&&<div className="card" style={{marginBottom:16,borderColor:"rgba(200,255,87,.18)"}}><div style={{fontSize:13,fontWeight:700,marginBottom:10}}>Plan para tus metas</div><div style={{fontSize:12,color:T.mid,marginBottom:12}}>Tenés <span className="mono" style={{color:T.lime}}>{fmt(disponible)}</span> de flujo disponible este mes (ingresos menos gastos y reservas netas):</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:10}}>{perGoal.map(g=><div key={g.id} style={{background:T.raised,borderRadius:10,padding:"12px 14px",border:`1px solid ${g.feasible?T.border:"rgba(255,184,48,.3)"}`}}><div style={{fontSize:12,marginBottom:6}}><GoalLabel goal={g} compact/></div><div className="mono" style={{fontSize:18,fontWeight:600,color:g.feasible?T.lime:T.amber}}>{fmt(g.needed)}<span style={{fontSize:11,fontWeight:400,color:T.muted}}>/mes</span></div><div style={{fontSize:10,color:T.muted,marginTop:3}}>{g.months} mes{g.months>1?"es":""} · Falta {fmt(g.rem)}</div>{!g.feasible&&<div style={{fontSize:10,color:T.amber,marginTop:4}}>Ajustá el plazo o el monto</div>}</div>)}</div></div>}
 
     {goals.length===0
       ?<div className="card" style={{textAlign:"center",padding:"64px 32px"}}><div style={{width:64,height:64,margin:"0 auto 16px",background:"rgba(204,255,71,.08)",borderRadius:20,display:"flex",alignItems:"center",justifyContent:"center",color:T.lime}}><svg width="32" height="32" viewBox="0 0 20 20" fill="none"><path d="M10 3C7 3 5 5.5 5 8.5c0 4 3.5 6.5 5 8 1.5-1.5 5-4 5-8C15 5.5 13 3 10 3z" stroke="currentColor" strokeWidth="1.4"/><circle cx="10" cy="8" r="1.5" fill="currentColor" opacity=".5"/></svg></div><div style={{fontSize:20,fontWeight:700,marginBottom:8}}>Sin metas todavía</div><div style={{fontSize:13,color:T.muted,marginBottom:20}}>Creá una meta y empezá a trackear tu progreso</div><button className="btn bl" onClick={()=>setSF(true)}><ic.Plus/> Crear meta</button></div>
@@ -1016,9 +945,10 @@ function Goals({state,update,notify}){
           const investedValue=linkedHoldings.reduce((s,h)=>s+calcHoldingValueArs(h,marketPrices,usdRate).curArs,0);
           const pnl=investedValue-invCost;
           const cash=goalCash(g);
-          const total=cash+investedValue;
+          const paid=goalProgress(g)-cash;
+          const total=goalProgress(g)+investedValue;
           const pct=clamp((total/g.target)*100,0,100);
-          const cashPct=clamp((cash/g.target)*100,0,100);
+          const cashPct=clamp((goalProgress(g)/g.target)*100,0,100);
           const invPct=clamp((investedValue/g.target)*100,0,cashPct===100?0:100-cashPct);
           const rem=g.target-total;
           const days=g.deadline?Math.ceil((new Date(g.deadline)-NOW)/864e5):null;
@@ -1028,13 +958,13 @@ function Goals({state,update,notify}){
           return<div key={g.id} className="card up">
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
               <div style={{display:"flex",gap:10,alignItems:"center"}}><span className="goal-icon-badge" style={{width:40,height:40,borderRadius:12}}><GoalIcon icon={g.icon} size={21}/></span><div><div style={{fontSize:14,fontWeight:700}}>{g.name}</div>{g.deadline&&<div style={{fontSize:10,color:T.muted,marginTop:2}}><span style={{display:"inline-flex",verticalAlign:"middle",marginRight:3}}><IcCalendar/></span>{g.deadline}{days!==null&&` · ${days>0?days+"d":"¡Hoy!"}`}</div>}</div></div>
-              <button className="btn bd bsm" onClick={()=>{update({goals:goals.filter(x=>x.id!==g.id)});notify("Eliminado","err");}}><ic.Trash/></button>
+              <button className="btn bd bsm" aria-label={`Eliminar meta ${g.name}`} onClick={()=>deleteGoal(g)}><ic.Trash/></button>
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:12}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:T.raised,borderRadius:8}}><div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:8,height:8,borderRadius:2,background:T.lime,flexShrink:0}}/><span style={{fontSize:11,color:T.mid}}>Ahorros depositados</span></div><span className="mono" style={{fontSize:12,color:T.lime,fontWeight:600}}>{fmt(g.saved||0)}</span></div>
-              {(g.payments||[]).map(p=><div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:T.raised,borderRadius:8}}><div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:8,height:8,borderRadius:2,background:T.mango,flexShrink:0}}/><span style={{fontSize:11,color:T.mid}}>{p.name}</span></div><div style={{display:"flex",alignItems:"center",gap:8}}><span className="mono" style={{fontSize:12,color:T.mango,fontWeight:600}}>{fmt(p.amount)}</span><button aria-label={`Eliminar aporte ${p.name}`} onClick={()=>removePayment(g,p.id)} style={{color:T.muted,background:"none",border:"none",cursor:"pointer",padding:3,lineHeight:1,display:"flex"}}><ic.X/></button></div></div>)}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:T.raised,borderRadius:8}}><div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:8,height:8,borderRadius:2,background:T.lime,flexShrink:0}}/><span style={{fontSize:11,color:T.mid}}>Efectivo reservado</span></div><span className="mono" style={{fontSize:12,color:T.lime,fontWeight:600}}>{fmt(g.saved||0)}</span></div>
+              {(g.payments||g.milestones||[]).map(p=><div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:T.raised,borderRadius:8}}><div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:8,height:8,borderRadius:2,background:T.mango,flexShrink:0}}/><span style={{fontSize:11,color:T.mid}}>{p.name}{!isActiveRecord(p)?" · Revertido":""}</span></div><div style={{display:"flex",alignItems:"center",gap:8}}><span className="mono" style={{fontSize:12,color:T.mango,fontWeight:600}}>{fmt(p.amount)}</span>{isActiveRecord(p)&&<button aria-label={`Revertir pago ${p.name}`} onClick={()=>removePayment(g,p.id)} style={{color:T.muted,background:"none",border:"none",cursor:"pointer",padding:3,lineHeight:1,display:"flex"}}><ic.X/></button>}</div></div>)}
               {linkedHoldings.length>0&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:T.raised,borderRadius:8,border:`1px solid ${pnl>=0?"rgba(0,212,170,.15)":"rgba(255,95,109,.15)"}`}}><div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:8,height:8,borderRadius:2,background:T.blue,flexShrink:0}}/><span style={{fontSize:11,color:T.mid}}>Inversión vinculada</span><span className="mono" style={{fontSize:10,color:pnl>=0?T.teal:T.coral,fontWeight:600}}>{pnl>=0?"+":""}{fmt(pnl)}</span></div><span className="mono" style={{fontSize:12,color:T.blue,fontWeight:600}}>{fmt(investedValue)}</span></div>}
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingTop:6,borderTop:`1px solid ${T.border}`}}><span style={{fontSize:11,color:T.muted,fontWeight:600}}>Total</span><div style={{display:"flex",alignItems:"center",gap:8}}><span className="mono" style={{fontSize:14,color:pc,fontWeight:700}}>{fmt(total)}</span><span style={{fontSize:10,color:T.muted}}>de {fmt(g.target)}</span></div></div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingTop:6,borderTop:`1px solid ${T.border}`}}><span style={{fontSize:11,color:T.muted,fontWeight:600}}>Avance total</span><div style={{display:"flex",alignItems:"center",gap:8}}><span className="mono" style={{fontSize:14,color:pc,fontWeight:700}}>{fmt(total)}</span><span style={{fontSize:10,color:T.muted}}>de {fmt(g.target)}</span></div></div>
             </div>
             <div style={{marginBottom:10}}>
               <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{fontSize:11,color:T.muted}}>Progreso</span><span className="mono" style={{fontSize:11,color:pc,fontWeight:600}}>{pct.toFixed(1)}%</span></div>
@@ -1042,18 +972,17 @@ function Goals({state,update,notify}){
                 <div style={{position:"absolute",left:0,top:0,height:"100%",borderRadius:3,width:`${cashPct}%`,background:T.lime,transition:"width .7s cubic-bezier(.16,1,.3,1)"}}/>
                 {investedValue>0&&<div style={{position:"absolute",left:`${cashPct}%`,top:0,height:"100%",width:`${invPct}%`,background:T.blue,transition:"width .7s cubic-bezier(.16,1,.3,1)"}}/>}
               </div>
-              {linkedHoldings.length>0&&<div style={{display:"flex",gap:12,marginTop:5}}><div style={{display:"flex",alignItems:"center",gap:4,fontSize:9,color:T.muted}}><div style={{width:6,height:6,borderRadius:1,background:T.lime}}/> Efectivo</div><div style={{display:"flex",alignItems:"center",gap:4,fontSize:9,color:T.muted}}><div style={{width:6,height:6,borderRadius:1,background:T.blue}}/> Inversión</div></div>}
+              {linkedHoldings.length>0&&<div style={{display:"flex",gap:12,marginTop:5}}><div style={{display:"flex",alignItems:"center",gap:4,fontSize:9,color:T.muted}}><div style={{width:6,height:6,borderRadius:1,background:T.lime}}/> Reservas + pagos</div><div style={{display:"flex",alignItems:"center",gap:4,fontSize:9,color:T.muted}}><div style={{width:6,height:6,borderRadius:1,background:T.blue}}/> Inversión</div></div>}
             </div>
             {needed&&needed>0&&<div style={{background:"rgba(91,158,255,.07)",border:"1px solid rgba(91,158,255,.15)",borderRadius:8,padding:"8px 10px",fontSize:11,color:T.blue,marginBottom:10}}><span style={{display:"inline-flex",color:T.blue,marginRight:4,verticalAlign:"middle"}}><ic.Bolt/></span>Guardá <span className="mono">{fmt(needed)}</span>/mes para llegar en {months} mes{months>1?"es":""}</div>}
-            {pct>=100
-              ?<div style={{display:"flex",gap:8}}><div style={{flex:1,background:"rgba(204,255,71,.08)",border:"1px solid rgba(204,255,71,.25)",borderRadius:10,padding:10,textAlign:"center",fontSize:13,color:T.lime,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}><ic.Check/>Alcanzada</div>{(g.saved||0)<g.target&&<button className="btn bl" onClick={()=>liquidar(g,linkedHoldings,investedValue)}>Liquidar</button>}</div>
-              :addTo?.id===g.id
+            {pct>=100&&<div style={{fontSize:12,color:T.lime,marginBottom:10}}>{paid>=g.target?"Objetivo pagado":"Meta financiada: las reservas siguen disponibles hasta registrar un pago."}</div>}
+            {addTo?.id===g.id
                 ?<div style={{display:"flex",flexDirection:"column",gap:7}}>
                     {addTo.mode==="payment"&&<input className="inp" style={{fontSize:12}} placeholder='Nombre (ej: "Pasajes a Europa")' value={addLabel} onChange={e=>setAL(e.target.value)}/>}
                     <div className="goal-input-actions" style={{display:"flex",gap:7}}><input className="inp" style={{flex:1,fontSize:12}} placeholder="Monto" value={addAmt} onChange={e=>setAA(e.target.value)} autoFocus onKeyDown={e=>e.key==="Enter"&&addSav(g)}/><AppSelect compact style={{width:78}} value={addCur} options={[{value:"ARS",label:"ARS"},{value:"USD",label:"USD"}]} ariaLabel="Moneda del aporte" onChange={setAC}/><button className="btn bl bsm" aria-label="Agregar aporte" onClick={()=>addSav(g)}><ic.Plus/></button><button className="btn bg bsm" aria-label="Cancelar aporte" onClick={()=>{setAT(null);setAA("");setAL("");}}><ic.X/></button></div>
                   </div>
                 :<div className="goal-actions" style={{display:"grid",gridTemplateColumns:holdings.length>0?"1fr 1fr 1fr":"1fr 1fr",gap:7}}>
-                    <button className="btn bg bsm" style={{justifyContent:"center"}} onClick={()=>setAT({id:g.id,mode:"cash"})}><ic.Plus/> Ahorro</button>
+                    <button className="btn bg bsm" style={{justifyContent:"center"}} onClick={()=>setAT({id:g.id,mode:"cash"})}><ic.Plus/> Reservar</button>
                     <button className="btn bg bsm" style={{justifyContent:"center",color:T.mango,borderColor:"rgba(255,154,53,.25)"}} onClick={()=>setAT({id:g.id,mode:"payment"})}><ic.Plus/> Pago</button>
                     {holdings.length>0&&<button className="btn bg bsm" style={{justifyContent:"center",color:T.blue,borderColor:"rgba(91,158,255,.3)"}} data-tour-target="vincular-inv-btn" onClick={()=>setLG(g.id)}><ic.Link/></button>}
                   </div>
@@ -1063,13 +992,14 @@ function Goals({state,update,notify}){
       </div>
     }
 
-    {linkGoal&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setLG(null)}><div className="modal" style={{width:420}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}><h2 style={{fontSize:17,fontWeight:700}}>Vincular inversión a meta</h2><button className="btn bg bsm" onClick={()=>setLG(null)}><ic.X/></button></div><div style={{fontSize:12,color:T.mid,marginBottom:14}}>El valor de mercado de la inversión contará hacia el progreso de la meta.</div>{holdings.filter(h=>!h.goalId).length===0?<div style={{color:T.muted,fontSize:12,textAlign:"center",padding:"20px 0"}}>No hay inversiones disponibles</div>:holdings.filter(h=>!h.goalId).map(h=><div key={h.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:T.raised,borderRadius:10,padding:"12px 14px",marginBottom:8,border:`1px solid ${T.border}`}}><div><div style={{fontSize:13,fontWeight:600}}>{h.ticker||h.name} <span style={{fontSize:10,color:T.muted}}>{h.type}</span></div><div className="mono" style={{fontSize:11,color:T.blue,marginTop:2}}>{fmt(calcHoldingValueArs(h,marketPrices,usdRate).curArs)}</div></div><button className="btn bl bsm" onClick={()=>{update({holdings:holdings.map(x=>x.id===h.id?{...x,goalId:linkGoal}:x)});setLG(null);notify("Inversión vinculada ✓");}}>Vincular</button></div>)}</div></div>}
+    {linkGoal&&<Dialog title="Vincular inversión a meta" onClose={()=>setLG(null)}><div style={{fontSize:12,color:T.mid,marginBottom:14}}>El valor de mercado de la inversión contará hacia el progreso de la meta.</div>{holdings.filter(h=>!h.goalId).length===0?<div style={{color:T.muted,fontSize:12,textAlign:"center",padding:"20px 0"}}>No hay inversiones disponibles</div>:holdings.filter(h=>!h.goalId).map(h=><div key={h.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:T.raised,borderRadius:10,padding:"12px 14px",marginBottom:8,border:`1px solid ${T.border}`}}><div><div style={{fontSize:13,fontWeight:600}}>{h.ticker||h.name} <span style={{fontSize:10,color:T.muted}}>{h.type}</span></div><div className="mono" style={{fontSize:11,color:T.blue,marginTop:2}}>{fmt(calcHoldingValueArs(h,marketPrices,usdRate).curArs)}</div></div><button className="btn bl bsm" onClick={()=>{update({holdings:holdings.map(x=>x.id===h.id?{...x,goalId:linkGoal}:x)});setLG(null);notify("Inversión vinculada ✓");}}>Vincular</button></div>)}</Dialog>}
 
-    {sf&&<div className="ov" onClick={e=>e.target===e.currentTarget&&setSF(false)}><div className="modal"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h2 style={{fontSize:18,fontWeight:700}}>Nueva meta</h2><button className="btn bg bsm" aria-label="Cerrar formulario de meta" onClick={()=>setSF(false)}><ic.X/></button></div><div style={{display:"flex",flexDirection:"column",gap:12}}><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:7}}>Tipo de meta</label><div className="goal-icon-grid" role="radiogroup" aria-label="Tipo de meta">{GOAL_ICON_OPTIONS.map(option=><button type="button" role="radio" className="goal-icon-option" key={option.value} aria-label={option.label} aria-checked={form.icon===option.value} onClick={()=>setForm(f=>({...f,icon:option.value}))}><GoalIcon icon={option.value}/><span>{option.label}</span></button>)}</div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Nombre</label><input className="inp" placeholder="ej: Viaje a Europa" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))}/></div><div className="g3"><div style={{gridColumn:"1/3"}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Monto objetivo</label><input className="inp" placeholder="500000" value={form.target} onChange={e=>setForm(f=>({...f,target:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda</label><AppSelect value={form.currency} options={[{value:"ARS",label:"ARS"},{value:"USD",label:"USD"}]} ariaLabel="Moneda de la meta" onChange={currency=>setForm(f=>({...f,currency}))}/></div></div><div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Ya tengo</label><input className="inp" placeholder="0" value={form.saved} onChange={e=>setForm(f=>({...f,saved:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha límite</label><input type="date" className="inp" value={form.deadline} onChange={e=>setForm(f=>({...f,deadline:e.target.value}))}/></div></div><button className="btn bl" style={{justifyContent:"center"}} onClick={addG}>Crear meta</button></div></div></div>}
+    <p style={{fontSize:11,color:T.muted,marginTop:14}}>Las reservas iniciales no crean movimientos históricos. Los pagos aumentan el avance y dejan de ser efectivo. Una inversión vinculada aporta su valor estimado, sin registrar una venta.</p>
+    {sf&&<Dialog title="Nueva meta" onClose={()=>setSF(false)}><div style={{display:"flex",flexDirection:"column",gap:12}}><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:7}}>Tipo de meta</label><div className="goal-icon-grid" role="radiogroup" aria-label="Tipo de meta">{GOAL_ICON_OPTIONS.map(option=><button type="button" role="radio" className="goal-icon-option" key={option.value} aria-label={option.label} aria-checked={form.icon===option.value} onClick={()=>setForm(f=>({...f,icon:option.value}))}><GoalIcon icon={option.value}/><span>{option.label}</span></button>)}</div></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Nombre</label><input className="inp" placeholder="ej: Viaje a Europa" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))}/></div><div className="g3"><div style={{gridColumn:"1/3"}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Monto objetivo</label><input className="inp" placeholder="500000" value={form.target} onChange={e=>setForm(f=>({...f,target:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Moneda</label><AppSelect value={form.currency} options={[{value:"ARS",label:"ARS"},{value:"USD",label:"USD"}]} ariaLabel="Moneda de la meta" onChange={currency=>setForm(f=>({...f,currency}))}/></div></div><div className="g2"><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Reserva inicial previa</label><input className="inp" placeholder="0" value={form.saved} onChange={e=>setForm(f=>({...f,saved:e.target.value}))}/></div><div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Fecha límite</label><input type="date" className="inp" value={form.deadline} onChange={e=>setForm(f=>({...f,deadline:e.target.value}))}/></div></div><button className="btn bl" style={{justifyContent:"center"}} onClick={addG}>Crear meta</button></div></Dialog>}
   </div>);
 }
 
-function Investments({state,update,notify}){
+function Investments({state,update,notify,request}){
   const {savedAnalyses=[],riskProfile,goals=[],usdRate,displayCurrency="ARS",lastScanResult=null,lastScanAt=null}=state;
   const {fmt}=useDsp(state);
   const [tab,setTab]=useState("portfolio");
@@ -1094,26 +1024,32 @@ function Investments({state,update,notify}){
   const [refreshingId,setRI]=useState(null);
   const holdings=state.holdings||[];
   const marketPrices=state.marketPrices||{};
+  const demo=state.demo||IS_DEMO;
+  const demoNotice=()=>notify("La demo usa datos ficticios guardados. Las consultas externas están desactivadas.","info");
+  const handledRequest=useRef(null);
+  useEffect(()=>{if(!request||handledRequest.current===request.nonce)return;handledRequest.current=request.nonce;if(["portfolio","new","investments:portfolio","investments:new"].includes(request.action))setTab("portfolio");if(["new","investments:new"].includes(request.action))openNewHolding();},[request]);
 
   const BANCOS_RATES=[{id:"GALICIA",name:"Banco Galicia",tna:36},{id:"NACION",name:"Banco Nación",tna:37},{id:"PROVINCIA",name:"Banco Provincia",tna:35},{id:"SANTANDER",name:"Santander",tna:33},{id:"BBVA",name:"BBVA Francés",tna:35},{id:"MACRO",name:"Banco Macro",tna:36},{id:"MERCADOPAGO",name:"Mercado Pago (FCI)",tna:38},{id:"UALA",name:"Ualá",tna:40},{id:"NARANJAX",name:"Naranja X",tna:42},{id:"OTRO",name:"Otro / Personalizado",tna:""}];
 
   const portfolioData=useMemo(()=>{
     let gInvArs=0,gCurArs=0;
-    const items=holdings.map(h=>{const {invArs,curArs}=calcHoldingValueArs(h,marketPrices,usdRate);gInvArs+=invArs;gCurArs+=curArs;const pnlArs=curArs-invArs;const pnlPct=invArs?(pnlArs/invArs)*100:0;return{...h,invArs,curArs,pnlArs,pnlPct};});
+    const items=holdings.map(h=>{const valuation=calcHoldingValueArs(h,marketPrices,usdRate,{asOfDate:todayISO()});const {invArs,curArs}=valuation;gInvArs+=invArs;gCurArs+=curArs;const pnlArs=curArs-invArs;const pnlPct=invArs?(pnlArs/invArs)*100:0;return{...h,...valuation,invArs,curArs,pnlArs,pnlPct};});
     return{items,gInvArs,gCurArs,gPnlArs:gCurArs-gInvArs};
   },[holdings,marketPrices,usdRate]);
 
   const refreshPortfolio=async()=>{
+    if(demo)return demoNotice();
     setRI("all");notify("Sincronizando mercado...","info");
     let newPrices={...marketPrices};let updated=0;
     for(const h of holdings){
-      if(h.type==="crypto"){try{const r=await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${h.ticker.toUpperCase()}USDT`);if(r.ok){const d=await r.json();newPrices[h.ticker]={price:parseFloat(d.price),currency:"USD",source:"binance",asOf:new Date().toISOString()};updated++;}}catch(e){}}
-      else if(["accion","cedear","etf"].includes(h.type)){const qt=(h.type==="cedear"||h.originalCurrency==="ARS")&&!h.ticker.endsWith(".BA")?`${h.ticker}.BA`:h.ticker;const pd=await fetchStockPrice(qt);if(pd?.price){newPrices[h.ticker]={price:pd.price,currency:pd.currency||"USD",source:pd.source||"market",asOf:pd.asOf||new Date().toISOString(),marketState:pd.marketState||null};updated++;}}
+      if(h.type==="crypto"){try{const r=await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${h.ticker.toUpperCase().endsWith("USDT")?h.ticker.toUpperCase():`${h.ticker.toUpperCase()}USDT`}`);if(r.ok){const d=await r.json();newPrices[getHoldingQuoteKey(h)]={price:parseFloat(d.price),currency:"USD",source:"binance",asOf:new Date().toISOString()};updated++;}}catch(e){}}
+      else if(["accion","cedear","etf"].includes(h.type)){const qt=(h.type==="cedear"||h.originalCurrency==="ARS")&&!h.ticker.endsWith(".BA")?`${h.ticker}.BA`:h.ticker;const pd=await fetchStockPrice(qt);if(pd?.price){newPrices[getHoldingQuoteKey(h)]={price:pd.price,currency:pd.currency||"USD",source:pd.source||"market",asOf:pd.asOf||new Date().toISOString(),marketState:pd.marketState||null};updated++;}}
     }
     update({marketPrices:newPrices});setRI(null);notify(`Mercado actualizado (${updated} activos) ✓`);
   };
 
   const refreshSavedPrices=async({silent=false}={})=>{
+    if(demo){if(!silent)demoNotice();return;}
     if(!savedAnalyses.length)return;
     setRI("saved");
     if(!silent)notify("Actualizando cotizaciones...","info");
@@ -1139,14 +1075,15 @@ function Investments({state,update,notify}){
   };
 
   const autoRefreshSingle=async(h)=>{
+    if(demo)return demoNotice();
     setRI(h.id);let newPrices={...marketPrices};
-    if(h.type==="crypto"){try{const r=await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${h.ticker.toUpperCase()}USDT`);if(r.ok){const d=await r.json();newPrices[h.ticker]={price:parseFloat(d.price),currency:"USD",source:"binance",asOf:new Date().toISOString()};update({marketPrices:newPrices});notify(`Cotización Binance actualizada ✓`);}else throw new Error();}catch{notify(`Error Binance para ${h.ticker}`,"err");}}
-    else if(["accion","cedear","etf"].includes(h.type)){notify(`Buscando precio de ${h.ticker}...`,"info");const qt=(h.type==="cedear"||h.originalCurrency==="ARS")&&!h.ticker.endsWith(".BA")?`${h.ticker}.BA`:h.ticker;const pd=await fetchStockPrice(qt);if(pd?.price){newPrices[h.ticker]={price:pd.price,currency:pd.currency||"USD",source:pd.source||"market",asOf:pd.asOf||new Date().toISOString(),marketState:pd.marketState||null};update({marketPrices:newPrices});notify(`${h.ticker}: ${pd.currency==="ARS"?fQuoteARS(pd.price):fQuoteUSD(pd.price)} ✓`);}else notify(`No se encontró precio para ${h.ticker}`,"err");}
+    if(h.type==="crypto"){try{const r=await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${h.ticker.toUpperCase().endsWith("USDT")?h.ticker.toUpperCase():`${h.ticker.toUpperCase()}USDT`}`);if(r.ok){const d=await r.json();newPrices[getHoldingQuoteKey(h)]={price:parseFloat(d.price),currency:"USD",source:"binance",asOf:new Date().toISOString()};update({marketPrices:newPrices});notify(`Cotización Binance actualizada ✓`);}else throw new Error();}catch{notify(`Error Binance para ${h.ticker}`,"err");}}
+    else if(["accion","cedear","etf"].includes(h.type)){notify(`Buscando precio de ${h.ticker}...`,"info");const qt=(h.type==="cedear"||h.originalCurrency==="ARS")&&!h.ticker.endsWith(".BA")?`${h.ticker}.BA`:h.ticker;const pd=await fetchStockPrice(qt);if(pd?.price){newPrices[getHoldingQuoteKey(h)]={price:pd.price,currency:pd.currency||"USD",source:pd.source||"market",asOf:pd.asOf||new Date().toISOString(),marketState:pd.marketState||null};update({marketPrices:newPrices});notify(`${h.ticker}: ${pd.currency==="ARS"?fQuoteARS(pd.price):fQuoteUSD(pd.price)} ✓`);}else notify(`No se encontró precio para ${h.ticker}`,"err");}
     else{notify(`Activo de tasa fija, rinde por tiempo ✓`);}
     setRI(null);
   };
 
-  const editPriceManual=(h)=>{const cp=marketPrices[h.ticker]?.price||h.originalBuyPrice||h.buyPrice||0;const cc=marketPrices[h.ticker]?.currency||h.originalCurrency||"ARS";const p=window.prompt(`Precio manual para ${h.ticker} en ${cc}:`,cp);if(p&&!isNaN(px(p))&&px(p)>0){let np={...marketPrices};np[h.ticker]={price:px(p),currency:cc,source:"manual",asOf:new Date().toISOString()};update({marketPrices:np});notify(`Precio manual guardado ✓`);}};
+  const editPriceManual=(h)=>{const key=getHoldingQuoteKey(h);const quote=marketPrices[key];const cp=quote?.price||h.originalBuyPrice||h.buyPrice||0;const cc=quote?.currency||h.originalCurrency||"ARS";const input=window.prompt(`Precio manual para ${h.ticker} en ${cc} (sin separador de miles):`,cp);if(input===null)return;const price=parseDecimal(input,{grouped:false});if(!Number.isFinite(price)||price<=0)return notify("Ingresá un precio válido mayor que cero","err");if(update({marketPrices:{...marketPrices,[key]:{price,currency:cc,source:"manual",asOf:new Date().toISOString()}}}))notify("Precio manual guardado");};
 
   const closeHoldingForm=()=>{setSHF(false);setEditingHoldingId(null);setHF(emptyHoldingForm());};
   const openNewHolding=()=>{setEditingHoldingId(null);setHF(emptyHoldingForm());setSHF(true);requestAnimationFrame(()=>holdingFormRef.current?.scrollIntoView({behavior:"smooth",block:"start"}));};
@@ -1175,10 +1112,10 @@ function Investments({state,update,notify}){
   const saveHolding=()=>{
     const isVar=["accion","cedear","etf","crypto"].includes(hForm.type);
     const isFix=["plazo_fijo","fci","bono"].includes(hForm.type);
-    let rawBuyPrice=px(hForm.buyPrice);let qty=px(hForm.quantity);let rawInv=px(hForm.totalInvested);
-    const rawRate=px(hForm.rate);
-    if(isVar&&(!hForm.ticker.trim()||qty<=0||rawBuyPrice<=0))return notify("Ingresá un ticker, una cantidad y un precio mayores a cero","err");
-    if(isFix&&(!hForm.name.trim()||rawInv<=0||rawRate<=0||!isValidISODate(hForm.buyDate)))return notify("Ingresá entidad, capital y TNA válidos, además de la fecha inicial","err");
+    let rawBuyPrice=parseDecimal(hForm.buyPrice,{grouped:false});let qty=parseDecimal(hForm.quantity,{grouped:false});let rawInv=parseMoney(hForm.totalInvested);
+    const rawRate=parseDecimal(hForm.rate,{grouped:false});
+    if(isVar&&(!hForm.ticker.trim()||!Number.isFinite(qty)||qty<=0||!Number.isFinite(rawBuyPrice)||rawBuyPrice<=0))return notify("Ingresá un ticker, una cantidad y un precio mayores a cero","err");
+    if(isFix&&(!hForm.name.trim()||!Number.isFinite(rawInv)||rawInv<=0||!Number.isFinite(rawRate)||rawRate<=0||!isValidISODate(hForm.buyDate)))return notify("Ingresá entidad, capital y TNA válidos, además de la fecha inicial","err");
     if(isVar&&!isValidISODate(hForm.buyDate))return notify("Ingresá una fecha inicial válida","err");
     if(["plazo_fijo","bono"].includes(hForm.type)&&!isValidISODate(hForm.maturityDate))return notify("Ingresá una fecha de vencimiento válida","err");
     if(hForm.maturityDate&&new Date(`${hForm.maturityDate}T00:00:00`)<new Date(`${hForm.buyDate}T00:00:00`))return notify("El vencimiento debe ser posterior a la fecha inicial","err");
@@ -1189,7 +1126,10 @@ function Investments({state,update,notify}){
     const economicsChanged=!previous||previous.type!==hForm.type||previousQty!==qty||previousPrice!==rawBuyPrice||previousCurrency!==hForm.currency;
     const fxRateAtEntry=isVar&&hForm.currency==="USD"?(previous&&previousCurrency==="USD"?historicalFx:usdRate):1;
     let invArs=isVar?(economicsChanged?qty*rawBuyPrice*fxRateAtEntry:(previous.totalInvestedArs||qty*rawBuyPrice*fxRateAtEntry)):rawInv;
+    invArs=parseMoney(invArs);
+    if(!Number.isFinite(invArs)||invArs<=0)return notify("Revisá el capital y el tipo de cambio.","err");
     const normalized={...(previous||{}),id:previous?.id||`h_${uid()}`,type:hForm.type,ticker:isFix?hForm.name.trim():hForm.ticker.trim().toUpperCase(),name:hForm.name.trim(),quantity:isVar?qty:0,originalBuyPrice:isVar?rawBuyPrice:0,originalCurrency:isVar?hForm.currency:"ARS",fxRateAtEntry,totalInvestedArs:invArs,rate:isFix?rawRate:0,buyDate:hForm.buyDate,maturityDate:["plazo_fijo","bono"].includes(hForm.type)?hForm.maturityDate:"",goalId:hForm.goalId||null};
+    if(previous&&(previous.type!==normalized.type||previous.ticker!==normalized.ticker||previous.originalCurrency!==normalized.originalCurrency)){delete normalized.instrumentId;delete normalized.quoteKey;}
     update({holdings:previous?holdings.map(item=>item.id===previous.id?normalized:item):[...holdings,normalized]});
     closeHoldingForm();
     notify(previous?"Inversión actualizada ✓":"Inversión guardada ✓");
@@ -1199,6 +1139,7 @@ function Investments({state,update,notify}){
   const PRESETS=[{t:"BTC",n:"Bitcoin"},{t:"ETH",n:"Ethereum"},{t:"AAPL",n:"Apple"},{t:"NVDA",n:"NVIDIA"},{t:"MELI",n:"MercadoLibre"},{t:"VIST",n:"Vista Oil"},{t:"YPF",n:"YPF SA"},{t:"SPY",n:"S&P 500 ETF"}];
 
   const runScanner=async()=>{
+    if(demo)return demoNotice();
     if(!riskProfile)return notify("Configurá tu perfil en el onboarding","info");
     setScan(true);setSE(null);
     try{const r=await autoScanInvestments(riskProfile,usdRate);
@@ -1210,6 +1151,7 @@ function Investments({state,update,notify}){
   };
 
   const analyze=async(t,n)=>{
+    if(demo)return demoNotice();
     const ex=savedAnalyses.find(a=>a.ticker===t);
     if(ex){
       setSel(ex);prefillAnalysisHolding({...ex,company:n||ex.company});setLoad(true);setLE(null);
@@ -1224,7 +1166,7 @@ function Investments({state,update,notify}){
     finally{setLoad(false);}
   };
 
-  const runComparison=async()=>{const monthly=px(cf.monthly);const months=px(cf.months);if(monthly<=0||months<=0)return setCompErr("Ingresá un monto y un plazo válidos.");setComp(true);setCompErr(null);try{setCompResult(await compareInstruments(monthly,months,usdRate));}catch(e){setCompErr(e.message||"No se pudo completar la comparación.");}finally{setComp(false);}};
+  const runComparison=async()=>{if(demo)return demoNotice();const monthly=px(cf.monthly);const months=px(cf.months);if(!Number.isFinite(monthly)||!Number.isFinite(months)||monthly<=0||months<=0)return setCompErr("Ingresá un monto y un plazo válidos.");setComp(true);setCompErr(null);try{setCompResult(await compareInstruments(monthly,months,usdRate));}catch(e){setCompErr(e.message||"No se pudo completar la comparación.");}finally{setComp(false);}};
 
   const saveFromScan=opp=>{
     const a={ticker:opp.ticker,company:opp.name,sector:"",signal:opp.signal,timeframe:opp.timeframe,upside:opp.upside,currentEstimate:opp.currentEstimate,priceCurrency:opp.priceCurrency||marketPrices[opp.ticker]?.currency||"USD",quoteSource:opp.quoteSource||marketPrices[opp.ticker]?.source||null,quoteAsOf:opp.quoteAsOf||marketPrices[opp.ticker]?.asOf||null,peRatio:opp.peRatio,revenueGrowth:opp.revenueGrowth,moat:opp.moat,bullCase:opp.thesis,bearCase:opp.bearRisk,catalysts:opp.catalysts||[],risks:[opp.bearRisk],summary:opp.thesis,confidenceScore:opp.confidenceScore,sources:scanResult?.sources||[],dataAsOf:scanResult?.scanDate||lastScanAt||todayISO()};
@@ -1236,11 +1178,12 @@ function Investments({state,update,notify}){
     <div className="tabbar" style={{marginBottom:18}}>{[{id:"portfolio",l:<><IcPortfolio/> Portfolio ({holdings.length})</>},{id:"scanner",l:<><IcScanner/> Scanner IA</>,target:"scanner-tab"},{id:"manual",l:<><IcSearch/> Buscar Activo</>},{id:"comparador",l:<><IcCompare/> Comparador</>},{id:"saved",l:<><IcSaved/> Guardados</>}].map(t=>(<button key={t.id} data-tour-target={t.target||undefined} className={`tab${tab===t.id?" on":""}`} onClick={()=>{if(t.id!=="portfolio"){setSHF(false);setEditingHoldingId(null);}setTab(t.id);if(t.id==="saved")refreshSavedPrices({silent:true});}}>{t.l}</button>))}</div>
 
     {tab==="portfolio"&&<div>
-      <div className="kpi-grid portfolio-kpis" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>{[{l:"Invertido",v:fmt(portfolioData.gInvArs),c:T.blue,i:<IcInvested/>},{l:"Valor Actual",v:fmt(portfolioData.gCurArs),c:T.lime,i:<IcPortfolio/>},{l:"P&L Total",v:`${portfolioData.gPnlArs>=0?"+":""}${fmt(portfolioData.gPnlArs)}`,c:portfolioData.gPnlArs>=0?T.teal:T.coral,i:<IcBalance/>}].map((k,i)=><div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase"}}>{k.l}</span><span>{k.i}</span></div><div className="mono" style={{fontSize:16,fontWeight:600,color:k.c}}>{k.v}</div></div>)}</div>
+      <div className="kpi-grid portfolio-kpis" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>{[{l:"Invertido",v:fmt(portfolioData.gInvArs),c:T.blue,i:<IcInvested/>},{l:"Valor registrado / estimado",v:fmt(portfolioData.gCurArs),c:T.lime,i:<IcPortfolio/>},{l:"P&L Total",v:`${portfolioData.gPnlArs>=0?"+":""}${fmt(portfolioData.gPnlArs)}`,c:portfolioData.gPnlArs>=0?T.teal:T.coral,i:<IcBalance/>}].map((k,i)=><div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase"}}>{k.l}</span><span>{k.i}</span></div><div className="mono" style={{fontSize:16,fontWeight:600,color:k.c}}>{k.v}</div></div>)}</div>
       <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
         <button data-tour-target="add-holding-btn" className="btn bl" onClick={openNewHolding}><ic.Plus/> Agregar inversión</button>
         <button className="btn bg" onClick={refreshPortfolio} disabled={refreshingId==="all"}>{refreshingId==="all"?<><Dots/> Sincronizando...</>:<><ic.Refresh/> Sincronizar Activos</>}</button>
       </div>
+      {portfolioData.items.some(h=>h.warnings.length>0)&&<p style={{fontSize:11,color:T.amber,marginBottom:14}}>Algunos activos usan costo o estimación: {portfolioData.items.filter(h=>h.warnings.length).map(h=>`${h.ticker}: ${h.warnings.join(" ")}`).join(" · ")}</p>}
       {showHForm&&<div ref={holdingFormRef} className="card" style={{marginBottom:14,scrollMarginTop:18}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:10}}><div><div style={{fontSize:14,fontWeight:700}}>{editingHoldingId?"Editar inversión":"Nueva inversión"}</div>{editingHoldingId&&<div style={{fontSize:10,color:T.muted,marginTop:3}}>Modificá los datos de compra, fechas o vínculo con una meta.</div>}</div><button className="btn bg bsm" aria-label="Cerrar formulario de inversión" onClick={closeHoldingForm}><ic.X/></button></div>
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
           <div><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:5}}>Tipo</label><AppSelect value={hForm.type} options={[{value:"accion",label:"Acción",icon:<InstrumentIcon type="accion"/>},{value:"cedear",label:"CEDEAR",icon:<InstrumentIcon type="cedear"/>},{value:"etf",label:"ETF",icon:<InstrumentIcon type="etf"/>},{value:"crypto",label:"Crypto",icon:<InstrumentIcon type="crypto"/>},{value:"plazo_fijo",label:"Plazo fijo",icon:<InstrumentIcon type="plazo_fijo"/>},{value:"fci",label:"FCI",icon:<InstrumentIcon type="fci"/>},{value:"bono",label:"Bono",icon:<InstrumentIcon type="bono"/>}]} ariaLabel="Tipo de inversión" onChange={t=>{let ac=hForm.currency;if(["cedear","plazo_fijo","fci","bono"].includes(t))ac="ARS";if(t==="crypto")ac="USD";setHF(f=>({...f,type:t,currency:ac}));}}/></div>
@@ -1260,7 +1203,7 @@ function Investments({state,update,notify}){
         {portfolioData.items.map(h=>{
           const symDisplay=h.originalCurrency==="USD"?"US$ ":"AR$ ";
           const buyPriceDisplay=h.originalBuyPrice||h.buyPrice||0;
-          const cmp=marketPrices[h.ticker];
+          const cmp=marketPrices[getHoldingQuoteKey(h)];
           return(<div key={h.id} className="card" style={{padding:"14px"}}>
             <div className="holding-head" style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div className="holding-copy" style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}><span className="category-icon" style={{color:"var(--ac)"}}><InstrumentIcon type={h.type}/></span><div style={{minWidth:0}}><div style={{fontSize:14,fontWeight:700}}>{h.ticker||h.name} <span style={{fontSize:10,color:T.muted,fontWeight:500}}>{instrumentLabel(h.type)}</span></div>{h.name&&h.name!==(h.ticker||"")&&<div style={{fontSize:10,color:T.muted,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.name}</div>}<div style={{fontSize:11,color:T.muted,marginTop:2}}>{h.quantity?`${h.quantity} un. a ${symDisplay}${buyPriceDisplay.toLocaleString("en-US")}`:`TNA ${h.rate}%`}{cmp&&<span style={{marginLeft:8,color:T.mid}}>· actual: {cmp.currency==="USD"?fUSD(cmp.price):fARS(cmp.price)}</span>}</div></div></div>
@@ -1370,7 +1313,8 @@ function Investments({state,update,notify}){
 }
 
 function Analytics({state,update,setView}){
-  const {transactions=[],goals=[],salaries=[],displayCurrency,holdings=[],marketPrices={},usdRate}=state;
+  const {transactions:allTransactions=[],goals=[],salaries=[],displayCurrency,holdings=[],marketPrices={},usdRate}=state;
+  const transactions=allTransactions.filter(isActiveRecord);
   const {fmt,toDsp}=useDsp(state);
   const NOW=getNow();
   const [range,setRange]=useState(6);
@@ -1379,10 +1323,8 @@ function Analytics({state,update,setView}){
   const months=useMemo(()=>Array.from({length:range},(_,i)=>{
     const d=new Date(NOW.getFullYear(),NOW.getMonth()-range+1+i,1);
     const m=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-    const txs=transactions.filter(t=>gMonth(t.date)===m);
-    const e=txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
-    const inc=getMonthIncomeParts(salaries,transactions,m).total;
-    return{name:MOS[d.getMonth()],Gastos:toDsp(e),Ingresos:toDsp(inc),Ahorro:toDsp(Math.max(0,inc-e)),balance:toDsp(inc-e)};
+    const summary=monthSummary(state,m);
+    return{name:MOS[d.getMonth()],Gastos:toDsp(summary.expenses),Ingresos:toDsp(summary.income),Reservas:toDsp(summary.reserved),Disponible:toDsp(summary.available),balance:toDsp(summary.balance)};
   }),[transactions,salaries,range,toDsp]);
   const hasHistory=months.some(m=>m.Ingresos>0||m.Gastos>0);
 
@@ -1394,26 +1336,27 @@ function Analytics({state,update,setView}){
 
   let totInc=0;
   selectedMonthKeys.forEach(m=>{totInc+=getMonthIncomeParts(salaries,transactions,m).total;});
-  const totExp=transactions.filter(t=>t.type==="expense"&&selectedMonthKeys.includes(gMonth(t.date))).reduce((s,t)=>s+t.amount,0);
+  const totExp=selectedMonthKeys.reduce((sum,month)=>sum+monthSummary(state,month).expenses,0);
   const hasSavingsEvidence=totInc>0&&totExp>0;const savR=hasSavingsEvidence?clamp(((totInc-totExp)/totInc)*100,-100,100).toFixed(1):null;const savN=savR===null?null:parseFloat(savR);
 
   const portfolioValArs=holdings.reduce((s,h)=>s+calcHoldingValueArs(h,marketPrices,usdRate).curArs,0);
   const portfolioInvArs=holdings.reduce((s,h)=>s+calcHoldingValueArs(h,marketPrices,usdRate).invArs,0);
   const portfolioPnlArs=portfolioValArs-portfolioInvArs;
-  const totalSavingsArs=transactions.filter(t=>t.category==="💰 Ahorro").reduce((s,t)=>s+t.amount,0);
-  const goalPaymentsArs=goals.reduce((s,g)=>(g.payments||[]).reduce((a,p)=>a+p.amount,s),0);
+  const totalSavingsArs=goals.reduce((s,g)=>s+goalCash(g),0);
+  const goalPaymentsArs=goals.reduce((s,g)=>s+goalProgress(g)-goalCash(g),0);
 
   return(<div className="up">
-    <PH title="Analíticas" sub="Histórico · Proyecciones · Patrimonio" right={<div style={{display:"flex",gap:8,alignItems:"center"}}>{setView&&<button className="btn bg bsm" onClick={()=>setView("salary")}><ic.Salary/>Editar sueldo</button>}<AppSelect compact style={{width:130}} value={range} options={[{value:3,label:"3 meses"},{value:6,label:"6 meses"},{value:12,label:"12 meses"}]} ariaLabel="Rango de analíticas" onChange={value=>setRange(Number(value))}/></div>}/>
+    <PH title="Analíticas" sub="Histórico · Flujos · Activos registrados" right={<div style={{display:"flex",gap:8,alignItems:"center"}}>{setView&&<button className="btn bg bsm" onClick={()=>setView("salary")}><ic.Salary/>Editar sueldo</button>}<AppSelect compact style={{width:130}} value={range} options={[{value:3,label:"3 meses"},{value:6,label:"6 meses"},{value:12,label:"12 meses"}]} ariaLabel="Rango de analíticas" onChange={value=>setRange(Number(value))}/></div>}/>
 
     {(portfolioValArs>0||totalSavingsArs>0)&&
       <div className="kpi-grid analytics-wealth-kpis" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
-        {[{l:"Portfolio",v:fmt(portfolioValArs),c:T.blue,i:<IcPortfolio/>},{l:"P&L Portfolio",v:`${portfolioPnlArs>=0?"+":""}${fmt(portfolioPnlArs)}`,c:portfolioPnlArs>=0?T.teal:T.red,i:<IcInvested/>},{l:"Ahorros (Efectivo)",v:fmt(totalSavingsArs+goalPaymentsArs),c:T.teal,i:<IcFree/>},{l:"Patrimonio Total",v:fmt(portfolioValArs+totalSavingsArs),c:T.lime,i:<IcBalance/>}].map((k,i)=>(
+        {[{l:"Portfolio",v:fmt(portfolioValArs),c:T.blue,i:<IcPortfolio/>},{l:"P&L Portfolio",v:`${portfolioPnlArs>=0?"+":""}${fmt(portfolioPnlArs)}`,c:portfolioPnlArs>=0?T.teal:T.red,i:<IcInvested/>},{l:"Reservas en metas",v:fmt(totalSavingsArs),c:T.teal,i:<IcFree/>},{l:"Pagos de metas",v:fmt(goalPaymentsArs),c:T.lime,i:<IcBalance/>}].map((k,i)=>(
           <div key={i} className="card csm"><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".5px"}}>{k.l}</span><span>{k.i}</span></div><div className="mono" title={k.v} style={{fontSize:16,fontWeight:600,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div></div>
         ))}
       </div>
     }
 
+    <p style={{fontSize:11,color:T.muted,marginBottom:14}}>Disponible = ingresos − gastos − reservas netas del período. Las reservas de metas son efectivo registrado; los pagos ya son gastos. Estas cifras no representan un saldo bancario ni patrimonio completo.</p>
     <div className="kpi-grid analytics-kpis" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
       {[{l:"Total ingresos",v:fmt(totInc),c:T.teal},{l:"Total gastos",v:fmt(totExp),c:totExp>0?T.red:T.muted},{l:"Tasa de ahorro",v:savR===null?"—":`${savR}%`,c:savR===null?T.muted:savN>=20?T.lime:savN>=10?T.amber:T.red,sub:savR===null?"Datos insuficientes":savN>=20?"Buen margen":savN>=10?"Margen acotado":savN<0?"Gastás más de lo que ingresás":"Margen bajo"}].map((k,i)=>(
         <div key={i} className="card csm"><div style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:".6px",marginBottom:8}}>{k.l}</div><div className="mono" title={k.v} style={{fontSize:22,fontWeight:500,color:k.c,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.v}</div>{k.sub&&<div style={{fontSize:11,color:T.muted,marginTop:3}}>{k.sub}</div>}</div>
@@ -1432,7 +1375,7 @@ function Analytics({state,update,setView}){
             <Legend wrapperStyle={{fontSize:11,color:T.muted}}/>
             <Bar dataKey="Ingresos" fill={T.teal} radius={[4,4,0,0]} opacity={.9}/>
             <Bar dataKey="Gastos" fill={T.red} radius={[4,4,0,0]} opacity={.9}/>
-            <Bar dataKey="Ahorro" fill={T.blue} radius={[4,4,0,0]} opacity={.9}/>
+            <Bar dataKey="Disponible" fill={T.blue} radius={[4,4,0,0]} opacity={.9}/>
           </BarChart>
         </ResponsiveContainer>
       </div>:<EmptyPanel icon={<ic.Chart/>} title="Todavía no hay historial" detail="Importá movimientos o registrá tu sueldo para comparar ingresos, gastos y ahorro.">{setView&&<><button className="btn bg bsm" onClick={()=>setView("salary")}>Registrar sueldo</button><button className="btn bl bsm" onClick={()=>setView("import")}>Importar</button></>}</EmptyPanel>}
@@ -1475,8 +1418,9 @@ function AnalysisDetail({a,onClose,quote=null,displayCurrency="USD",usdRate=1}){
   return(<div className="card up" style={{border:`1px solid ${T.hi}`,marginTop:14}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:18,flexWrap:"wrap",gap:8}}><div><div style={{display:"flex",gap:10,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}><span className="mono" style={{fontSize:22,fontWeight:700}}>{a.ticker}</span><span className={`tag ${sigCls(a.signal)}`}>{a.signal}</span><span className={`tag ${a.timeframe==="SHORT"?"te":a.timeframe==="LONG"?"ti":"ts"}`}>{a.timeframe}</span></div><div style={{fontSize:13,color:T.mid}}>{a.company}{a.sector?` · ${a.sector}`:""}</div>{updatedAt&&<div style={{fontSize:9,color:T.muted,marginTop:4}}>Última cotización regular · {updatedAt}</div>}</div><button className="btn bg bsm" aria-label="Cerrar análisis" onClick={onClose}><ic.X/></button></div><div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:18}}>{[{l:"Precio actual",v:price>0?formatMarketQuote(price,priceCurrency,displayCurrency,usdRate):"—"},{l:"Target 12m",v:hasTarget?formatMarketQuote(a.priceTarget12m,priceCurrency,displayCurrency,usdRate):"—",c:hasTarget?T.lime:T.muted},{l:"Upside",v:Number.isFinite(a.upside)?`${a.upside>0?"+":""}${a.upside.toFixed(1)}%`:"—",c:Number.isFinite(a.upside)?(a.upside>0?T.lime:T.red):T.muted},{l:"P/E",v:Number.isFinite(a.peRatio)?a.peRatio.toFixed(1):"—"},{l:"Rev. Growth",v:Number.isFinite(a.revenueGrowth)?`${a.revenueGrowth.toFixed(1)}%`:"—",c:Number.isFinite(a.revenueGrowth)?(a.revenueGrowth>0?T.teal:T.red):T.muted}].map((s,i)=>(<div key={i} style={{background:T.raised,borderRadius:10,padding:"12px 14px"}}><div style={{fontSize:10,color:T.muted,marginBottom:5}}>{s.l}</div><div className="mono" style={{fontSize:16,fontWeight:500,color:s.c||T.white}}>{s.v}</div></div>))}</div><div className="trend-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>{scenarios.map(({title,Icon,color,body,sub,items})=>(<div key={title} style={{background:T.raised,borderRadius:12,padding:"14px 16px"}}><div style={{fontSize:11,color,fontWeight:600,marginBottom:7,display:"flex",alignItems:"center",gap:6}}><Icon/>{title}</div><div style={{fontSize:12,color:T.mid,lineHeight:1.6,marginBottom:8}}>{body}</div><div style={{fontSize:10,color:T.muted,marginBottom:5}}>{sub}</div>{items?.map((item,index)=><div key={index} style={{fontSize:11,color:T.mid,padding:"3px 0",borderBottom:`1px solid ${T.border}`,display:"flex",gap:7}}><span aria-hidden="true" style={{color}}>•</span><span>{item}</span></div>)}</div>))}</div>{a.moat&&<div style={{background:"rgba(77,158,255,.06)",border:`1px solid rgba(77,158,255,.15)`,borderRadius:10,padding:"12px 16px",marginBottom:8}}><div style={{fontSize:11,color:T.blue,fontWeight:600,marginBottom:4,display:"flex",alignItems:"center",gap:6}}><ic.Shield/>Ventaja competitiva</div><div style={{fontSize:12,color:T.mid}}>{a.moat}</div></div>}<SourcesMeta sources={a.sources} asOf={a.dataAsOf} label="Fuentes del análisis"/><div style={{fontSize:10,color:T.muted,textAlign:"center",marginTop:4,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}><ic.Alert/>Análisis educativo. No constituye asesoramiento financiero.</div></div>);
 }
 
-function Import({state,update,notify}){
+function Import({state,update,notify,request}){
   const [tab,setTab]=useState("image");
+  useEffect(()=>{if(["csv","import:csv"].includes(request?.action)||request?.tab==="csv")setTab("csv");},[request]);
   const [imgSrc,setImgSrc]=useState(null);
   const [imgMime,setImgMime]=useState("image/png");
   const [extracting,setExt]=useState(null);
@@ -1498,7 +1442,7 @@ function Import({state,update,notify}){
   const pdfRef=useRef();
 
   const loadPreview=(items,meta={})=>{
-    setPreview(items.map(item=>({...normalizeTxRecord(item),isRecurring:Boolean(item.isRecurring)})));
+    setPreview(items.map(item=>({...normalizeTxRecord(item),category:item.exportVersion===1?item.category:CATS.find(c=>categoryName(c).toLocaleLowerCase()===categoryName(item.category).toLocaleLowerCase())||item.category||"❓ Otros",isRecurring:Boolean(item.isRecurring)})));
     setExtractMeta({warnings:meta.warnings||[],appDetected:meta.appDetected||null});
     setMissingMonth(getCUR());
     setCE({});
@@ -1526,87 +1470,93 @@ function Import({state,update,notify}){
   };
 
   const extractImg=async()=>{
+    if(state.demo)return notify("La demo permite importar CSV o texto sin enviar datos a la IA.","info");
     if(!imgSrc)return;
     clearExtraction();setExt("loading");setEE(null);
     notify("Analizando imagen con IA...","info");
     const b64=imgSrc.split(",")[1];
     try{const result=await extractFromImage(b64,imgMime);
       if(!result.transactions?.length){const fallback=result.outcome==="unreadable_image"?"La captura no se pudo leer. Probá recortarla y subir una versión más nítida.":result.outcome==="not_financial_document"?"La imagen no parece ser un historial de movimientos.":"La pantalla no muestra movimientos ni resúmenes por categoría con importes legibles.";const reason=result.warnings?.[0]||fallback;setExt("error");setEE(reason);setExtractMeta({warnings:result.warnings||[],appDetected:result.appDetected||null});notify(reason,"err");return;}
-      loadPreview(result.transactions.map((t,i)=>({...t,id:`img_${uid()}_${i}`,currency:result.currency||"ARS",source:"image"})),result);
+      loadPreview(identifyImportRows(result.transactions.map((t,i)=>({...t,id:`img_${uid()}_${i}`,currency:result.currency||"ARS",source:"image"})),await importSourceId("image",imgSrc)),result);
       setExt("done");notify(`${result.transactions.length} transacciones extraídas ✓`);
     }catch(e){setExt("error");setEE(e.message||"No se pudo analizar la imagen.");notify(e.message||"Error al analizar la imagen","err");}
   };
 
-  const handleCSV=file=>{
-    const r=new FileReader();
-    clearExtraction();
-    r.onload=e=>{const p=parseCSV(e.target.result);if(!p.length)return notify("Sin datos válidos en el CSV","err");loadPreview(p);notify(`${p.length} movimientos detectados`);};
-    r.readAsText(file,"utf-8");
+  const handleCSV=async file=>{
+    if(!file)return;
+    clearExtraction();setEE(null);
+    try{if(file.size>10000000)throw new Error("El CSV supera los 10 MB admitidos.");const rows=parseMovementCSV(await file.text());if(!rows.length)return notify("El CSV no contiene movimientos","err");loadPreview(rows);notify(`${rows.length} movimientos detectados`);}
+    catch(error){setEE(error.message);notify(error.message,"err");}
   };
 
   const handlePDF=async file=>{
     if(!file)return;
+    if(state.demo)return notify("La demo permite importar CSV o texto sin enviar datos a la IA.","info");
+    if(file.size>12000000)return notify("El PDF supera los 12 MB. Dividilo antes de importar.","err");
     clearExtraction();setExt("loading");setEE(null);setPDFProgress("Cargando PDF...");
     notify("Procesando PDF con IA...","info");
     try{
       const result=await extractFromPDF(file,msg=>setPDFProgress(msg));
       if(!result.transactions.length){const reason=result.warnings?.[0]||"No se detectaron transacciones ni resúmenes por categoría en el PDF.";setExt("error");setEE(reason);setExtractMeta({warnings:result.warnings||[],appDetected:result.appDetected||null});notify("Sin transacciones detectadas","err");}
-      else{loadPreview(result.transactions,result);setExt("done");notify(`${result.transactions.length} transacciones extraídas del PDF ✓`);}
+      else{loadPreview(identifyImportRows(result.transactions,await importSourceId("pdf",await file.arrayBuffer())),result);setExt("done");notify(`${result.transactions.length} transacciones extraídas del PDF ✓`);}
     }catch(e){setExt("error");setEE("Error procesando el PDF: "+e.message);notify("Error al procesar el PDF","err");}
     setPDFProgress(null);
   };
 
-  const doPaste=()=>{
-    clearExtraction();
+  const doPaste=async()=>{
+    clearExtraction();setEE(null);
     const lines=paste.trim().split("\n").filter(l=>l.trim());
-    const out=[];
-    for(const l of lines){
-      const dateToken=l.match(/\b\d{1,2}[\/\-.]\d{1,2}(?:[\/\-.]\d{2,4})?\b/)?.[0]||null;
-      const date=normalizeInputDate(dateToken);
-      const amountText=date&&dateToken?l.replace(dateToken," "):l;
-      const amts=[...amountText.matchAll(/[\d.,]+/g)].map(m=>px(m[0])).filter(a=>a>100);
-      if(!amts.length)continue;
-      const currency=/(?:\bUSD\b|US\$|U\$S|\bD[ÓO]LAR(?:ES)?\b)/i.test(l)?"USD":"ARS";
-      out.push({id:`p_${uid()}`,date,description:amountText.replace(/\b(?:ARS|USD|US\$|U\$S|PESOS?|D[ÓO]LAR(?:ES)?)\b/gi,"").replace(/[\d.,$%\/\-]/g,"").trim().slice(0,60)||"TX",amount:amts[0],type:"expense",category:"❓ Otros",currency,source:"paste"});
-    }
-    if(!out.length)return notify("Sin montos detectados","err");
-    loadPreview(out);notify(`${out.length} movimientos detectados`);
+    try{
+      const out=lines.map((line,index)=>{
+        const dateToken=line.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0]||line.match(/\b\d{1,2}[\/\-.]\d{1,2}(?:[\/\-.]\d{2,4})?\b/)?.[0]||null;
+        const date=normalizeInputDate(dateToken),amountText=date&&dateToken?line.replace(dateToken," "):line;
+        let signed;try{signed=parsePastedAmount(amountText);}catch(error){throw new Error(`Línea ${index+1}: ${error.message}`,{cause:error});}
+        const currency=/(?:\bUSD(?=\s|[+\-\d])|US\$|U\$S|\bD[ÓO]LAR(?:ES)?\b)/i.test(line)?"USD":"ARS";
+        return {id:`p_${uid()}`,date,description:amountText.replace(/(?:ARS|USD|US\$|U\$S|PESOS?|D[ÓO]LAR(?:ES)?)/gi,"").replace(/[\d.,$%\/\-]/g,"").trim().slice(0,60)||"Movimiento",amount:Math.abs(signed),type:signed>0&&/\b(ingreso|sueldo|cobro|salario|crédito)\b/i.test(line)?"income":"expense",category:"❓ Otros",currency,source:"paste"};
+      });
+      if(!out.length)return notify("Pegá al menos un movimiento","err");
+      loadPreview(identifyImportRows(out,await importSourceId("paste",paste)));notify(`${out.length} movimientos detectados. Revisá importes, moneda y tipo antes de confirmar.`);
+    }catch(error){setEE(error.message);notify(error.message,"err");}
   };
 
   const autoCatAll=async()=>{
+    if(state.demo)return notify("En la demo podés asignar las categorías manualmente.","info");
     setAR(true);notify("Auto-categorizando...","info");
-    try{const items=preview.map(t=>({id:String(t.id),description:t.description,type:normalizeTxType(t.type),category:t.category||null}));const batches=[];for(let i=0;i<items.length;i+=40)batches.push(items.slice(i,i+40));const suggestions=(await Promise.all(batches.map(batch=>autoCat(batch)))).flat();const byId=new Map(suggestions.map(s=>[String(s.id),s]));setPreview(rows=>rows.map(t=>{const suggestion=byId.get(String(t.id));if(!suggestion)return t;return{...t,type:normalizeTxType(suggestion.type)||normalizeTxType(t.type)||"expense",category:matchCat(suggestion.category)};}));notify(`Categorización completa · ${suggestions.length} filas ✓`);}catch(e){notify(e.message||"No se pudo categorizar","err");}finally{setAR(false);}
+    try{const items=preview.map(t=>({id:String(t.id),description:t.description,type:["income","expense"].includes(normalizeTxType(t.type))?normalizeTxType(t.type):null,category:t.category||null}));const batches=[];for(let i=0;i<items.length;i+=40)batches.push(items.slice(i,i+40));const suggestions=(await Promise.all(batches.map(batch=>autoCat(batch)))).flat();const byId=new Map(suggestions.map(s=>[String(s.id),s]));setPreview(rows=>rows.map(t=>{const suggestion=byId.get(String(t.id));if(!suggestion)return t;return{...t,type:t.type==="transfer"?"transfer":normalizeTxType(suggestion.type)||normalizeTxType(t.type)||"expense",category:matchCat(suggestion.category)};}));notify(`Categorización completa · ${suggestions.length} filas ✓`);}catch(e){notify(e.message||"No se pudo categorizar","err");}finally{setAR(false);}
   };
 
   // ── CONFIRM CON DETECCIÓN DE TRANSFERENCIAS ──
   const confirm=()=>{
-    if(preview.some(t=>!isValidISODate(t.date)))return notify("Completá el mes y año antes de importar","err");
-    const recurring=state.recurring||[];
-    const newRecurring=[];
-    const toAdd=preview.map(t=>{
-      const category=catE[t.id]||t.category;
-      const {isRecurring,...row}=t;
-      const isUsd=t.currency==="USD";
-      const imported={...row,id:`i_${uid()}`,type:normalizeTxType(t.type)||"expense",category,amount:isUsd?t.amount*state.usdRate:t.amount,currency:"ARS",...(isUsd?{originalAmount:t.amount,originalCurrency:"USD",fxRateAtEntry:state.usdRate,fxDate:todayISO()}:{})};
-      if(isRecurring)newRecurring.push({id:`rec_${uid()}`,description:String(t.description||"").replace(/^🔁\s*/,""),amount:imported.amount,type:t.type,category,currency:"ARS",lastMonth:gMonth(t.date),paused:false,source:"import",originTransactionId:imported.id});
-      return imported;
-    });
-    const pairs=detectTransfers(toAdd,state.transactions);
-    update({transactions:[...state.transactions,...toAdd],recurring:[...recurring,...newRecurring]});
-    clearExtraction();setPaste("");setImgSrc(null);setExt(null);setEE(null);
-    notify(`${toAdd.length} movimientos importados${newRecurring.length?` · ${newRecurring.length} recurrente${newRecurring.length===1?"":"s"}`:""} ✓`);
-    if(pairs.length>0){
-      setTimeout(()=>{setTransferPairs(pairs);setRejectedPairs(new Set());setSTM(true);},1500);
-    }
+    if(preview.some(t=>!isValidISODate(t.date)))return notify("Completá las fechas antes de importar","err");
+    try{
+      const rows=preview.map(t=>({...t,category:catE[t.id]||t.category}));
+      let next=applyImportBatch(state,rows,{usdRate:state.usdRate,fxDate:todayISO(),fxSource:state.fxSource||"Referencia guardada"});
+      const known=new Set(state.transactions.map(t=>t.id));
+      const added=next.transactions.filter(t=>!known.has(t.id));
+      const newRecurring=[];
+      for(const row of rows.filter(t=>t.isRecurring)){
+        const tx=added.find(t=>t.importBatchId===row.sourceBatchId&&t.importRowId===row.sourceRowId);
+        if(!tx)continue;
+        const id=`rec_${tx.id}`;tx.recurringId=id;
+        newRecurring.push({id,description:tx.description,amount:tx.amount,type:tx.type,category:tx.category,currency:"ARS",lastMonth:gMonth(tx.date),paused:false,source:"import",originTransactionId:tx.id,confirmations:{[gMonth(tx.date)]:{status:"paid",transactionId:tx.id,date:tx.date}}});
+      }
+      next={...next,recurring:[...(state.recurring||[]),...newRecurring]};
+      const eligible=tx=>isActiveRecord(tx)&&!linkedTransactionOrigin(tx)&&!(state.recurring||[]).some(r=>r.originTransactionId===tx.id);
+      const pairs=detectTransfers(added.filter(eligible),state.transactions.filter(eligible));
+      if(!update(next))return;
+      clearExtraction();setPaste("");setImgSrc(null);setExt(null);setEE(null);
+      notify(added.length?`${added.length} movimientos importados${newRecurring.length?` · ${newRecurring.length} recurrentes`:""}`:"Este lote ya estaba importado; no se agregaron movimientos.");
+      if(pairs.length){setTransferPairs(pairs);setRejectedPairs(new Set());setSTM(true);}
+    }catch(error){setEE(error.message);notify(error.message,"err");}
   };
 
-  return(<div className="up"><PH title="Importar datos" sub="Imagen · PDF · CSV · Texto pegado"/>
+  return(<div className="up"><PH title="Importar datos" sub="Imagen · PDF · CSV · Texto pegado"/>{state.demo&&<div className="m-status">Demostración local: podés probar CSV y texto. Imagen y PDF requieren IA y están desactivados en este espacio.</div>}{extractErr&&<p role="alert" style={{color:T.coral,marginBottom:14}}>{extractErr}</p>}
     <div className="tabbar" style={{marginBottom:18}}>{[{id:"image",l:<><IcImage/> Imagen</>,target:"import-image-tab"},{id:"pdf",l:<><IcPdf/> PDF</>},{id:"csv",l:<><IcCsv/> CSV</>},{id:"paste",l:<><IcText/> Texto</>},{id:"guide",l:<><IcGuide/> Guía</>}].map(t=>(<button key={t.id} data-tour-target={t.target||undefined} className={`tab${tab===t.id?" on":""}`} onClick={()=>setTab(t.id)}>{t.l}</button>))}</div>
 
     {tab==="image"&&<div><div style={{background:"rgba(167,139,250,.06)",border:`1px solid rgba(167,139,250,.2)`,borderRadius:12,padding:"12px 16px",marginBottom:14,fontSize:12,color:T.purple,display:"flex",alignItems:"center",gap:8,lineHeight:1.5}}><span style={{display:"flex",color:T.purple,flexShrink:0}}><ic.Bolt/></span><span>Subí un screenshot de Mercado Pago, tu banco, o resumen de tarjeta de crédito.</span></div><div data-tour-target="import-drop" className={`imgdrop${over?" ov2":""}`} onDragOver={e=>{e.preventDefault();setOver(true);}} onDragLeave={()=>setOver(false)} onDrop={e=>{e.preventDefault();setOver(false);const f=e.dataTransfer.files[0];if(f)handleImgFile(f);}} onClick={()=>imgRef.current?.click()}>{imgSrc?<img src={imgSrc} alt="preview" style={{maxWidth:"100%",maxHeight:300,borderRadius:8,objectFit:"contain"}}/>:<><div style={{width:52,height:52,borderRadius:16,background:"rgba(184,155,255,.1)",border:"1px solid rgba(184,155,255,.2)",display:"flex",alignItems:"center",justifyContent:"center",color:"#B89BFF",marginBottom:4}}><IcImage/></div><div style={{fontSize:15,fontWeight:600,color:T.mid}}>Arrastrá o hacé clic para subir</div><div style={{fontSize:12,color:T.muted,maxWidth:520,lineHeight:1.55}}>Screenshots de tu banco, billetera virtual o resumen de tarjeta</div></>}<input ref={imgRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>e.target.files[0]&&handleImgFile(e.target.files[0])}/></div>{imgSrc&&<div style={{display:"flex",gap:8,marginTop:10}}><button className="btn bl" style={{flex:1,justifyContent:"center"}} onClick={extractImg} disabled={extracting==="loading"}>{extracting==="loading"?<><Dots/> Extrayendo...</>:<><IcScanner/> Extraer con IA</>}</button><button className="btn bg" onClick={()=>{setImgSrc(null);setExt(null);setEE(null);clearExtraction();}}>Cambiar</button></div>}{extractErr&&<div style={{marginTop:10,background:"rgba(255,77,106,.08)",border:`1px solid rgba(255,77,106,.25)`,borderRadius:8,padding:"8px 12px",fontSize:12,color:T.red}}>{extractErr}</div>}</div>}
 
     {tab==="pdf"&&<div>
-      <div style={{background:"rgba(77,158,255,.06)",border:`1px solid rgba(77,158,255,.2)`,borderRadius:12,padding:"12px 16px",marginBottom:14,fontSize:12,color:T.blue,display:"flex",alignItems:"center",gap:8}}><IcPdf/>Subí el extracto bancario o resumen de tarjeta en PDF.</div>
+      <div style={{background:"rgba(77,158,255,.06)",border:`1px solid rgba(77,158,255,.2)`,borderRadius:12,padding:"12px 16px",marginBottom:14,fontSize:12,color:T.blue,display:"flex",alignItems:"center",gap:8}}><IcPdf/>Subí el extracto bancario o resumen de tarjeta en PDF (hasta 10 páginas y 12 MB).</div>
       <div className={`dz${over?" ov2":""}`} style={{borderColor:T.blue+"44"}} onDragOver={e=>{e.preventDefault();setOver(true);}} onDragLeave={()=>setOver(false)} onDrop={e=>{e.preventDefault();setOver(false);const f=e.dataTransfer.files[0];if(f)handlePDF(f);}} onClick={()=>pdfRef.current?.click()}>
         {extracting==="loading"?<><div style={{width:48,height:48,borderRadius:14,background:"rgba(91,158,255,.1)",display:"flex",alignItems:"center",justifyContent:"center",color:T.blue,marginBottom:8,animation:"pulse-glow 1.5s infinite"}}><IcPdf/></div><div style={{fontSize:14,color:T.blue}}>{pdfProgress||"Procesando..."}</div><Dots/></>:<><div style={{width:52,height:52,borderRadius:16,background:"rgba(91,158,255,.08)",border:"1px solid rgba(91,158,255,.18)",display:"flex",alignItems:"center",justifyContent:"center",color:T.blue,marginBottom:4}}><IcPdf/></div><div style={{fontSize:15,fontWeight:600,color:T.mid}}>Arrastrá o hacé clic para subir un PDF</div><div style={{fontSize:12,color:T.muted}}>Extractos bancarios · Resúmenes de TC · Salida de homebanking</div></>}
         <input ref={pdfRef} type="file" accept=".pdf" style={{display:"none"}} onChange={e=>e.target.files[0]&&handlePDF(e.target.files[0])}/>
@@ -1614,11 +1564,11 @@ function Import({state,update,notify}){
       {extractErr&&<div style={{marginTop:10,background:"rgba(255,77,106,.08)",border:`1px solid rgba(255,77,106,.25)`,borderRadius:8,padding:"8px 12px",fontSize:12,color:T.red}}>{extractErr}</div>}
     </div>}
 
-    {tab==="csv"&&<div><div data-tour-target="import-csv-tab" className={`dz${over?" ov2":""}`} onDragOver={e=>{e.preventDefault();setOver(true);}} onDragLeave={()=>setOver(false)} onDrop={e=>{e.preventDefault();setOver(false);const f=e.dataTransfer.files[0];if(f)handleCSV(f);}} onClick={()=>csvRef.current?.click()}><div style={{width:52,height:52,borderRadius:16,background:"rgba(255,154,53,.08)",border:"1px solid rgba(255,154,53,.18)",display:"flex",alignItems:"center",justifyContent:"center",color:T.mango,marginBottom:8}}><IcCsv/></div><div style={{fontSize:15,fontWeight:600,color:T.mid}}>Arrastrá un CSV</div><div style={{fontSize:12,color:T.muted}}>Compatible con Mercado Pago, bancos argentinos y exportaciones estándar</div><input ref={csvRef} type="file" accept=".csv,.txt" style={{display:"none"}} onChange={e=>e.target.files[0]&&handleCSV(e.target.files[0])}/></div></div>}
+    {tab==="csv"&&<div><div data-tour-target="import-csv-tab" className={`dz${over?" ov2":""}`} onDragOver={e=>{e.preventDefault();setOver(true);}} onDragLeave={()=>setOver(false)} onDrop={e=>{e.preventDefault();setOver(false);const f=e.dataTransfer.files[0];if(f)handleCSV(f);}} onClick={()=>csvRef.current?.click()}><div style={{width:52,height:52,borderRadius:16,background:"rgba(255,154,53,.08)",border:"1px solid rgba(255,154,53,.18)",display:"flex",alignItems:"center",justifyContent:"center",color:T.mango,marginBottom:8}}><IcCsv/></div><div style={{fontSize:15,fontWeight:600,color:T.mid}}>Arrastrá un CSV</div><div style={{fontSize:12,color:T.muted}}>Columnas de fecha e importe; revisá el tipo, la moneda y las categorías antes de confirmar</div><input ref={csvRef} type="file" accept=".csv,.txt" style={{display:"none"}} onChange={e=>e.target.files[0]&&handleCSV(e.target.files[0])}/></div></div>}
 
     {tab==="paste"&&<div><textarea className="inp" style={{minHeight:150}} placeholder="Pegá acá el texto de tu app..." value={paste} onChange={e=>setPaste(e.target.value)}/><button className="btn bl" style={{marginTop:10}} onClick={doPaste} disabled={!paste.trim()}>Analizar texto</button></div>}
 
-    {tab==="guide"&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:12}}>{[{app:"Imágenes",icon:"img",steps:["Screenshot del historial de tu banco, Mercado Pago o resumen TC","Subila en la pestaña Imagen","Revisá y editá las fechas si hace falta"]},{app:"PDF",icon:"pdf",steps:["Bajá el extracto desde tu homebanking","Subilo en la pestaña PDF","La IA procesa todas las páginas automáticamente"]},{app:"CSV",icon:"csv",steps:["Exportá desde Mercado Pago o tu banco","El parser detecta el formato automáticamente","Compatible con doble-header (ej: MP)"]}].map(({app,icon,steps})=><div key={app} className="card csm"><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:9}}>{icon==="img"?<IcImage/>:icon==="pdf"?<IcPdf/>:<IcCsv/>}<span style={{fontSize:13,fontWeight:600}}>{app}</span></div><ol style={{paddingLeft:16}}>{steps.map((s,i)=><li key={i} style={{fontSize:12,color:T.muted,marginBottom:4}}>{s}</li>)}</ol></div>)}</div>}
+    {tab==="guide"&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:12}}>{[{app:"Imágenes",icon:"img",steps:["Screenshot del historial de tu banco, Mercado Pago o resumen TC","Subila en la pestaña Imagen","Revisá y editá las fechas si hace falta"]},{app:"PDF",icon:"pdf",steps:["Bajá el extracto desde tu homebanking","Subilo en la pestaña PDF","La IA procesa hasta 10 páginas; dividí los archivos más extensos"]},{app:"CSV",icon:"csv",steps:["Exportá desde Mercado Pago o tu banco","El parser detecta el formato automáticamente","Compatible con doble-header (ej: MP)"]}].map(({app,icon,steps})=><div key={app} className="card csm"><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:9}}>{icon==="img"?<IcImage/>:icon==="pdf"?<IcPdf/>:<IcCsv/>}<span style={{fontSize:13,fontWeight:600}}>{app}</span></div><ol style={{paddingLeft:16}}>{steps.map((s,i)=><li key={i} style={{fontSize:12,color:T.muted,marginBottom:4}}>{s}</li>)}</ol></div>)}</div>}
 
     {preview.length>0&&<div style={{marginTop:22}}>
       {(extractMeta.appDetected||extractMeta.warnings.length>0)&&<div style={{background:"rgba(91,158,255,.07)",border:`1px solid ${T.blue}33`,borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:11,color:T.mid}}>{extractMeta.appDetected&&<div style={{color:T.blue,fontWeight:700,marginBottom:extractMeta.warnings.length?5:0}}>Origen detectado: {extractMeta.appDetected}</div>}{extractMeta.warnings.map((warning,i)=><div key={i}>• {warning}</div>)}</div>}
@@ -1634,17 +1584,17 @@ function Import({state,update,notify}){
           <button className="btn bl" onClick={confirm} disabled={missingDateCount>0}><ic.Check/> Importar todo</button>
         </div>
       </div>
-      <div className="preview-mobile">{preview.map(t=>(<div key={t.id} className="card csm"><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:12}}><div style={{fontSize:13,fontWeight:700,minWidth:0,overflowWrap:"anywhere"}}>{t.description}</div><div className="mono" style={{fontSize:13,fontWeight:700,color:t.type==="income"?T.teal:T.red,flexShrink:0}}>{t.type==="income"?"+":"-"}{t.currency==="USD"?fUSD(t.amount):fARS(t.amount)}</div></div><div style={{display:"grid",gap:10}}><div><label style={{fontSize:10,color:T.muted,display:"block",marginBottom:5}}>Fecha</label><input type="date" className="inp" value={t.date||""} onChange={e=>setPreview(prev=>prev.map(p=>p.id===t.id?{...p,date:e.target.value}:p))}/></div><div><label style={{fontSize:10,color:T.muted,display:"block",marginBottom:5}}>Categoría</label><CategorySelect value={catE[t.id]||t.category} ariaLabel={`Categoría de ${t.description}`} onChange={category=>setCE(c=>({...c,[t.id]:category}))}/></div><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,paddingTop:2}}><label style={{display:"flex",alignItems:"center",gap:9,fontSize:11,color:T.mid,cursor:"pointer",minHeight:40}}><input type="checkbox" checked={Boolean(t.isRecurring)} onChange={e=>setPreview(prev=>prev.map(p=>p.id===t.id?{...p,isRecurring:e.target.checked}:p))} aria-label={`Marcar ${t.description} como recurrente`} style={{width:18,height:18,accentColor:"var(--ac)"}}/><span>Repetir cada mes</span></label><button className="btn bd bsm" aria-label={`Quitar ${t.description} de la importación`} title="No importar esta fila" style={{width:40,height:40,padding:0}} onClick={()=>setPreview(rows=>rows.filter(row=>row.id!==t.id))}><ic.Trash/></button></div></div></div>))}</div>
+      <div className="preview-mobile">{preview.map(t=>(<div key={t.id} className="card csm"><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:12}}><div style={{fontSize:13,fontWeight:700,minWidth:0,overflowWrap:"anywhere"}}>{t.description}</div><div className="mono" style={{fontSize:13,fontWeight:700,color:t.type==="income"?T.teal:T.red,flexShrink:0}}>{t.type==="income"?"+":"-"}{t.currency==="USD"?fUSD(t.amount):fARS(t.amount)}</div></div><div style={{display:"grid",gap:10}}><div><label style={{fontSize:10,color:T.muted,display:"block",marginBottom:5}}>Fecha</label><input type="date" className="inp" value={t.date||""} onChange={e=>setPreview(prev=>prev.map(p=>p.id===t.id?{...p,date:e.target.value}:p))}/></div><div><input className="inp" inputMode="decimal" aria-label={`Importe de ${t.description}`} value={t.amount} onChange={e=>setPreview(rows=>rows.map(row=>row.id===t.id?{...row,amount:e.target.value}:row))}/><select className="inp" aria-label={`Moneda de ${t.description}`} value={t.currency||"ARS"} onChange={e=>setPreview(rows=>rows.map(row=>row.id===t.id?{...row,currency:e.target.value,fxRate:undefined,fxDate:undefined,fxSource:undefined}:row))}><option value="ARS">ARS</option><option value="USD">USD</option></select></div><div><select className="inp" aria-label={`Tipo de ${t.description}`} value={t.type||""} onChange={e=>setPreview(prev=>prev.map(p=>p.id===t.id?{...p,type:e.target.value}:p))}><option value="income">Ingreso</option><option value="expense">Gasto</option><option value="transfer">Transferencia</option></select></div><div><label style={{fontSize:10,color:T.muted,display:"block",marginBottom:5}}>Categoría</label><CategorySelect value={catE[t.id]||t.category} ariaLabel={`Categoría de ${t.description}`} onChange={category=>setCE(c=>({...c,[t.id]:category}))}/></div><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,paddingTop:2}}><label style={{display:"flex",alignItems:"center",gap:9,fontSize:11,color:T.mid,cursor:"pointer",minHeight:40}}><input type="checkbox" checked={Boolean(t.isRecurring)} onChange={e=>setPreview(prev=>prev.map(p=>p.id===t.id?{...p,isRecurring:e.target.checked}:p))} aria-label={`Marcar ${t.description} como recurrente`} style={{width:18,height:18,accentColor:"var(--ac)"}}/><span>Repetir cada mes</span></label><button className="btn bd bsm" aria-label={`Quitar ${t.description} de la importación`} title="No importar esta fila" style={{width:40,height:40,padding:0}} onClick={()=>setPreview(rows=>rows.filter(row=>row.id!==t.id))}><ic.Trash/></button></div></div></div>))}</div>
       <div className="card preview-desktop" style={{padding:0,overflow:"auto",maxHeight:450}}>
         <table className="tbl" style={{minWidth:760}}>
-          <thead><tr><th>Fecha (Editable)</th><th>Descripción</th><th>Monto</th><th>Categoría</th><th>Recurrente</th><th aria-label="Acciones"/></tr></thead>
+          <thead><tr><th>Fecha (Editable)</th><th>Descripción</th><th>Monto</th><th>Moneda</th><th>Tipo</th><th>Categoría</th><th>Recurrente</th><th aria-label="Acciones"/></tr></thead>
           <tbody>
             {preview.map(t=>(
               <tr key={t.id}>
                 <td><input type="date" className="inp" style={{fontSize:11,padding:"5px 8px",width:"auto",minWidth:130,border:`1px solid ${T.border}`,background:T.raised,color:T.white,borderRadius:6}} value={t.date||""} onChange={e=>setPreview(prev=>prev.map(p=>p.id===t.id?{...p,date:e.target.value}:p))}/></td>
                 <td style={{fontSize:12}}>{t.description}</td>
-                <td className="mono" style={{color:t.type==="income"?T.teal:T.red}}>{t.type==="income"?"+":"-"}{t.currency==="USD"?fUSD(t.amount):fARS(t.amount)}</td>
-                <td><CategorySelect compact value={catE[t.id]||t.category} ariaLabel={`Categoría de ${t.description}`} onChange={category=>setCE(c=>({...c,[t.id]:category}))}/></td>
+                <td><input className="inp" inputMode="decimal" aria-label={`Importe de ${t.description}`} value={t.amount} onChange={e=>setPreview(rows=>rows.map(row=>row.id===t.id?{...row,amount:e.target.value}:row))}/></td><td><select className="inp" aria-label={`Moneda de ${t.description}`} value={t.currency||"ARS"} onChange={e=>setPreview(rows=>rows.map(row=>row.id===t.id?{...row,currency:e.target.value,fxRate:undefined,fxDate:undefined,fxSource:undefined}:row))}><option value="ARS">ARS</option><option value="USD">USD</option></select></td>
+                <td><select className="inp" aria-label={`Tipo de ${t.description}`} value={t.type||""} onChange={e=>setPreview(prev=>prev.map(p=>p.id===t.id?{...p,type:e.target.value}:p))}><option value="income">Ingreso</option><option value="expense">Gasto</option><option value="transfer">Transferencia</option></select></td><td><CategorySelect compact value={catE[t.id]||t.category} ariaLabel={`Categoría de ${t.description}`} onChange={category=>setCE(c=>({...c,[t.id]:category}))}/></td>
                 <td style={{textAlign:"center"}}><label title="Crear una regla para repetir este movimiento cada mes" style={{display:"inline-flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}><input type="checkbox" checked={Boolean(t.isRecurring)} onChange={e=>setPreview(prev=>prev.map(p=>p.id===t.id?{...p,isRecurring:e.target.checked}:p))} aria-label={`Marcar ${t.description} como recurrente`}/></label></td>
                 <td><button className="btn bd bsm" aria-label={`Quitar ${t.description} de la importación`} title="No importar esta fila" onClick={()=>setPreview(rows=>rows.filter(row=>row.id!==t.id))}><ic.Trash/></button></td>
               </tr>
