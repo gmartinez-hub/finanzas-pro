@@ -1,6 +1,6 @@
 # Mangos
 
-Organización financiera personal y apoyo para charlas: movimientos, resultado mensual, metas, inversiones y demostraciones con datos ficticios. React/Vite, con funciones puras para los cálculos y almacenamiento local versionado. La presentación Charla se mantiene en un repositorio separado; el protocolo compartido está en [docs/tour-integration.md](docs/tour-integration.md).
+Organización financiera personal y apoyo para charlas: movimientos, resultado mensual, metas, inversiones con las integraciones de cotizaciones, IA y presentación conectada. React/Vite, con funciones puras para los cálculos y almacenamiento local versionado. La presentación Charla se mantiene en un repositorio separado; el protocolo compartido está en [docs/tour-integration.md](docs/tour-integration.md).
 
 ## Desarrollo reproducible
 
@@ -24,7 +24,7 @@ pnpm check
 
 ## Datos personales y demostración
 
-El espacio personal usa `fp_v3b` y la demo `mangos_demo_v1`. La demo se selecciona con `VITE_APP_MODE=demo` o `?demo=1`. Para una charla o publicación, usar **un origen o perfil de navegador separado**, con datos ficticios y sin credenciales de los endpoints facturables. Un parámetro de URL sirve para probar el modo; no es una barrera de privacidad entre orígenes ni protege por sí mismo las rutas de servidor. Una demo estática puede publicarse desde `dist/` sin desplegar `api/`.
+La app abre en modo personal de forma predeterminada, sin datos de ejemplo ni avisos de demostración. Actualiza la cotización al iniciar; el resumen semanal con IA sigue disponible a pedido en Resumen, junto a Qué cambió. El espacio personal usa `fp_v3b` y la demo `mangos_demo_v1`. La demo se selecciona con `VITE_APP_MODE=demo` o `?demo=1`. Para una charla o publicación, usar **un origen o perfil de navegador separado**, con datos ficticios y sin credenciales de los endpoints facturables. Un parámetro de URL sirve para probar el modo; no es una barrera de privacidad entre orígenes ni protege por sí mismo las rutas de servidor. Una demo estática puede publicarse desde `dist/` sin desplegar `api/`.
 
 Los datos permanecen en este navegador y origen; no se sincronizan automáticamente con otro dispositivo. Descargar periódicamente un respaldo JSON desde Ajustes. El JSON versionado incluye todo el estado; el CSV intercambia movimientos y no sustituye ese respaldo. La restauración valida el archivo, permite revisar el contenido y conserva una copia previa. También reconoce los JSON completos exportados por la versión anterior.
 

@@ -488,7 +488,7 @@ function exportData(state){const json=JSON.stringify(state,null,2);const jsonBlo
 const SUPABASE_URL=import.meta.env.VITE_SUPABASE_URL||"https://ghfnscswtsgnylumcxyp.supabase.co";
 const SUPABASE_KEY=import.meta.env.VITE_SUPABASE_ANON_KEY||"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdoZm5zY3N3dHNnbnlsdW1jeHlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNzUxOTgsImV4cCI6MjA4OTk1MTE5OH0.dq2Xhy7c7X_kZvGtln5Ko8hl5woYsHGq5hXLSfJQoic";
 export default function App(){
-  return <AppRoot defaults={DEFAULT} components={{Transactions,Goals,SalaryModule,Analytics,Investments,Import,Onboarding,FinancialHealthCard}} getHealth={s=>healthScore(s.transactions,s.goals,s.holdings,s.salaries,s.riskProfile,s.marketPrices,s.usdRate)} legacyStyles={CSS} supabaseConfig={{url:SUPABASE_URL,anonKey:SUPABASE_KEY}} icons={ic}/>;
+  return <AppRoot generateInsight={genWeeklyInsight} defaults={DEFAULT} components={{Transactions,Goals,SalaryModule,Analytics,Investments,Import,Onboarding,FinancialHealthCard}} getHealth={s=>healthScore(s.transactions,s.goals,s.holdings,s.salaries,s.riskProfile,s.marketPrices,s.usdRate)} legacyStyles={CSS} supabaseConfig={{url:SUPABASE_URL,anonKey:SUPABASE_KEY}} icons={ic}/>;
 }
 
 function Onboarding({update,notify,usdRate=1350}){

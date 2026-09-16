@@ -6,6 +6,8 @@ Esta entrega conserva React/Vite y las funciones de inversiones/importación rec
 
 La recuperación previa está documentada en [recovery.md](recovery.md). El PR anterior de IA no se cierra automáticamente: esta rama incluye la base recuperada y sus correcciones posteriores. Comparar su alcance antes de declararlo reemplazado.
 
+La entrega principal es la app personal conectada, sin `?demo=1`, sin `VITE_APP_MODE=demo` y sin rótulos de datos ficticios. El modo de ejemplo se conserva sólo para QA aislado; no sustituye la app del usuario. El usuario confirmó que utiliza el URL versionado `https://finanzas-j1e3z3emn-gabomrtz.vercel.app/`; cualquier cambio de origen necesita respaldo y restauración verificada, porque los movimientos no están sincronizados en un backend.
+
 ## Revisión y despliegue
 
 1. Ejecutar `pnpm install --frozen-lockfile`, `pnpm check` y el ensayo documentado en [verification.md](verification.md).
