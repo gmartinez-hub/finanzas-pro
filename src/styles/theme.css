@@ -26,3 +26,6 @@
 
 .m-icon-button.m-mobile-menu,.m-icon-button.m-close-menu{display:none}
 @media(max-width:780px){.m-icon-button.m-mobile-menu,.m-icon-button.m-close-menu{display:grid}}
+
+/* Keep navigation symbols optically aligned and legible at sidebar size. */
+.m-nav-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex:0 0 18px}.m-nav-icon svg{width:18px;height:18px}

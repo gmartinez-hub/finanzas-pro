@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { CloseIcon } from '../components/InterfaceIcons.jsx';
 import { TOUR_STEPS, createSupabaseTourTransport, createTourController, positionTour } from './steps.js';
 import './tour.css';
 
@@ -124,7 +125,7 @@ export default function TourGuide({ enabled = false, onClose, navigate, onAction
       <div className="mangos-tour-heading">
         <span>{state.mode === 'live' ? 'Charla en vivo' : 'Guía Mangos'}</span>
         <span className="mangos-tour-progress">{state.step ? `${state.index + 1} / ${TOUR_STEPS.length}` : 'En pausa'}</span>
-        <button type="button" className="mangos-tour-close" aria-label="Cerrar guía" onClick={() => controller.current?.close()}>×</button>
+        <button type="button" className="mangos-tour-close" aria-label="Cerrar guía" onClick={() => controller.current?.close()}><CloseIcon/></button>
       </div>
       <div className="mangos-tour-copy" aria-live="polite" aria-atomic="true">
         <h2>{state.step?.title || 'Seguí la presentación'}</h2>

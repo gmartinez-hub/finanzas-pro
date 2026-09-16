@@ -1,13 +1,14 @@
 import {useRef,useState} from 'react';
 import {prepareWeeklyInsight} from '../domain/weeklyInsight.js';
+import {CategoryBreakdownIcon} from '../components/InterfaceIcons.jsx';
 
 const colors={red:'var(--coral)',amber:'var(--amber)',lime:'var(--lime)',blue:'var(--blue)',mango:'var(--mango)'};
-const symbols={spending:'↘',top_category:'▤',investment:'↗',goal:'◎'};
 
 /** Network access is only performed by the injected legacy generator after a
  * deliberate click. Cached results remain visible during loading and failures.
  */
-export default function WeeklyInsight({state,update,notify,generateInsight}){
+export default function WeeklyInsight({state,update,notify,generateInsight,icons}){
+  const cardIcons={spending:icons.Tx,top_category:CategoryBreakdownIcon,investment:icons.Stock,goal:icons.Target};
   const [loading,setLoading]=useState(false),[error,setError]=useState(''),[warnings,setWarnings]=useState([]);
   const inFlight=useRef(false);
   const demo=Boolean(state.demo),insight=state.weeklyInsight;
@@ -40,11 +41,12 @@ export default function WeeklyInsight({state,update,notify,generateInsight}){
     {insight?.headline&&<p style={{fontWeight:600,marginBottom:14}}>{String(insight.headline)}</p>}
     {cards.length>0?<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(100%,210px),1fr))',gap:12}}>{cards.map((card,index)=>{
       const color=colors[card.color]||colors.blue;
-      const trend=card.trend==='up'?'↑':card.trend==='down'?'↓':null;
+      const CardIcon=cardIcons[card.type]||icons.Chart;
+      const TrendIcon=card.trend==='up'?icons.TrendUp:card.trend==='down'?icons.TrendDown:null;
       const trendLabel=card.trend==='up'?'En aumento':card.trend==='down'?'En descenso':'';
       const trendColor=card.type==='spending'?(card.trend==='up'?colors.red:colors.lime):(card.trend==='up'?colors.lime:colors.red);
       return <article key={`${card.type||'card'}-${index}`} style={{background:'var(--raised)',border:'1px solid var(--border)',borderTop:`3px solid ${color}`,borderRadius:12,padding:16,minWidth:0}}>
-        <div style={{display:'flex',justifyContent:'space-between',gap:10,marginBottom:12}}><h3 style={{fontSize:12,color:'var(--text-mid)'}}><span aria-hidden="true" style={{color,marginRight:7}}>{symbols[card.type]||'✦'}</span>{String(card.title||'Análisis')}</h3>{trend&&<span aria-label={trendLabel} style={{color:trendColor}}>{trend}</span>}</div>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,marginBottom:12}}><h3 style={{display:'flex',alignItems:'center',gap:7,fontSize:12,color:'var(--text-mid)'}}><span aria-hidden="true" style={{display:'inline-flex',color,flexShrink:0}}><CardIcon/></span>{String(card.title||'Análisis')}</h3>{TrendIcon&&<span role="img" aria-label={trendLabel} style={{display:'inline-flex',color:trendColor,flexShrink:0}}><span aria-hidden="true"><TrendIcon/></span></span>}</div>
         <p className="mono" style={{fontSize:23,fontWeight:700,color,marginBottom:8,overflowWrap:'anywhere'}}>{String(card.value??'')}</p>
         <p style={{fontSize:12,color:'var(--text-mid)',lineHeight:1.6}}>{String(card.detail||'')}</p>
       </article>;
