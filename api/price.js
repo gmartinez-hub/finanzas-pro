@@ -1,6 +1,7 @@
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Cache-Control", "no-store");
   if (req.method === "OPTIONS") return res.status(200).end();
 
   const { ticker } = req.query;
@@ -17,8 +18,8 @@ export default async function handler(req, res) {
 
 async function tryYahoo(ticker) {
   const urls = [
-    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=1d&interval=1d`,
-    `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=1d&interval=1d`,
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=1d&interval=1m`,
+    `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=1d&interval=1m`,
   ];
   for (const url of urls) {
     try {
@@ -42,6 +43,10 @@ async function tryYahoo(ticker) {
         symbol: result.meta.symbol,
         name: result.meta.shortName || ticker,
         source: "yahoo",
+        asOf: result.meta.regularMarketTime
+          ? new Date(result.meta.regularMarketTime * 1000).toISOString()
+          : new Date().toISOString(),
+        marketState: result.meta.marketState || null,
       };
     } catch { continue; }
   }
@@ -68,6 +73,8 @@ async function tryTwelveData(ticker) {
       symbol: ticker,
       name: ticker,
       source: "twelve_data",
+      asOf: new Date().toISOString(),
+      marketState: null,
     };
   } catch { return null; }
 }

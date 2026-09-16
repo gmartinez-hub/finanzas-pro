@@ -73,6 +73,12 @@ const ScanInput = z.object({
   profile: z.object({
     risk: z.string().trim().min(1).max(50),
     horizon: z.string().trim().min(1).max(50),
+    horizonLabel: z.string().trim().min(1).max(80),
+    allocation: z.object({
+      liquidity: z.number().finite().min(0).max(100),
+      fixedIncome: z.number().finite().min(0).max(100),
+      variableIncome: z.number().finite().min(0).max(100),
+    }).strict().nullable(),
     objective: z.string().trim().min(1).max(120).nullable(),
   }).strict(),
   usdRate: z.number().finite().positive().max(1_000_000_000),
@@ -281,7 +287,7 @@ Generá exactamente cuatro tarjetas, una y solo una de cada tipo: spending, top_
     maxToolCalls: 3,
     web: true,
     instructions: `${WEB_INSTRUCTIONS}
-Buscá tres instrumentos líquidos y verificables relevantes para un inversor argentino y el perfil recibido. Usá como máximo tres búsquedas compactas. Separá encaje con el perfil de certeza factual. Sustentá contexto, precio aproximado, múltiplos y catalizadores con fuentes actuales; usá null si no podés verificar. Cada thesis debe ser una oración de hasta 300 caracteres; moat y bearRisk, una oración de hasta 160; incluí como máximo tres catalizadores de hasta 100 caracteres; marketContext debe tener hasta 240 caracteres. No repitas información entre campos. topPick debe coincidir exactamente con un ticker devuelto.`,
+Buscá tres instrumentos líquidos y verificables relevantes para un inversor argentino y el perfil recibido. El horizonte temporal es una restricción más fuerte que la tolerancia: no propongas exposición incompatible con el plazo ni superes la distribución orientativa recibida. Usá como máximo tres búsquedas compactas. Separá encaje con el perfil de certeza factual. Sustentá contexto, precio aproximado, múltiplos y catalizadores con fuentes actuales; usá null si no podés verificar. Cada thesis debe ser una oración de hasta 300 caracteres; moat y bearRisk, una oración de hasta 160; incluí como máximo tres catalizadores de hasta 100 caracteres; marketContext debe tener hasta 240 caracteres. No repitas información entre campos. topPick debe coincidir exactamente con un ticker devuelto.`,
     buildInput: (input) => `Perfil y contexto validados (JSON de datos):\n${JSON.stringify(input)}`,
   },
   analyze_stock: {
